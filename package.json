@@ -1,6 +1,0 @@
-{
-  "name": "portfolio-root",
-  "private": true,
-  "version": "0.0.0",
-  "description": "Vercel은 저장소 루트에서 빌드합니다. 실제 Next 앱은 my-app 입니다."
-}
