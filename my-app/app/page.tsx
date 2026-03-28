@@ -299,7 +299,8 @@ export default function Home() {
       }
       return res.json() as Promise<MarketResponse>;
     },
-    enabled: positions.length > 0,
+    /** 보유 종목이 없어도 USD/KRW만 받아 현금(USD) 환산·비중에 반영 */
+    enabled: true,
     refetchInterval: 10000,
   });
 
@@ -378,24 +379,35 @@ export default function Home() {
 
   const allocationByOwner = useMemo(() => {
     return OWNER_NAMES.map((ownerName) => {
-      const stockSlices = enrichedPositions
-        .filter((p) => p.owner === ownerName)
-        .map((position) => ({
-          name: position.symbol,
+      const items = enrichedPositions.filter((p) => p.owner === ownerName);
+      const stockSlices = items.map((position, idx) => {
+        const v = position.valueKrw;
+        const value = Math.max(0, Number.isFinite(v) ? v : 0);
+        return {
+          /** Recharts·범례 충돌 방지: 계좌까지 포함한 고유 키 */
+          name: `stk|${position.symbol}|${position.accountType}|${position.accountName}|${idx}`,
           displayName: position.name,
-          value: position.valueKrw,
-        }));
+          value,
+        };
+      });
       const c = cashByOwner[ownerName];
+      const usd = Number.isFinite(c.usd) ? Math.max(0, c.usd) : 0;
+      const krw = Number.isFinite(c.krw) ? Math.max(0, c.krw) : 0;
+      const usdCashKrw = usd * usdKrw;
       const extra: { name: string; displayName: string; value: number }[] = [];
-      if (c.usd > 0) {
+      if (usdCashKrw > 0) {
         extra.push({
-          name: "USD 현금",
+          name: `cash-usd|${ownerName}`,
           displayName: "USD 현금",
-          value: c.usd * usdKrw,
+          value: usdCashKrw,
         });
       }
-      if (c.krw > 0) {
-        extra.push({ name: "KRW 현금", displayName: "KRW 현금", value: c.krw });
+      if (krw > 0) {
+        extra.push({
+          name: `cash-krw|${ownerName}`,
+          displayName: "KRW 현금",
+          value: krw,
+        });
       }
       const merged = [...stockSlices, ...extra];
       const total = merged.reduce((sum, item) => sum + item.value, 0);

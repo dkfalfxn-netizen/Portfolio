@@ -110,7 +110,7 @@ export function FamilyAllocationDonut({
         {data.map((d, i) => {
           const c = NEON_PALETTE[i % NEON_PALETTE.length];
           return (
-            <div key={`${d.name}-${i}`} className="flex items-center gap-2 text-[11px] font-medium tracking-tight text-zinc-200">
+            <div key={d.name} className="flex items-center gap-2 text-[11px] font-medium tracking-tight text-zinc-200">
               <span
                 className="h-2.5 w-2.5 shrink-0 rounded-sm"
                 style={{
@@ -177,7 +177,7 @@ export function FamilyAllocationDonut({
                 const c = NEON_PALETTE[index % NEON_PALETTE.length];
                 return (
                   <Cell
-                    key={`${entry.name}-${index}`}
+                    key={entry.name}
                     fill={c}
                     style={{
                       filter: `drop-shadow(0 0 6px ${c}) drop-shadow(0 0 14px ${c}55)`,

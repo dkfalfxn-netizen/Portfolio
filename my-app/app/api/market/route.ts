@@ -18,8 +18,29 @@ export async function GET(req: NextRequest) {
     .map((s) => s.trim())
     .filter(Boolean);
 
+  async function fetchUsdKrwOnly(): Promise<number | null> {
+    try {
+      const chartUrl =
+        "https://query1.finance.yahoo.com/v8/finance/chart/KRW=X?interval=1m&range=1d";
+      const response = await fetch(chartUrl, {
+        method: "GET",
+        cache: "no-store",
+        headers: { "User-Agent": "Mozilla/5.0" },
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      const meta = data?.chart?.result?.[0]?.meta;
+      const price =
+        typeof meta?.regularMarketPrice === "number" ? meta.regularMarketPrice : null;
+      return price;
+    } catch {
+      return null;
+    }
+  }
+
   if (rawSymbols.length === 0) {
-    return NextResponse.json({ quotes: {}, usdKrw: null, fetchedAt: Date.now() });
+    const usdKrw = await fetchUsdKrwOnly();
+    return NextResponse.json({ quotes: {}, usdKrw, fetchedAt: Date.now() });
   }
 
   const mapping = rawSymbols.map((symbol) => ({
