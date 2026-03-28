@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율"] as const;
+const OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율", "퇴직연금"] as const;
 type OwnerName = (typeof OWNER_NAMES)[number];
 
 type Position = {
@@ -89,6 +89,7 @@ const DEFAULT_CASH_BY_OWNER: CashByOwner = {
   강희진: { usd: 0, krw: 0 },
   김도율: { usd: 0, krw: 0 },
   김찬율: { usd: 0, krw: 0 },
+  퇴직연금: { usd: 0, krw: 0 },
 };
 
 function isOwnerName(value: unknown): value is OwnerName {
@@ -625,7 +626,7 @@ export default function Home() {
           </section>
 
           <section className="space-y-4">
-            <h2 className="font-semibold">포트폴리오 비중 (가족별)</h2>
+            <h2 className="font-semibold">포트폴리오 비중 (가족·퇴직연금)</h2>
             <p className="text-xs text-muted-foreground">
               도넛 중앙은 담당자명과 평가 합계, 상단은 범례입니다. 비중 5% 미만 조각은 퍼센트만 생략됩니다.
             </p>
@@ -782,14 +783,14 @@ export default function Home() {
               ) : null}
             </form>
             <p className="mt-2 text-xs text-muted-foreground">
-              현금(USD·KRW)은 아래 가족별 보유 종목 표 상단에서 담당자마다 입력합니다. 전체 현금
+              현금(USD·KRW)은 아래 각 보유 종목 표 상단에서 입력합니다. 전체 현금
               합계(원화): ₩{Math.round(totalCashKrw).toLocaleString()}
             </p>
           </section>
 
           <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
             <div className="border-b px-4 py-3">
-              <h2 className="font-semibold">보유 종목 (가족별)</h2>
+              <h2 className="font-semibold">보유 종목 (가족·퇴직연금)</h2>
             </div>
             <div className="space-y-5 p-4">
               {positionsByOwner.map((group) => (
