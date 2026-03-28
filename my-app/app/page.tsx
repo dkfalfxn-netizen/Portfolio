@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { FamilyAllocationDonut } from "@/components/family-allocation-chart";
 import {
   Card,
   CardContent,
@@ -44,17 +44,6 @@ type MarketResponse = {
 
 const STORAGE_KEY = "portfolio_positions_v1";
 const CASH_STORAGE_KEY = "portfolio_cash_v1";
-const CHART_COLORS = [
-  "#2563eb",
-  "#7c3aed",
-  "#db2777",
-  "#ea580c",
-  "#16a34a",
-  "#0d9488",
-  "#4f46e5",
-  "#ca8a04",
-];
-
 const DEFAULT_POSITIONS: Position[] = [
   {
     symbol: "NVDA",
@@ -623,75 +612,19 @@ export default function Home() {
             ))}
           </section>
 
-          <section className="rounded-2xl border bg-card p-4 shadow-sm">
-            <h2 className="mb-4 font-semibold">포트폴리오 비중 (가족별)</h2>
+          <section className="space-y-4">
+            <h2 className="font-semibold">포트폴리오 비중 (가족별)</h2>
+            <p className="text-xs text-muted-foreground">
+              도넛 중앙은 담당자명과 평가 합계, 상단은 범례입니다. 비중 5% 미만 조각은 퍼센트만 생략됩니다.
+            </p>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               {allocationByOwner.map(({ ownerName, data, total }) => (
-                <div key={ownerName} className="rounded-xl border bg-muted/20 p-3">
-                  <p className="mb-2 text-center text-sm font-semibold">{ownerName}</p>
-                  <p className="mb-2 text-center text-xs text-muted-foreground">
-                    합계 ₩{Math.round(total).toLocaleString()}
-                  </p>
-                  <div className="h-56 w-full">
-                    {data.length === 0 ? (
-                      <p className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                        보유 종목·현금 없음
-                      </p>
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
-                          <Pie
-                            data={data}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            outerRadius={72}
-                            labelLine
-                            label={(entry: { name?: string; percent?: number }) => {
-                              const percent = (entry.percent ?? 0) * 100;
-                              if (percent < 4) return "";
-                              return `${entry.name ?? ""} ${percent.toFixed(0)}%`;
-                            }}
-                          >
-                            {data.map((entry, index) => (
-                              <Cell
-                                key={`${ownerName}-${entry.name}-${index}`}
-                                fill={CHART_COLORS[index % CHART_COLORS.length]}
-                              />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value, _name, item) => {
-                              const numericValue =
-                                typeof value === "number" ? value : Number(value ?? 0);
-                              const payload = item.payload as {
-                                value: number | string;
-                                weight: number;
-                                displayName: string;
-                              };
-                              return [
-                                `₩${Math.round(numericValue).toLocaleString()} (${payload.weight.toFixed(1)}%)`,
-                                payload.displayName,
-                              ];
-                            }}
-                          />
-                          <Legend
-                            formatter={(value, _entry, index) => {
-                              const item = data[index] ?? null;
-                              if (!item) return <span className="font-semibold">{value}</span>;
-                              return (
-                                <span className="font-semibold">
-                                  {value} {item.weight.toFixed(1)}%
-                                </span>
-                              );
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
-                </div>
+                <FamilyAllocationDonut
+                  key={ownerName}
+                  ownerName={ownerName}
+                  data={data}
+                  total={total}
+                />
               ))}
             </div>
           </section>
