@@ -89,9 +89,13 @@ const DEFAULT_POSITIONS: Position[] = [
   },
 ];
 
-const DEFAULT_CASH = {
-  usd: 0,
-  krw: 0,
+type CashByOwner = Record<OwnerName, { usd: number; krw: number }>;
+
+const DEFAULT_CASH_BY_OWNER: CashByOwner = {
+  김승주: { usd: 0, krw: 0 },
+  강희진: { usd: 0, krw: 0 },
+  김도율: { usd: 0, krw: 0 },
+  김찬율: { usd: 0, krw: 0 },
 };
 
 function isOwnerName(value: unknown): value is OwnerName {
@@ -204,27 +208,44 @@ function loadPositions(): Position[] {
   }
 }
 
-function loadCash(): { usd: number; krw: number } {
-  if (typeof window === "undefined") return DEFAULT_CASH;
+function parseCashPair(raw: unknown): { usd: number; krw: number } {
+  if (!raw || typeof raw !== "object") return { usd: 0, krw: 0 };
+  const o = raw as { usd?: unknown; krw?: unknown };
+  const usd = Number(o.usd ?? 0);
+  const krw = Number(o.krw ?? 0);
+  return {
+    usd: Number.isFinite(usd) && usd >= 0 ? usd : 0,
+    krw: Number.isFinite(krw) && krw >= 0 ? krw : 0,
+  };
+}
+
+function loadCashByOwner(): CashByOwner {
+  if (typeof window === "undefined") return { ...DEFAULT_CASH_BY_OWNER };
   try {
     const raw = window.localStorage.getItem(CASH_STORAGE_KEY);
-    if (!raw) return DEFAULT_CASH;
+    if (!raw) return { ...DEFAULT_CASH_BY_OWNER };
     const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return DEFAULT_CASH;
-    const usd = Number((parsed as { usd?: unknown }).usd ?? 0);
-    const krw = Number((parsed as { krw?: unknown }).krw ?? 0);
-    return {
-      usd: Number.isFinite(usd) && usd >= 0 ? usd : 0,
-      krw: Number.isFinite(krw) && krw >= 0 ? krw : 0,
-    };
+    if (!parsed || typeof parsed !== "object") return { ...DEFAULT_CASH_BY_OWNER };
+    const obj = parsed as Record<string, unknown>;
+    if ("usd" in obj || "krw" in obj) {
+      const legacy = parseCashPair(parsed);
+      return { ...DEFAULT_CASH_BY_OWNER, 김승주: { ...legacy } };
+    }
+    const next: CashByOwner = { ...DEFAULT_CASH_BY_OWNER };
+    for (const name of OWNER_NAMES) {
+      if (obj[name] !== undefined) {
+        next[name] = parseCashPair(obj[name]);
+      }
+    }
+    return next;
   } catch {
-    return DEFAULT_CASH;
+    return { ...DEFAULT_CASH_BY_OWNER };
   }
 }
 
 export default function Home() {
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
-  const [cash, setCash] = useState(DEFAULT_CASH);
+  const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [editQuantity, setEditQuantity] = useState("");
@@ -261,7 +282,13 @@ export default function Home() {
   });
 
   const usdKrw = marketQuery.data?.usdKrw ?? 1350;
-  const cashKrw = cash.krw + cash.usd * usdKrw;
+
+  const totalCashKrw = useMemo(() => {
+    return OWNER_NAMES.reduce((sum, owner) => {
+      const c = cashByOwner[owner];
+      return sum + c.krw + c.usd * usdKrw;
+    }, 0);
+  }, [cashByOwner, usdKrw]);
 
   const enrichedPositions = useMemo(() => {
     return positions.map((position) => {
@@ -278,69 +305,89 @@ export default function Home() {
   const summaryCards = useMemo(() => {
     const stockValue = enrichedPositions.reduce((sum, position) => sum + position.valueKrw, 0);
     const stockCost = enrichedPositions.reduce((sum, position) => sum + position.costKrw, 0);
-    const totalValue = stockValue + cashKrw;
-    const totalCost = stockCost + cashKrw;
-    const totalProfit = totalValue - totalCost;
-    const totalReturn = totalCost > 0 ? (totalProfit / totalCost) * 100 : 0;
-    const dailyProfit = totalProfit * 0.18;
-    const dailyReturn = totalValue > 0 ? (dailyProfit / totalValue) * 100 : 0;
+    const totalValue = stockValue + totalCashKrw;
+    const costBasis = stockCost + totalCashKrw;
+    const totalProfit = totalValue - costBasis;
+    const totalReturnPct = costBasis > 0 ? (totalProfit / costBasis) * 100 : 0;
 
     return [
       {
-        label: "총 자산 (KRW)",
+        label: "총 자산 (원화)",
         value: `₩${Math.round(totalValue).toLocaleString()}`,
-        change: `${totalReturn >= 0 ? "+" : ""}${totalReturn.toFixed(2)}%`,
+        sub: `주식 ₩${Math.round(stockValue).toLocaleString()} · 현금 ₩${Math.round(totalCashKrw).toLocaleString()}`,
+        change: "",
+        positive: null as boolean | null,
       },
       {
-        label: "당일 수익금",
-        value: `₩${Math.round(dailyProfit).toLocaleString()}`,
-        change: `${dailyReturn >= 0 ? "+" : ""}${dailyReturn.toFixed(2)}%`,
+        label: "전체 수익률 (원화 기준)",
+        value: `${totalReturnPct >= 0 ? "+" : ""}${totalReturnPct.toFixed(2)}%`,
+        sub: "투입(주식 원가+현금) 대비 평가",
+        change: "",
+        positive: totalReturnPct >= 0,
       },
       {
-        label: "총 누적 수익",
+        label: "평가손익 (주식·원화)",
         value: `₩${Math.round(totalProfit).toLocaleString()}`,
-        change: `${totalReturn >= 0 ? "+" : ""}${totalReturn.toFixed(2)}%`,
+        sub: "현금은 손익 없이 원금으로 포함",
+        change: "",
+        positive: totalProfit >= 0,
       },
     ];
-  }, [enrichedPositions, cashKrw]);
+  }, [enrichedPositions, totalCashKrw]);
 
-  const allocationData = useMemo(() => {
-    const stockData = enrichedPositions.map((position) => ({
-      name: position.symbol,
-      displayName: position.name,
-      value: position.valueKrw,
-    }));
-    const cashData = [
-      {
-        name: "USD 현금",
-        displayName: "USD 현금",
-        value: cash.usd * usdKrw,
-      },
-      {
-        name: "KRW 현금",
-        displayName: "KRW 현금",
-        value: cash.krw,
-      },
-    ].filter((item) => item.value > 0);
-    const merged = [...stockData, ...cashData];
-    const totalValue = merged.reduce((sum, item) => sum + item.value, 0);
-    return merged.map((item) => ({
-      ...item,
-      weight: totalValue > 0 ? (item.value / totalValue) * 100 : 0,
-    }));
-  }, [enrichedPositions, cash.krw, cash.usd, usdKrw]);
+  const allocationByOwner = useMemo(() => {
+    return OWNER_NAMES.map((ownerName) => {
+      const stockSlices = enrichedPositions
+        .filter((p) => p.owner === ownerName)
+        .map((position) => ({
+          name: position.symbol,
+          displayName: position.name,
+          value: position.valueKrw,
+        }));
+      const c = cashByOwner[ownerName];
+      const extra: { name: string; displayName: string; value: number }[] = [];
+      if (c.usd > 0) {
+        extra.push({
+          name: "USD 현금",
+          displayName: "USD 현금",
+          value: c.usd * usdKrw,
+        });
+      }
+      if (c.krw > 0) {
+        extra.push({ name: "KRW 현금", displayName: "KRW 현금", value: c.krw });
+      }
+      const merged = [...stockSlices, ...extra];
+      const total = merged.reduce((sum, item) => sum + item.value, 0);
+      const data = merged.map((item) => ({
+        ...item,
+        weight: total > 0 ? (item.value / total) * 100 : 0,
+      }));
+      return { ownerName, data, total };
+    });
+  }, [enrichedPositions, cashByOwner, usdKrw]);
 
   const positionsByOwner = useMemo(() => {
     return OWNER_NAMES.map((ownerName) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
-      const sectionValue = items.reduce((sum, item) => sum + item.valueKrw, 0);
-      return { ownerName, items, sectionValue };
+      const sectionStockValue = items.reduce((sum, item) => sum + item.valueKrw, 0);
+      const c = cashByOwner[ownerName];
+      const sectionCashKrw = c.krw + c.usd * usdKrw;
+      const sectionTotal = sectionStockValue + sectionCashKrw;
+      return {
+        ownerName,
+        items,
+        sectionStockValue,
+        sectionCashKrw,
+        sectionTotal,
+        cashUsd: c.usd,
+        cashKrw: c.krw,
+      };
     });
-  }, [enrichedPositions]);
+  }, [enrichedPositions, cashByOwner, usdKrw]);
 
   useEffect(() => {
     setPositions(loadPositions());
-    setCash(loadCash());
+    setCashByOwner(loadCashByOwner());
     setIsHydrated(true);
   }, []);
 
@@ -351,8 +398,8 @@ export default function Home() {
 
   useEffect(() => {
     if (!isHydrated) return;
-    window.localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(cash));
-  }, [cash, isHydrated]);
+    window.localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(cashByOwner));
+  }, [cashByOwner, isHydrated]);
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -475,69 +522,100 @@ export default function Home() {
               <Card key={card.label}>
                 <CardHeader>
                   <CardDescription>{card.label}</CardDescription>
-                  <CardTitle className="text-2xl">{card.value}</CardTitle>
+                  <CardTitle
+                    className={`text-2xl ${
+                      card.positive === true
+                        ? "text-red-600"
+                        : card.positive === false
+                          ? "text-blue-600"
+                          : ""
+                    }`}
+                  >
+                    {card.value}
+                  </CardTitle>
+                  {card.sub ? (
+                    <p className="text-xs text-muted-foreground">{card.sub}</p>
+                  ) : null}
                 </CardHeader>
-                <CardContent className="pt-0">
-                  <p className="text-sm font-medium text-red-500">{card.change}</p>
-                </CardContent>
+                {card.change ? (
+                  <CardContent className="pt-0">
+                    <p className="text-sm font-medium text-red-500">{card.change}</p>
+                  </CardContent>
+                ) : null}
               </Card>
             ))}
           </section>
 
           <section className="rounded-2xl border bg-card p-4 shadow-sm">
-            <h2 className="mb-3 font-semibold">포트폴리오 비중</h2>
-            <div className="h-80 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart margin={{ top: 12, right: 24, bottom: 12, left: 24 }}>
-                  <Pie
-                    data={allocationData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={108}
-                    labelLine
-                    label={(entry: { name?: string; percent?: number }) => {
-                      const percent = (entry.percent ?? 0) * 100;
-                      if (percent < 2.5) return "";
-                      return `${entry.name ?? ""} ${percent.toFixed(1)}%`;
-                    }}
-                  >
-                    {allocationData.map((entry, index) => (
-                      <Cell
-                        key={`cell-${entry.name}`}
-                        fill={CHART_COLORS[index % CHART_COLORS.length]}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value, _name, item) => {
-                      const numericValue =
-                        typeof value === "number" ? value : Number(value ?? 0);
-                      const payload = item.payload as {
-                        value: number | string;
-                        weight: number;
-                        displayName: string;
-                      };
-                      return [
-                        `₩${Math.round(numericValue).toLocaleString()} (${payload.weight.toFixed(2)}%)`,
-                        payload.displayName,
-                      ];
-                    }}
-                  />
-                  <Legend
-                    formatter={(value, _entry, index) => {
-                      const item = allocationData[index] ?? null;
-                      if (!item) return <span className="font-semibold">{value}</span>;
-                      return (
-                        <span className="font-semibold">
-                          {value} {item.weight.toFixed(1)}%
-                        </span>
-                      );
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+            <h2 className="mb-4 font-semibold">포트폴리오 비중 (가족별)</h2>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              {allocationByOwner.map(({ ownerName, data, total }) => (
+                <div key={ownerName} className="rounded-xl border bg-muted/20 p-3">
+                  <p className="mb-2 text-center text-sm font-semibold">{ownerName}</p>
+                  <p className="mb-2 text-center text-xs text-muted-foreground">
+                    합계 ₩{Math.round(total).toLocaleString()}
+                  </p>
+                  <div className="h-56 w-full">
+                    {data.length === 0 ? (
+                      <p className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                        보유 종목·현금 없음
+                      </p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+                          <Pie
+                            data={data}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={72}
+                            labelLine
+                            label={(entry: { name?: string; percent?: number }) => {
+                              const percent = (entry.percent ?? 0) * 100;
+                              if (percent < 4) return "";
+                              return `${entry.name ?? ""} ${percent.toFixed(0)}%`;
+                            }}
+                          >
+                            {data.map((entry, index) => (
+                              <Cell
+                                key={`${ownerName}-${entry.name}-${index}`}
+                                fill={CHART_COLORS[index % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value, _name, item) => {
+                              const numericValue =
+                                typeof value === "number" ? value : Number(value ?? 0);
+                              const payload = item.payload as {
+                                value: number | string;
+                                weight: number;
+                                displayName: string;
+                              };
+                              return [
+                                `₩${Math.round(numericValue).toLocaleString()} (${payload.weight.toFixed(1)}%)`,
+                                payload.displayName,
+                              ];
+                            }}
+                          />
+                          <Legend
+                            formatter={(value, _entry, index) => {
+                              const item = data[index] ?? null;
+                              if (!item) return <span className="font-semibold">{value}</span>;
+                              return (
+                                <span className="font-semibold">
+                                  {value} {item.weight.toFixed(1)}%
+                                </span>
+                              );
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
 
@@ -657,45 +735,9 @@ export default function Home() {
                 </button>
               </div>
             </form>
-            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div>
-                <p className="mb-1 text-xs font-medium text-muted-foreground">USD</p>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder="USD 현금"
-                  value={cash.usd === 0 ? "" : cash.usd}
-                  onChange={(e) =>
-                    setCash((prev) => ({
-                      ...prev,
-                      usd: e.target.value === "" ? 0 : Number(e.target.value),
-                    }))
-                  }
-                />
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-medium text-muted-foreground">KRW</p>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder="KRW 현금"
-                  value={cash.krw}
-                  onChange={(e) =>
-                    setCash((prev) => ({
-                      ...prev,
-                      krw: Number.isFinite(Number(e.target.value)) ? Number(e.target.value) : 0,
-                    }))
-                  }
-                />
-              </div>
-            </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              현금 합계(원화 환산): ₩{Math.round(cashKrw).toLocaleString()} (USD {cash.usd.toLocaleString()} /
-              KRW {cash.krw.toLocaleString()})
+              현금(USD·KRW)은 아래 가족별 보유 종목 표 상단에서 담당자마다 입력합니다. 전체 현금
+              합계(원화): ₩{Math.round(totalCashKrw).toLocaleString()}
             </p>
           </section>
 
@@ -706,11 +748,66 @@ export default function Home() {
             <div className="space-y-5 p-4">
               {positionsByOwner.map((group) => (
                 <div key={group.ownerName} className="rounded-xl border">
-                  <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
+                  <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
                     <p className="font-semibold">보유 종목({group.ownerName})</p>
-                    <p className="text-sm font-semibold">
-                      평가액: ₩{Math.round(group.sectionValue).toLocaleString()}
-                    </p>
+                    <div className="text-right text-sm">
+                      <p className="font-semibold">
+                        총 평가(주식+현금): ₩{Math.round(group.sectionTotal).toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        주식 ₩{Math.round(group.sectionStockValue).toLocaleString()} · 현금 ₩
+                        {Math.round(group.sectionCashKrw).toLocaleString()}{" "}
+                        <span className="hidden sm:inline">
+                          (USD {group.cashUsd.toLocaleString()} / KRW{" "}
+                          {group.cashKrw.toLocaleString()})
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-3 border-b bg-muted/10 px-4 py-2 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">현금</span>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground">USD</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="w-28 rounded-md border bg-background px-2 py-1.5 text-right"
+                        placeholder="0"
+                        value={group.cashUsd === 0 ? "" : group.cashUsd}
+                        onChange={(e) =>
+                          setCashByOwner((prev) => ({
+                            ...prev,
+                            [group.ownerName]: {
+                              ...prev[group.ownerName],
+                              usd: e.target.value === "" ? 0 : Number(e.target.value),
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground">KRW</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="w-32 rounded-md border bg-background px-2 py-1.5 text-right"
+                        placeholder="0"
+                        value={group.cashKrw}
+                        onChange={(e) =>
+                          setCashByOwner((prev) => ({
+                            ...prev,
+                            [group.ownerName]: {
+                              ...prev[group.ownerName],
+                              krw: Number.isFinite(Number(e.target.value))
+                                ? Number(e.target.value)
+                                : 0,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
                   </div>
                   <Table className="min-w-full text-sm">
                     <TableHeader className="bg-muted/40">
