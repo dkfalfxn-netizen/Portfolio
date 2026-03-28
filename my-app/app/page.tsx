@@ -19,6 +19,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+const OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율"] as const;
+type OwnerName = (typeof OWNER_NAMES)[number];
+
 type Position = {
   symbol: string;
   name: string;
@@ -28,6 +31,7 @@ type Position = {
   currency: "USD" | "KRW";
   accountType: "해외주식" | "국내주식";
   accountName: string;
+  owner: OwnerName;
 };
 
 type MarketResponse = {
@@ -59,6 +63,7 @@ const DEFAULT_POSITIONS: Position[] = [
     currency: "USD",
     accountType: "해외주식",
     accountName: "미국주식-주계좌",
+    owner: "김승주",
   },
   {
     symbol: "TSM",
@@ -69,6 +74,7 @@ const DEFAULT_POSITIONS: Position[] = [
     currency: "USD",
     accountType: "해외주식",
     accountName: "미국주식-주계좌",
+    owner: "강희진",
   },
   {
     symbol: "KRX:005930",
@@ -79,6 +85,7 @@ const DEFAULT_POSITIONS: Position[] = [
     currency: "KRW",
     accountType: "국내주식",
     accountName: "국내주식-주계좌",
+    owner: "김도율",
   },
 ];
 
@@ -86,6 +93,10 @@ const DEFAULT_CASH = {
   usd: 0,
   krw: 0,
 };
+
+function isOwnerName(value: unknown): value is OwnerName {
+  return typeof value === "string" && (OWNER_NAMES as readonly string[]).includes(value);
+}
 
 function isValidPosition(value: unknown): value is Position {
   if (!value || typeof value !== "object") return false;
@@ -98,7 +109,8 @@ function isValidPosition(value: unknown): value is Position {
     typeof item.currentPrice === "number" &&
     (item.currency === "USD" || item.currency === "KRW") &&
     (item.accountType === "해외주식" || item.accountType === "국내주식") &&
-    typeof item.accountName === "string"
+    typeof item.accountName === "string" &&
+    isOwnerName(item.owner)
   );
 }
 
@@ -112,6 +124,14 @@ function loadPositions(): Position[] {
     const migrated = parsed
       .map((item) => {
         if (isValidPosition(item)) return item;
+        if (item && typeof item === "object") {
+          const p = item as Partial<Position> & { account?: string };
+          const withOwner: Partial<Position> = {
+            ...p,
+            owner: isOwnerName(p.owner) ? p.owner : "김승주",
+          };
+          if (isValidPosition(withOwner)) return withOwner as Position;
+        }
         if (!item || typeof item !== "object") return null;
         const legacy = item as {
           symbol?: unknown;
@@ -145,6 +165,7 @@ function loadPositions(): Position[] {
           currency: legacy.currency,
           accountType,
           accountName,
+          owner: "김승주",
         } satisfies Position;
       })
       .filter((item): item is Position => item !== null);
@@ -186,6 +207,7 @@ export default function Home() {
     currency: "USD" as "USD" | "KRW",
     accountType: "해외주식" as "해외주식" | "국내주식",
     accountName: "미국주식-주계좌",
+    owner: "김승주" as OwnerName,
   });
 
   const marketSymbols = useMemo(
@@ -276,18 +298,11 @@ export default function Home() {
     }));
   }, [enrichedPositions, cash.krw, cash.usd, usdKrw]);
 
-  const positionsByAccount = useMemo(() => {
-    const map = new Map<string, typeof enrichedPositions>();
-    for (const position of enrichedPositions) {
-      const key = `${position.accountType}|${position.accountName}`;
-      const current = map.get(key) ?? [];
-      current.push(position);
-      map.set(key, current);
-    }
-    return Array.from(map.entries()).map(([key, items]) => {
-      const [accountType, accountName] = key.split("|");
-      const accountValue = items.reduce((sum, item) => sum + item.valueKrw, 0);
-      return { accountType, accountName, items, accountValue };
+  const positionsByOwner = useMemo(() => {
+    return OWNER_NAMES.map((ownerName) => {
+      const items = enrichedPositions.filter((p) => p.owner === ownerName);
+      const sectionValue = items.reduce((sum, item) => sum + item.valueKrw, 0);
+      return { ownerName, items, sectionValue };
     });
   }, [enrichedPositions]);
 
@@ -332,6 +347,7 @@ export default function Home() {
         currency: form.currency,
         accountType: form.accountType,
         accountName: form.accountName.trim() || "기본계좌",
+        owner: form.owner,
       },
     ]);
 
@@ -344,6 +360,7 @@ export default function Home() {
       currency: form.currency,
       accountType: form.accountType,
       accountName: form.accountName,
+      owner: form.owner,
     });
   }
 
@@ -369,7 +386,7 @@ export default function Home() {
           <header>
             <h1 className="text-2xl font-bold tracking-tight">주식 대시보드</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              계좌별 자산 현황과 종목별 수익률을 한눈에 확인합니다.
+              가족(담당자)별·계좌별 자산과 종목별 수익률을 한눈에 확인합니다.
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               환율(USD/KRW): {usdKrw.toLocaleString()} | 시세 갱신:{" "}
@@ -509,14 +526,31 @@ export default function Home() {
                   setForm((prev) => ({
                     ...prev,
                     currency: e.target.value as "USD" | "KRW",
-                    account: e.target.value === "KRW" ? "국내주식" : "해외주식",
+                    accountType: e.target.value === "KRW" ? "국내주식" : "해외주식",
                   }))
                 }
               >
                 <option value="USD">USD</option>
                 <option value="KRW">KRW</option>
               </select>
-              <div className="flex gap-2 md:col-span-2">
+              <div className="flex flex-wrap gap-2 md:col-span-2">
+                <select
+                  className="min-w-[7rem] rounded-md border bg-background px-3 py-2 text-sm"
+                  value={form.owner}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      owner: e.target.value as OwnerName,
+                    }))
+                  }
+                  aria-label="담당자"
+                >
+                  {OWNER_NAMES.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
                 <select
                   className="min-w-[110px] rounded-md border bg-background px-3 py-2 text-sm"
                   value={form.accountType}
@@ -531,8 +565,8 @@ export default function Home() {
                   <option value="국내주식">국내주식</option>
                 </select>
                 <input
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder="계좌명 (예: 연금계좌, 단기매매)"
+                  className="min-w-[120px] flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+                  placeholder="계좌명 (예: 연금계좌)"
                   value={form.accountName}
                   onChange={(e) => setForm((prev) => ({ ...prev, accountName: e.target.value }))}
                 />
@@ -588,17 +622,15 @@ export default function Home() {
 
           <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
             <div className="border-b px-4 py-3">
-              <h2 className="font-semibold">보유 종목 (계좌별)</h2>
+              <h2 className="font-semibold">보유 종목 (가족별)</h2>
             </div>
             <div className="space-y-5 p-4">
-              {positionsByAccount.map((group) => (
-                <div key={`${group.accountType}-${group.accountName}`} className="rounded-xl border">
+              {positionsByOwner.map((group) => (
+                <div key={group.ownerName} className="rounded-xl border">
                   <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
-                    <p className="font-semibold">
-                      {group.accountName} <span className="text-sm text-muted-foreground">({group.accountType})</span>
-                    </p>
+                    <p className="font-semibold">보유 종목({group.ownerName})</p>
                     <p className="text-sm font-semibold">
-                      평가액: ₩{Math.round(group.accountValue).toLocaleString()}
+                      평가액: ₩{Math.round(group.sectionValue).toLocaleString()}
                     </p>
                   </div>
                   <Table className="min-w-full text-sm">
@@ -609,11 +641,22 @@ export default function Home() {
                         <TableHead className="px-4 py-3 text-right">평단가</TableHead>
                         <TableHead className="px-4 py-3 text-right">현재가</TableHead>
                         <TableHead className="px-4 py-3 text-right">수익률</TableHead>
+                        <TableHead className="px-4 py-3">계좌</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {group.items.map((position) => (
-                        <TableRow key={`${group.accountName}-${position.symbol}`}>
+                      {group.items.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={6}
+                            className="px-4 py-6 text-center text-sm text-muted-foreground"
+                          >
+                            등록된 종목이 없습니다.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        group.items.map((position) => (
+                        <TableRow key={`${group.ownerName}-${position.symbol}-${position.accountName}`}>
                           <TableCell className="px-4 py-3">
                             <p className="font-medium">{position.name}</p>
                             <p className="text-xs text-muted-foreground">{position.symbol}</p>
@@ -644,8 +687,14 @@ export default function Home() {
                           >
                             {position.pnl.toFixed(2)}%
                           </TableCell>
+                          <TableCell className="px-4 py-3 text-sm">
+                            <span className="text-muted-foreground">{position.accountType}</span>
+                            <span className="mx-1">·</span>
+                            {position.accountName}
+                          </TableCell>
                         </TableRow>
-                      ))}
+                        ))
+                      )}
                     </TableBody>
                   </Table>
                 </div>
