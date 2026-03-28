@@ -1,0 +1,10 @@
+{
+  "name": "portfolio",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix my-app",
+    "build": "npm run build --prefix my-app",
+    "deploy": "node scripts/deploy.cjs",
+    "lint": "npm run lint --prefix my-app"
+  }
+}

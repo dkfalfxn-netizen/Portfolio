@@ -98,6 +98,34 @@ function isOwnerName(value: unknown): value is OwnerName {
   return typeof value === "string" && (OWNER_NAMES as readonly string[]).includes(value);
 }
 
+/** 같은 담당자·같은 티커·같은 계좌·같은 통화면 한 줄로 합칩니다(가중 평단). */
+function makePositionKey(p: Pick<Position, "owner" | "symbol" | "accountType" | "accountName" | "currency">) {
+  return `${p.owner}|${p.symbol}|${p.accountType}|${p.accountName}|${p.currency}`;
+}
+
+function mergeDuplicatePositions(positions: Position[]): Position[] {
+  const map = new Map<string, Position>();
+  for (const p of positions) {
+    const key = makePositionKey(p);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, { ...p });
+      continue;
+    }
+    const newQty = existing.quantity + p.quantity;
+    const newAvg =
+      (existing.quantity * existing.avgPrice + p.quantity * p.avgPrice) / newQty;
+    map.set(key, {
+      ...existing,
+      quantity: newQty,
+      avgPrice: newAvg,
+      currentPrice: p.currentPrice,
+      name: existing.name || p.name,
+    });
+  }
+  return Array.from(map.values());
+}
+
 function isValidPosition(value: unknown): value is Position {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<Position>;
@@ -169,7 +197,8 @@ function loadPositions(): Position[] {
         } satisfies Position;
       })
       .filter((item): item is Position => item !== null);
-    return migrated.length > 0 ? migrated : DEFAULT_POSITIONS;
+    const list = migrated.length > 0 ? migrated : DEFAULT_POSITIONS;
+    return mergeDuplicatePositions(list);
   } catch {
     return DEFAULT_POSITIONS;
   }
@@ -197,6 +226,9 @@ export default function Home() {
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const [cash, setCash] = useState(DEFAULT_CASH);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
+  const [editQuantity, setEditQuantity] = useState("");
+  const [editAvgPrice, setEditAvgPrice] = useState("");
 
   const [form, setForm] = useState({
     symbol: "",
@@ -334,22 +366,37 @@ export default function Home() {
     if (!Number.isFinite(avgPrice) || avgPrice <= 0) return;
     if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
 
-    const pnl = ((currentPrice - avgPrice) / avgPrice) * 100;
+    const symbol = form.symbol.trim().toUpperCase();
+    const accountName = form.accountName.trim() || "기본계좌";
+    const nextEntry: Position = {
+      symbol,
+      name: form.name.trim(),
+      quantity,
+      avgPrice,
+      currentPrice: currentPrice || avgPrice,
+      currency: form.currency,
+      accountType: form.accountType,
+      accountName,
+      owner: form.owner,
+    };
 
-    setPositions((prev) => [
-      ...prev,
-      {
-        symbol: form.symbol.trim().toUpperCase(),
-        name: form.name.trim(),
-        quantity,
-        avgPrice,
-        currentPrice: currentPrice || avgPrice,
-        currency: form.currency,
-        accountType: form.accountType,
-        accountName: form.accountName.trim() || "기본계좌",
-        owner: form.owner,
-      },
-    ]);
+    setPositions((prev) => {
+      const key = makePositionKey(nextEntry);
+      const idx = prev.findIndex((p) => makePositionKey(p) === key);
+      if (idx === -1) return [...prev, nextEntry];
+      const existing = prev[idx];
+      const newQty = existing.quantity + quantity;
+      const newAvg =
+        (existing.quantity * existing.avgPrice + quantity * avgPrice) / newQty;
+      const merged: Position = {
+        ...existing,
+        quantity: newQty,
+        avgPrice: newAvg,
+        currentPrice: currentPrice || existing.currentPrice,
+        name: form.name.trim() || existing.name,
+      };
+      return prev.map((p, i) => (i === idx ? merged : p));
+    });
 
     setForm({
       symbol: "",
@@ -362,6 +409,33 @@ export default function Home() {
       accountName: form.accountName,
       owner: form.owner,
     });
+  }
+
+  function startEditRow(p: Position) {
+    const key = makePositionKey(p);
+    setEditingRowKey(key);
+    setEditQuantity(String(p.quantity));
+    setEditAvgPrice(String(p.avgPrice));
+  }
+
+  function cancelEditRow() {
+    setEditingRowKey(null);
+    setEditQuantity("");
+    setEditAvgPrice("");
+  }
+
+  function saveEditRow() {
+    if (!editingRowKey) return;
+    const q = Number(editQuantity);
+    const a = Number(editAvgPrice);
+    if (!Number.isFinite(q) || q <= 0) return;
+    if (!Number.isFinite(a) || a <= 0) return;
+    setPositions((prev) =>
+      prev.map((p) =>
+        makePositionKey(p) === editingRowKey ? { ...p, quantity: q, avgPrice: a } : p,
+      ),
+    );
+    cancelEditRow();
   }
 
   return (
@@ -469,6 +543,11 @@ export default function Home() {
 
           <section className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-3 font-semibold">종목 추가</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              같은 티커·담당자·계좌(해외/국내+계좌명)·통화로 추가하면 기존 줄에{" "}
+              <span className="font-medium text-foreground">수량이 더해지고 평단은 가중평균</span>으로
+              갱신됩니다.
+            </p>
             <form
               onSubmit={handleSubmit}
               className="grid grid-cols-1 gap-3 md:grid-cols-7"
@@ -642,34 +721,64 @@ export default function Home() {
                         <TableHead className="px-4 py-3 text-right">현재가</TableHead>
                         <TableHead className="px-4 py-3 text-right">수익률</TableHead>
                         <TableHead className="px-4 py-3">계좌</TableHead>
+                        <TableHead className="px-4 py-3 w-[140px]">수정</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {group.items.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={6}
+                            colSpan={7}
                             className="px-4 py-6 text-center text-sm text-muted-foreground"
                           >
                             등록된 종목이 없습니다.
                           </TableCell>
                         </TableRow>
                       ) : (
-                        group.items.map((position) => (
-                        <TableRow key={`${group.ownerName}-${position.symbol}-${position.accountName}`}>
+                        group.items.map((position) => {
+                          const rowKey = makePositionKey(position);
+                          const isEditing = editingRowKey === rowKey;
+                          return (
+                        <TableRow key={rowKey}>
                           <TableCell className="px-4 py-3">
                             <p className="font-medium">{position.name}</p>
                             <p className="text-xs text-muted-foreground">{position.symbol}</p>
                           </TableCell>
-                          <TableCell className="px-4 py-3 text-right">{position.quantity}</TableCell>
                           <TableCell className="px-4 py-3 text-right">
-                            {position.avgPrice.toLocaleString()} {position.currency}
-                            <p className="text-xs text-muted-foreground">
-                              원화: ₩
-                              {Math.round(
-                                position.avgPrice * (position.currency === "USD" ? usdKrw : 1),
-                              ).toLocaleString()}
-                            </p>
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="0.000001"
+                                step="any"
+                                className="w-24 rounded-md border bg-background px-2 py-1 text-right text-sm"
+                                value={editQuantity}
+                                onChange={(e) => setEditQuantity(e.target.value)}
+                              />
+                            ) : (
+                              position.quantity
+                            )}
+                          </TableCell>
+                          <TableCell className="px-4 py-3 text-right">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="0.000001"
+                                step="any"
+                                className="w-28 rounded-md border bg-background px-2 py-1 text-right text-sm"
+                                value={editAvgPrice}
+                                onChange={(e) => setEditAvgPrice(e.target.value)}
+                              />
+                            ) : (
+                              <>
+                                {position.avgPrice.toLocaleString()} {position.currency}
+                                <p className="text-xs text-muted-foreground">
+                                  원화: ₩
+                                  {Math.round(
+                                    position.avgPrice * (position.currency === "USD" ? usdKrw : 1),
+                                  ).toLocaleString()}
+                                </p>
+                              </>
+                            )}
                           </TableCell>
                           <TableCell className="px-4 py-3 text-right">
                             {position.currentPrice.toLocaleString()} {position.currency}
@@ -692,8 +801,37 @@ export default function Home() {
                             <span className="mx-1">·</span>
                             {position.accountName}
                           </TableCell>
+                          <TableCell className="px-4 py-3">
+                            {isEditing ? (
+                              <div className="flex flex-col gap-1">
+                                <button
+                                  type="button"
+                                  className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground"
+                                  onClick={saveEditRow}
+                                >
+                                  저장
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-md border px-2 py-1 text-xs"
+                                  onClick={cancelEditRow}
+                                >
+                                  취소
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                                onClick={() => startEditRow(position)}
+                              >
+                                수정
+                              </button>
+                            )}
+                          </TableCell>
                         </TableRow>
-                        ))
+                          );
+                        })
                       )}
                     </TableBody>
                   </Table>
