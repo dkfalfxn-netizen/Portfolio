@@ -9,14 +9,14 @@ import {
   type PieLabelRenderProps,
 } from "recharts";
 
-/** 네온 글로우용 팔레트 (참고 이미지 톤) */
+/** 네온 글로우용 팔레트 (한 단계 어둡게 — 채도는 유지) */
 const NEON_PALETTE = [
-  "#00E5FF",
-  "#A2FF00",
-  "#FFD600",
-  "#FF4D8D",
-  "#B388FF",
-  "#00FFC8",
+  "#0891B2",
+  "#65A30D",
+  "#CA8A04",
+  "#DB2777",
+  "#7C3AED",
+  "#0D9488",
 ];
 
 export type AllocationSlice = {
