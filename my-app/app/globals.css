@@ -128,3 +128,15 @@
     @apply font-sans;
   }
 }
+
+/* Recharts: 다크 모드에서 축·범례 글자 대비 */
+.dark .recharts-cartesian-axis-tick text,
+.dark .recharts-legend-item-text,
+.dark .recharts-label {
+  fill: var(--foreground);
+}
+.dark .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--card-foreground);
+}

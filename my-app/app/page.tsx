@@ -298,7 +298,22 @@ export default function Home() {
       const fxRate = position.currency === "USD" ? usdKrw : 1;
       const valueKrw = position.quantity * currentPrice * fxRate;
       const costKrw = position.quantity * position.avgPrice * fxRate;
-      return { ...position, currentPrice, pnl, valueKrw, costKrw };
+      /** 해외(USD): 달러 주가 수익률(종목 통화) */
+      const pnlUsdPct = position.currency === "USD" ? pnl : null;
+      /** 해외(USD): 원화 환산 평가·매입 대비 수익률(현재 환율로 원가·평가 모두 환산) */
+      const pnlKrwEquityPct =
+        position.currency === "USD" && costKrw > 0
+          ? ((valueKrw - costKrw) / costKrw) * 100
+          : null;
+      return {
+        ...position,
+        currentPrice,
+        pnl,
+        valueKrw,
+        costKrw,
+        pnlUsdPct,
+        pnlKrwEquityPct,
+      };
     });
   }, [positions, marketQuery.data, usdKrw]);
 
@@ -891,7 +906,22 @@ export default function Home() {
                               position.pnl >= 0 ? "text-red-500" : "text-blue-500"
                             }`}
                           >
-                            {position.pnl.toFixed(2)}%
+                            {position.currency === "USD" &&
+                            position.pnlUsdPct != null &&
+                            position.pnlKrwEquityPct != null ? (
+                              <div className="flex flex-col items-end gap-0.5 leading-tight">
+                                <span>
+                                  USD {position.pnlUsdPct >= 0 ? "+" : ""}
+                                  {position.pnlUsdPct.toFixed(2)}%
+                                </span>
+                                <span className="text-xs font-normal opacity-90">
+                                  원화 {position.pnlKrwEquityPct >= 0 ? "+" : ""}
+                                  {position.pnlKrwEquityPct.toFixed(2)}%
+                                </span>
+                              </div>
+                            ) : (
+                              `${position.pnl.toFixed(2)}%`
+                            )}
                           </TableCell>
                           <TableCell className="px-4 py-3 text-sm">
                             <span className="text-muted-foreground">{position.accountType}</span>
