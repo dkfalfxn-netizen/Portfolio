@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { FamilyAllocationDonut } from "@/components/family-allocation-chart";
 import {
   Card,
@@ -44,6 +44,8 @@ type MarketResponse = {
 
 const STORAGE_KEY = "portfolio_positions_v1";
 const CASH_STORAGE_KEY = "portfolio_cash_v1";
+const SYNC_KEY_STORAGE = "portfolio_sync_key_v1";
+const AUTO_SYNC_STORAGE = "portfolio_auto_sync_v1";
 const DEFAULT_POSITIONS: Position[] = [
   {
     symbol: "NVDA",
@@ -264,6 +266,18 @@ function loadCashByOwner(): CashByOwner {
   }
 }
 
+function normalizeCashFromServer(raw: unknown): CashByOwner {
+  const base: CashByOwner = { ...DEFAULT_CASH_BY_OWNER };
+  if (!raw || typeof raw !== "object") return base;
+  const obj = raw as Record<string, unknown>;
+  for (const name of OWNER_NAMES) {
+    if (obj[name] !== undefined) {
+      base[name] = parseCashPair(obj[name]);
+    }
+  }
+  return base;
+}
+
 export default function Home() {
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
@@ -272,6 +286,15 @@ export default function Home() {
   const [editQuantity, setEditQuantity] = useState("");
   const [editAvgPrice, setEditAvgPrice] = useState("");
   const [editPurchaseUsdKrw, setEditPurchaseUsdKrw] = useState("");
+
+  const [cloudSyncKey, setCloudSyncKey] = useState("");
+  const [syncKeyDraft, setSyncKeyDraft] = useState("");
+  const [autoSync, setAutoSync] = useState(false);
+  const [syncReady, setSyncReady] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const pushDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [form, setForm] = useState({
     symbol: "",
@@ -440,9 +463,74 @@ export default function Home() {
   }, [enrichedPositions, cashByOwner, usdKrw]);
 
   useEffect(() => {
-    setPositions(loadPositions());
-    setCashByOwner(loadCashByOwner());
+    const pos = loadPositions();
+    const cash = loadCashByOwner();
+    setPositions(pos);
+    setCashByOwner(cash);
+    const savedKey = typeof window !== "undefined" ? window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "" : "";
+    setCloudSyncKey(savedKey);
+    setSyncKeyDraft(savedKey);
+    const auto = typeof window !== "undefined" && window.localStorage.getItem(AUTO_SYNC_STORAGE) === "1";
+    setAutoSync(auto);
     setIsHydrated(true);
+
+    if (savedKey.length < 8) {
+      setSyncReady(true);
+      return;
+    }
+
+    void (async () => {
+      setSyncBusy(true);
+      try {
+        const r = await fetch("/api/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "pull", key: savedKey }),
+        });
+        const j = (await r.json()) as {
+          error?: string;
+          found?: boolean;
+          positions?: unknown;
+          cash_by_owner?: unknown;
+          updated_at?: string | null;
+        };
+        if (!r.ok) {
+          setSyncMessage(j.error ?? "동기화를 사용할 수 없습니다.");
+          return;
+        }
+        if (j.found) {
+          const valid = Array.isArray(j.positions)
+            ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
+            : [];
+          setPositions(mergeDuplicatePositions(valid));
+          setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
+          setSyncMessage("서버 데이터를 불러왔습니다.");
+          setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
+        } else {
+          const r2 = await fetch("/api/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "push",
+              key: savedKey,
+              positions: pos,
+              cashByOwner: cash,
+            }),
+          });
+          const j2 = (await r2.json()) as { error?: string };
+          if (!r2.ok) setSyncMessage(j2.error ?? "서버 업로드 실패");
+          else {
+            setSyncMessage("로컬 데이터를 서버에 저장했습니다.");
+            setLastSyncedAt(new Date().toISOString());
+          }
+        }
+      } catch {
+        setSyncMessage("네트워크 오류로 동기화에 실패했습니다.");
+      } finally {
+        setSyncBusy(false);
+        setSyncReady(true);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -454,6 +542,113 @@ export default function Home() {
     if (!isHydrated) return;
     window.localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(cashByOwner));
   }, [cashByOwner, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated || !syncReady || !autoSync || cloudSyncKey.length < 8) return;
+    if (pushDebounceRef.current) clearTimeout(pushDebounceRef.current);
+    pushDebounceRef.current = setTimeout(() => {
+      void fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "push",
+          key: cloudSyncKey,
+          positions,
+          cashByOwner,
+        }),
+      }).then(async (r) => {
+        if (r.ok) {
+          setLastSyncedAt(new Date().toISOString());
+          setSyncMessage("서버에 자동 저장했습니다.");
+        } else {
+          const j = (await r.json().catch(() => ({}))) as { error?: string };
+          setSyncMessage(j.error ?? "자동 저장 실패(서버 응답 오류). GET /api/sync 로 상태를 확인하세요.");
+        }
+      });
+    }, 2000);
+    return () => {
+      if (pushDebounceRef.current) clearTimeout(pushDebounceRef.current);
+    };
+  }, [positions, cashByOwner, isHydrated, syncReady, autoSync, cloudSyncKey]);
+
+  async function handlePullCloud() {
+    const key = cloudSyncKey.trim();
+    if (key.length < 8) {
+      setSyncMessage("동기화 키를 8자 이상 저장해 주세요.");
+      return;
+    }
+    setSyncBusy(true);
+    try {
+      const r = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "pull", key }),
+      });
+      const j = (await r.json()) as {
+        error?: string;
+        found?: boolean;
+        positions?: unknown;
+        cash_by_owner?: unknown;
+        updated_at?: string | null;
+      };
+      if (!r.ok) {
+        setSyncMessage(j.error ?? "불러오기 실패");
+        return;
+      }
+      if (j.found) {
+        const valid = Array.isArray(j.positions)
+          ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
+          : [];
+        setPositions(mergeDuplicatePositions(valid));
+        setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
+        setSyncMessage("서버에서 불러왔습니다.");
+        setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
+      } else {
+        setSyncMessage("서버에 아직 데이터가 없습니다. 먼저 이 기기에서 올리기를 해 보세요.");
+      }
+    } catch {
+      setSyncMessage("네트워크 오류입니다.");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function handlePushCloud() {
+    const key = cloudSyncKey.trim();
+    if (key.length < 8) {
+      setSyncMessage("동기화 키를 8자 이상 저장해 주세요.");
+      return;
+    }
+    setSyncBusy(true);
+    try {
+      const r = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "push", key, positions, cashByOwner }),
+      });
+      const j = (await r.json()) as { error?: string };
+      if (!r.ok) setSyncMessage(j.error ?? "업로드 실패");
+      else {
+        setSyncMessage("서버에 올렸습니다.");
+        setLastSyncedAt(new Date().toISOString());
+      }
+    } catch {
+      setSyncMessage("네트워크 오류입니다.");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  function handleSaveSyncKey() {
+    const k = syncKeyDraft.trim();
+    if (k.length < 8) {
+      setSyncMessage("동기화 키는 8자 이상으로 정해 주세요.");
+      return;
+    }
+    window.localStorage.setItem(SYNC_KEY_STORAGE, k);
+    setCloudSyncKey(k);
+    setSyncMessage("키를 저장했습니다. 다른 기기에도 같은 키를 입력하세요.");
+  }
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -595,6 +790,83 @@ export default function Home() {
                 : "대기 중"}
             </p>
           </header>
+
+          <Card className="border-dashed">
+            <CardHeader className="pb-2">
+              <CardDescription>클라우드 동기화 (폰·PC 같은 데이터)</CardDescription>
+              <CardTitle className="text-lg">동기화 키</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                같은 키를 여러 기기에 저장하면 Supabase에 올린 스냅샷을 공유합니다. 키는 비밀번호처럼
+                길게 정하세요. Vercel에{" "}
+                <code className="rounded bg-muted px-1">SUPABASE_SERVICE_ROLE_KEY</code>가 있어야
+                합니다.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1">
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="sync-key">
+                    동기화 키 (8자 이상)
+                  </label>
+                  <input
+                    id="sync-key"
+                    type="password"
+                    autoComplete="off"
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    placeholder="예: 우리가족포트폴리오2026"
+                    value={syncKeyDraft}
+                    onChange={(e) => setSyncKeyDraft(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                  onClick={handleSaveSyncKey}
+                >
+                  키 저장
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border px-3 py-1.5 text-sm"
+                  disabled={syncBusy}
+                  onClick={handlePullCloud}
+                >
+                  서버에서 불러오기
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border px-3 py-1.5 text-sm"
+                  disabled={syncBusy}
+                  onClick={handlePushCloud}
+                >
+                  서버로 올리기
+                </button>
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={autoSync}
+                    onChange={(e) => {
+                      const v = e.target.checked;
+                      setAutoSync(v);
+                      window.localStorage.setItem(AUTO_SYNC_STORAGE, v ? "1" : "0");
+                    }}
+                  />
+                  변경 시 자동으로 서버에 저장 (2초 후)
+                </label>
+              </div>
+              {syncMessage ? (
+                <p className="text-xs text-muted-foreground">{syncMessage}</p>
+              ) : null}
+              {syncBusy ? <p className="text-xs text-amber-600">동기화 중…</p> : null}
+              {lastSyncedAt ? (
+                <p className="text-xs text-muted-foreground">
+                  마지막 동기 시각: {new Date(lastSyncedAt).toLocaleString()}
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {summaryCards.map((card) => (
