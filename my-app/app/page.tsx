@@ -805,15 +805,25 @@ export default function Home() {
     return OWNER_NAMES.map((ownerName) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
       const sectionStockValue = items.reduce((sum, item) => sum + item.valueKrw, 0);
+      const sectionStockCost = items.reduce((sum, item) => sum + item.costKrw, 0);
       const c = cashByOwner[ownerName];
       const sectionCashKrw = c.krw + c.usd * usdKrw;
       const sectionTotal = sectionStockValue + sectionCashKrw;
+      /** 주식 원가 + 현금(원화 환산) — 상단 카드와 동일한 투입 기준 */
+      const sectionCostBasis = sectionStockCost + sectionCashKrw;
+      const sectionPnL = sectionTotal - sectionCostBasis;
+      const sectionPnLPct =
+        sectionCostBasis > 0 ? (sectionPnL / sectionCostBasis) * 100 : 0;
       return {
         ownerName,
         items,
         sectionStockValue,
+        sectionStockCost,
         sectionCashKrw,
         sectionTotal,
+        sectionCostBasis,
+        sectionPnL,
+        sectionPnLPct,
         cashUsd: c.usd,
         cashKrw: c.krw,
       };
@@ -1531,16 +1541,37 @@ export default function Home() {
                         차트 그룹(미입력 시 티커)별로 묶여 보입니다.
                       </p>
                     </div>
-                    <div className="text-right text-sm">
-                      <p className="font-semibold">
-                        총 평가(주식+현금): ₩{Math.round(group.sectionTotal).toLocaleString()}
-                      </p>
+                    <div className="max-w-md space-y-1 text-right text-sm">
                       <p className="text-xs text-muted-foreground">
-                        주식 ₩{Math.round(group.sectionStockValue).toLocaleString()} · 현금 ₩
-                        {Math.round(group.sectionCashKrw).toLocaleString()}{" "}
+                        총 매입{" "}
+                        <span className="font-medium tabular-nums text-foreground">
+                          ₩{Math.round(group.sectionCostBasis).toLocaleString()}
+                        </span>
                         <span className="hidden sm:inline">
-                          (USD {group.cashUsd.toLocaleString()} / KRW{" "}
-                          {group.cashKrw.toLocaleString()})
+                          {" "}
+                          (주식 원가 ₩{Math.round(group.sectionStockCost).toLocaleString()} · 현금 ₩
+                          {Math.round(group.sectionCashKrw).toLocaleString()})
+                        </span>
+                      </p>
+                      <p className="font-semibold tabular-nums">
+                        총 평가(주식+현금) ₩{Math.round(group.sectionTotal).toLocaleString()}
+                      </p>
+                      <p
+                        className={`text-sm font-semibold tabular-nums ${
+                          group.sectionPnL >= 0 ? "text-red-600" : "text-blue-600"
+                        }`}
+                      >
+                        평가손익 {group.sectionPnL >= 0 ? "+" : ""}₩
+                        {Math.round(group.sectionPnL).toLocaleString()} (
+                        {group.sectionPnL >= 0 ? "+" : ""}
+                        {group.sectionPnLPct.toFixed(2)}%)
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        주식 평가 ₩{Math.round(group.sectionStockValue).toLocaleString()}
+                        <span className="hidden sm:inline">
+                          {" "}
+                          · 현금 ₩{Math.round(group.sectionCashKrw).toLocaleString()} (USD{" "}
+                          {group.cashUsd.toLocaleString()} / KRW {group.cashKrw.toLocaleString()})
                         </span>
                       </p>
                     </div>
