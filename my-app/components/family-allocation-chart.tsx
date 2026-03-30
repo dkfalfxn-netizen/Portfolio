@@ -64,7 +64,7 @@ export function FamilyAllocationDonut({
   if (data.length === 0) {
     return (
       <div
-        className="relative overflow-hidden rounded-2xl border border-white/[0.08] p-4"
+        className="relative rounded-2xl border border-white/[0.08] p-4"
         style={{
           backgroundImage: `
             repeating-linear-gradient(
@@ -87,7 +87,7 @@ export function FamilyAllocationDonut({
 
   return (
     <div
-      className="relative overflow-hidden rounded-2xl border border-white/[0.08] p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
+      className="relative rounded-2xl border border-white/[0.08] p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
       style={{
         backgroundImage: `
           repeating-linear-gradient(
@@ -187,7 +187,11 @@ export function FamilyAllocationDonut({
                 );
               })}
             </Pie>
-            <Tooltip content={<NeonTooltip />} />
+            <Tooltip
+              content={<NeonTooltip />}
+              allowEscapeViewBox={{ x: true, y: true }}
+              wrapperStyle={{ zIndex: 50 }}
+            />
           </PieChart>
         </ResponsiveContainer>
 
