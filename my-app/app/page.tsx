@@ -427,30 +427,33 @@ export default function Home() {
     return OWNER_NAMES.map((ownerName) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
       // chartGroup이 있으면 그룹명 기준, 없으면 symbol 기준으로 차트 슬라이스 합산
-      const groupMap = new Map<string, { displayName: string; allNames: string[]; value: number }>();
+      const groupMap = new Map<string, {
+        displayName: string;
+        allEntries: { name: string; symbol: string }[];
+        value: number;
+      }>();
       for (const position of items) {
         const v = Math.max(0, Number.isFinite(position.valueKrw) ? position.valueKrw : 0);
         const groupKey = position.chartGroup?.trim() || position.symbol;
         const existing = groupMap.get(groupKey);
         if (existing) {
           existing.value += v;
-          if (!existing.allNames.includes(position.name)) {
-            existing.allNames.push(position.name);
+          if (!existing.allEntries.some((e) => e.symbol === position.symbol && e.name === position.name)) {
+            existing.allEntries.push({ name: position.name, symbol: position.symbol });
           }
         } else {
           groupMap.set(groupKey, {
             displayName: position.chartGroup?.trim() || position.name,
-            allNames: [position.name],
+            allEntries: [{ name: position.name, symbol: position.symbol }],
             value: v,
           });
         }
       }
-      const stockSlices = Array.from(groupMap.entries()).map(([groupKey, { displayName, allNames, value }]) => ({
-        /** Recharts·범례 충돌 방지를 위해 그룹키+담당자 기준 고유 키 사용 */
+      const stockSlices = Array.from(groupMap.entries()).map(([groupKey, { displayName, allEntries, value }]) => ({
         name: `stk|${groupKey}|${ownerName}`,
         displayName,
         ticker: groupKey,
-        allNames,
+        allEntries,
         value,
       }));
 
@@ -458,13 +461,13 @@ export default function Home() {
       const usd = Number.isFinite(c.usd) ? Math.max(0, c.usd) : 0;
       const krw = Number.isFinite(c.krw) ? Math.max(0, c.krw) : 0;
       const usdCashKrw = usd * usdKrw;
-      const extra: { name: string; displayName: string; ticker: string; allNames: string[]; value: number }[] = [];
+      const extra: { name: string; displayName: string; ticker: string; allEntries: { name: string; symbol: string }[]; value: number }[] = [];
       if (usdCashKrw > 0) {
         extra.push({
           name: `cash-usd|${ownerName}`,
           displayName: "USD 현금",
           ticker: "USD 현금",
-          allNames: ["USD 현금"],
+          allEntries: [{ name: "USD 현금", symbol: "" }],
           value: usdCashKrw,
         });
       }
@@ -473,7 +476,7 @@ export default function Home() {
           name: `cash-krw|${ownerName}`,
           displayName: "KRW 현금",
           ticker: "KRW 현금",
-          allNames: ["KRW 현금"],
+          allEntries: [{ name: "KRW 현금", symbol: "" }],
           value: krw,
         });
       }
@@ -1594,7 +1597,7 @@ export default function Home() {
                           const rowKey = makePositionKey(position);
                           const isEditing = editingRowKey === rowKey;
                           return (
-                        <TableRow key={rowKey}>
+                        <TableRow key={rowKey} className="group/row">
                           <TableCell className="px-4 py-3">
                             {isEditing ? (
                               <div className="flex flex-col gap-1">
@@ -1734,9 +1737,19 @@ export default function Home() {
                                   원화 {position.pnlKrwEquityPct >= 0 ? "+" : ""}
                                   {position.pnlKrwEquityPct.toFixed(2)}%
                                 </span>
+                                <span className="text-xs font-normal opacity-75">
+                                  {(position.valueKrw - position.costKrw) >= 0 ? "+" : ""}
+                                  ₩{Math.round(position.valueKrw - position.costKrw).toLocaleString()}
+                                </span>
                               </div>
                             ) : (
-                              `${position.pnl.toFixed(2)}%`
+                              <div className="flex flex-col items-end gap-0.5 leading-tight">
+                                <span>{position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)}%</span>
+                                <span className="text-xs font-normal opacity-75">
+                                  {(position.valueKrw - position.costKrw) >= 0 ? "+" : ""}
+                                  ₩{Math.round(position.valueKrw - position.costKrw).toLocaleString()}
+                                </span>
+                              </div>
                             )}
                           </TableCell>
                           <TableCell className="px-4 py-3">
@@ -1758,7 +1771,7 @@ export default function Home() {
                                 </button>
                               </div>
                             ) : (
-                              <div className="flex flex-col gap-1">
+                              <div className="flex flex-col gap-1 opacity-0 transition-opacity duration-150 group-hover/row:opacity-100">
                                 <div className="flex gap-1">
                                   <button
                                     type="button"

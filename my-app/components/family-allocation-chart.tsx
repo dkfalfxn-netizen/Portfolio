@@ -23,7 +23,7 @@ export type AllocationSlice = {
   name: string;
   displayName: string;
   ticker: string;
-  allNames: string[];
+  allEntries: { name: string; symbol: string }[];
   value: number;
   weight: number;
 };
@@ -43,16 +43,27 @@ function NeonTooltip({
 }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
+  const entries = p.allEntries.filter((e) => e.name !== "USD 현금" && e.name !== "KRW 현금");
+  const isGroup = entries.length > 1;
   return (
     <div className="rounded-lg border border-white/15 bg-zinc-950/95 px-3 py-2 text-xs shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md">
-      {p.allNames.length > 1 ? (
-        <div className="mb-1 space-y-0.5">
-          {p.allNames.map((n) => (
-            <p key={n} className="font-semibold text-foreground">{n}</p>
+      {isGroup ? (
+        <div className="mb-1.5 space-y-1">
+          <p className="mb-1 font-bold text-cyan-400">{p.ticker}</p>
+          {entries.map((e) => (
+            <div key={`${e.symbol}-${e.name}`} className="flex items-baseline gap-1.5">
+              <span className="font-semibold text-zinc-300">{e.symbol}</span>
+              <span className="text-zinc-500">{e.name}</span>
+            </div>
           ))}
         </div>
       ) : (
-        <p className="mb-1 font-semibold text-foreground">{p.displayName}</p>
+        <div className="mb-1">
+          {entries[0]?.symbol && entries[0].symbol !== entries[0].name && (
+            <p className="font-bold text-cyan-400">{entries[0].symbol}</p>
+          )}
+          <p className="font-semibold text-foreground">{p.displayName}</p>
+        </div>
       )}
       <p className="text-muted-foreground">
         {formatKrw(p.value)} · {p.weight.toFixed(1)}%
