@@ -765,13 +765,13 @@ export default function Home() {
         <aside className="hidden w-64 shrink-0 rounded-2xl border bg-card p-4 shadow-sm md:block">
           <h2 className="mb-6 text-lg font-semibold">포트폴리오</h2>
           <nav className="space-y-2 text-sm">
-            <a className="block rounded-lg bg-primary px-3 py-2 text-primary-foreground">
+            <a className="block cursor-pointer rounded-lg bg-primary px-3 py-2 text-primary-foreground transition-all duration-100 active:scale-95">
               대시보드
             </a>
-            <a className="block rounded-lg px-3 py-2 hover:bg-muted">
+            <a className="block cursor-pointer rounded-lg px-3 py-2 transition-all duration-100 hover:bg-muted active:scale-95">
               계좌관리
             </a>
-            <a className="block rounded-lg px-3 py-2 hover:bg-muted">
+            <a className="block cursor-pointer rounded-lg px-3 py-2 transition-all duration-100 hover:bg-muted active:scale-95">
               설정
             </a>
           </nav>
@@ -820,7 +820,7 @@ export default function Home() {
                 </div>
                 <button
                   type="button"
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
                   onClick={handleSaveSyncKey}
                 >
                   키 저장
@@ -829,7 +829,7 @@ export default function Home() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className="rounded-md border px-3 py-1.5 text-sm"
+                  className="rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                   disabled={syncBusy}
                   onClick={handlePullCloud}
                 >
@@ -837,15 +837,16 @@ export default function Home() {
                 </button>
                 <button
                   type="button"
-                  className="rounded-md border px-3 py-1.5 text-sm"
+                  className="rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                   disabled={syncBusy}
                   onClick={handlePushCloud}
                 >
                   서버로 올리기
                 </button>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
                   <input
                     type="checkbox"
+                    className="cursor-pointer accent-primary"
                     checked={autoSync}
                     onChange={(e) => {
                       const v = e.target.checked;
@@ -1025,7 +1026,7 @@ export default function Home() {
                 />
                 <button
                   type="submit"
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
                 >
                   추가
                 </button>
@@ -1276,14 +1277,14 @@ export default function Home() {
                               <div className="flex flex-col gap-1">
                                 <button
                                   type="button"
-                                  className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground"
+                                  className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
                                   onClick={saveEditRow}
                                 >
                                   저장
                                 </button>
                                 <button
                                   type="button"
-                                  className="rounded-md border px-2 py-1 text-xs"
+                                  className="rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
                                   onClick={cancelEditRow}
                                 >
                                   취소
@@ -1292,7 +1293,7 @@ export default function Home() {
                             ) : (
                               <button
                                 type="button"
-                                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                                className="rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
                                 onClick={() => startEditRow(position)}
                               >
                                 수정
