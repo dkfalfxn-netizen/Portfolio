@@ -1230,18 +1230,18 @@ export default function Home() {
                     <TableHeader className="bg-muted/40">
                       <TableRow>
                         <TableHead className="px-3 py-1.5">종목</TableHead>
+                        <TableHead className="px-3 py-1.5 text-right">평가금액</TableHead>
                         <TableHead
                           className="w-[72px] px-1 py-1.5 text-center"
                           title="당일 분봉 기준 가격 흐름"
                         >
                           일중
                         </TableHead>
+                        <TableHead className="px-3 py-1.5 text-right">현재가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">수량</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">수익률</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">평단가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">매입환율</TableHead>
-                        <TableHead className="px-3 py-1.5 text-right">현재가</TableHead>
-                        <TableHead className="px-3 py-1.5 text-right">평가금액</TableHead>
                         <TableHead className="px-3 py-1.5 w-[140px]">수정/삭제</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1295,12 +1295,31 @@ export default function Home() {
                               </>
                             )}
                           </TableCell>
+                          <TableCell className="px-3 py-1.5 text-right align-top">
+                            <p className="text-[16px] font-semibold tabular-nums leading-none">
+                              ₩{Math.round(position.valueKrw).toLocaleString()}
+                            </p>
+                          </TableCell>
                           <TableCell className="px-2 py-1.5 align-middle">
                             <div className="flex justify-center">
                               <IntradaySparkline
                                 points={marketQuery.data?.intraday?.[position.symbol] ?? []}
                               />
                             </div>
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 align-top">
+                            <LivePriceCell
+                              currency={position.currency}
+                              price={position.currentPrice}
+                              previousClose={position.previousClose}
+                              krwLine={
+                                position.currency === "USD"
+                                  ? `₩${Math.round(
+                                      position.currentPrice * usdKrw,
+                                    ).toLocaleString()}`
+                                  : undefined
+                              }
+                            />
                           </TableCell>
                           <TableCell className="px-3 py-1.5 text-right">
                             {isEditing ? (
@@ -1410,25 +1429,6 @@ export default function Home() {
                             ) : (
                               "—"
                             )}
-                          </TableCell>
-                          <TableCell className="px-3 py-1.5 align-top">
-                            <LivePriceCell
-                              currency={position.currency}
-                              price={position.currentPrice}
-                              previousClose={position.previousClose}
-                              krwLine={
-                                position.currency === "USD"
-                                  ? `₩${Math.round(
-                                      position.currentPrice * usdKrw,
-                                    ).toLocaleString()}`
-                                  : undefined
-                              }
-                            />
-                          </TableCell>
-                          <TableCell className="px-3 py-1.5 text-right align-top">
-                            <p className="text-[16px] font-semibold tabular-nums leading-none">
-                              ₩{Math.round(position.valueKrw).toLocaleString()}
-                            </p>
                           </TableCell>
                           <TableCell className="px-3 py-1.5">
                             {isEditing ? (
