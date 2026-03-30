@@ -1578,7 +1578,7 @@ export default function Home() {
                                   onChange={(e) => setEditSymbol(e.target.value)}
                                 />
                                 <input
-                                  className="w-32 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground"
+                                  className="w-40 rounded-md border bg-background px-2 py-1.5 text-sm font-medium text-foreground"
                                   placeholder="종목명"
                                   value={editName}
                                   onChange={(e) => setEditName(e.target.value)}
@@ -1592,7 +1592,9 @@ export default function Home() {
                               </div>
                             ) : (
                               <>
-                                <p className="font-medium">{position.name}</p>
+                                <p className="text-[15px] font-semibold leading-snug text-foreground sm:text-base">
+                                  {position.name}
+                                </p>
                                 <p className="text-xs text-muted-foreground">{position.symbol}</p>
                                 {position.chartGroup && (
                                   <p className="mt-0.5 w-fit rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
