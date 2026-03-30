@@ -7,27 +7,51 @@ function isKrxCommodity(symbol: string): boolean {
   return /^M\d{8}$/i.test(symbol.trim());
 }
 
-/** 네이버 금융 API로 KRX 상품 시세 조회 */
-async function fetchNaverPrice(code: string): Promise<ChartQuote> {
+/**
+ * 네이버 금융 KRX 금현물 일별시세 페이지에서 최근 표준가격(KRW/g) 파싱
+ * goldDailyQuote.nhn HTML: <td class="date">YYYY.MM.DD</td><td class="num">NNN,NNN.NN</td>
+ */
+async function fetchNaverGoldPrice(): Promise<ChartQuote> {
   try {
-    const url = `https://m.stock.naver.com/api/stock/${code.toUpperCase()}/basic`;
+    const url = "https://finance.naver.com/marketindex/goldDailyQuote.nhn?page=1";
     const res = await fetch(url, {
       method: "GET",
       cache: "no-store",
-      headers: { "User-Agent": "Mozilla/5.0" },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Referer": "https://finance.naver.com/",
+      },
     });
     if (!res.ok) return { price: null, currency: null };
-    const data = await res.json();
-    // closePrice는 쉼표 포함 문자열일 수 있음 (예: "127,500")
-    const raw = data?.closePrice ?? data?.currentPrice ?? data?.stockEndPrice;
-    const price = raw ? parseFloat(String(raw).replace(/,/g, "")) : null;
+
+    // EUC-KR로 인코딩된 HTML이지만 숫자는 ASCII이므로 UTF-8로도 파싱 가능
+    const html = await res.text();
+
+    // 패턴: <td class="date">2026.03.30</td> 다음에 오는 <td class="num">221,008.87</td>
+    const match = html.match(
+      /<td class="date">\d{4}\.\d{2}\.\d{2}<\/td>\s*<td class="num">([\d,]+(?:\.\d+)?)<\/td>/,
+    );
+    if (!match) return { price: null, currency: null };
+
+    const price = parseFloat(match[1].replace(/,/g, ""));
     return {
-      price: Number.isFinite(price) && price !== null ? price : null,
+      price: Number.isFinite(price) ? price : null,
       currency: "KRW",
     };
   } catch {
     return { price: null, currency: null };
   }
+}
+
+/** KRX 상품 코드별 시세 조회 라우팅 */
+async function fetchNaverPrice(code: string): Promise<ChartQuote> {
+  // M04020000 = KRX 금현물(금 99.99 1kg) — 일별시세 HTML에서 파싱
+  if (/^M040200/i.test(code)) {
+    return fetchNaverGoldPrice();
+  }
+  // 다른 KRX 상품 코드는 현재 지원 안 함
+  return { price: null, currency: null };
 }
 
 function toYahooSymbol(symbol: string): string {
