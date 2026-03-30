@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   Cell,
   Pie,
@@ -81,6 +82,12 @@ export function FamilyAllocationDonut({
   data: AllocationSlice[];
   total: number;
 }) {
+  /** 큰 비율이 12시에서 시작해 시계 방향으로 갈수록 작아지도록 정렬 */
+  const chartData = useMemo(
+    () => [...data].sort((a, b) => b.value - a.value),
+    [data],
+  );
+
   if (data.length === 0) {
     return (
       <div
@@ -126,10 +133,9 @@ export function FamilyAllocationDonut({
         `,
       }}
     >
-      {/* 상단 글래스 범례 — 비중 내림차순 */}
+      {/* 상단 글래스 범례 — 차트와 동일: 비중 내림차순 */}
       <div className="mb-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 backdrop-blur-md">
-        {[...data].sort((a, b) => b.weight - a.weight).map((d) => {
-          const i = data.indexOf(d);
+        {chartData.map((d, i) => {
           const c = NEON_PALETTE[i % NEON_PALETTE.length];
           return (
             <div key={d.name} className="flex items-center gap-2 text-[11px] font-medium tracking-tight text-zinc-200">
@@ -153,13 +159,15 @@ export function FamilyAllocationDonut({
         <ResponsiveContainer width="100%" height="100%">
           <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
             <Pie
-              data={data}
+              data={chartData}
               dataKey="value"
               nameKey="name"
               cx="50%"
               cy="50%"
               innerRadius="58%"
               outerRadius="82%"
+              startAngle={90}
+              endAngle={-270}
               paddingAngle={2.5}
               stroke="rgba(255,255,255,0.12)"
               strokeWidth={1}
@@ -196,7 +204,7 @@ export function FamilyAllocationDonut({
                 );
               }}
             >
-              {data.map((entry, index) => {
+              {chartData.map((entry, index) => {
                 const c = NEON_PALETTE[index % NEON_PALETTE.length];
                 return (
                   <Cell
