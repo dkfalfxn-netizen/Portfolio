@@ -354,6 +354,39 @@ function mergeDuplicatePositions(positions: Position[]): Position[] {
   return Array.from(map.values());
 }
 
+/** 종목 추가 폼: 한 건을 기존 목록에 병합하거나 새 줄 추가 */
+function applyPositionUpsert(prev: Position[], nextEntry: Position): Position[] {
+  const key = makePositionKey(nextEntry);
+  const idx = prev.findIndex((p) => makePositionKey(p) === key);
+  if (idx === -1) return [...prev, nextEntry];
+  const existing = prev[idx];
+  const newQty = existing.quantity + nextEntry.quantity;
+  const newAvg =
+    (existing.quantity * existing.avgPrice + nextEntry.quantity * nextEntry.avgPrice) / newQty;
+  const mergedPurchase = blendPurchaseUsdKrw(existing, nextEntry);
+  const mergedEur = blendPurchaseEurKrw(existing, nextEntry);
+  const merged: Position = {
+    ...existing,
+    quantity: newQty,
+    avgPrice: newAvg,
+    currentPrice: existing.currentPrice,
+    name: nextEntry.name || existing.name,
+  };
+  if (nextEntry.currency === "USD") {
+    const px = mergedPurchase ?? existing.purchaseUsdKrw ?? nextEntry.purchaseUsdKrw;
+    if (px != null && px > 0) merged.purchaseUsdKrw = px;
+    delete merged.purchaseEurKrw;
+  } else if (nextEntry.currency === "EUR") {
+    const px = mergedEur ?? existing.purchaseEurKrw ?? nextEntry.purchaseEurKrw;
+    if (px != null && px > 0) merged.purchaseEurKrw = px;
+    delete merged.purchaseUsdKrw;
+  } else {
+    delete merged.purchaseUsdKrw;
+    delete merged.purchaseEurKrw;
+  }
+  return prev.map((p, i) => (i === idx ? merged : p));
+}
+
 function isValidPosition(value: unknown): value is Position {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<Position>;
@@ -560,7 +593,8 @@ export default function Home() {
     currency: "USD" as "USD" | "EUR" | "KRW",
     accountType: "해외주식" as "해외주식" | "국내주식",
     accountName: "미국주식-주계좌",
-    owner: "김승주" as OwnerName,
+    /** 종목 추가 시 한 번에 넣을 담당자(복수) */
+    selectedOwners: ["김승주"] as OwnerName[],
   });
 
   const marketSymbols = useMemo(
@@ -973,22 +1007,6 @@ export default function Home() {
     }
   }
 
-  function handleResetToDefaultPositions() {
-    if (
-      !window.confirm(
-        "브라우저에 저장된 종목을 모두 지우고, 앱에 포함된 기본 예시 종목으로 바꿉니다.\n\n" +
-          "동기화 키로 서버에 이미 올린 데이터가 있으면, 나중에 「서버에서 불러오기」를 하면 서버 내용이 다시 덮어씁니다.\n\n" +
-          "계속할까요?",
-      )
-    ) {
-      return;
-    }
-    const next = mergeDuplicatePositions(DEFAULT_POSITIONS);
-    setPositions(next);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    setSyncMessage("기본 예시 종목으로 로컬을 초기화했습니다.");
-  }
-
   async function handleSaveSyncKey() {
     const k = syncKeyDraft.trim();
     if (k.length < 8) {
@@ -1148,9 +1166,12 @@ export default function Home() {
       if (!Number.isFinite(purchaseEurKrwNum) || purchaseEurKrwNum <= 0) return;
     }
 
+    const ownersOrdered = OWNER_NAMES.filter((o) => form.selectedOwners.includes(o));
+    if (ownersOrdered.length === 0) return;
+
     const symbol = form.symbol.trim().toUpperCase();
     const accountName = form.accountName.trim() || "기본계좌";
-    const nextEntry: Position = {
+    const base: Omit<Position, "owner"> = {
       symbol,
       name: form.name.trim(),
       quantity,
@@ -1159,43 +1180,17 @@ export default function Home() {
       currency: form.currency,
       accountType: form.accountType,
       accountName,
-      owner: form.owner,
       ...(form.currency === "USD" ? { purchaseUsdKrw: purchaseUsdKrwNum } : {}),
       ...(form.currency === "EUR" ? { purchaseEurKrw: purchaseEurKrwNum } : {}),
     };
 
     setPositions((prev) => {
-      const key = makePositionKey(nextEntry);
-      const idx = prev.findIndex((p) => makePositionKey(p) === key);
-      if (idx === -1) return [...prev, nextEntry];
-      const existing = prev[idx];
-      const newQty = existing.quantity + quantity;
-      const newAvg =
-        (existing.quantity * existing.avgPrice + quantity * avgPrice) / newQty;
-      const mergedPurchase = blendPurchaseUsdKrw(existing, nextEntry);
-      const mergedEur = blendPurchaseEurKrw(existing, nextEntry);
-      const merged: Position = {
-        ...existing,
-        quantity: newQty,
-        avgPrice: newAvg,
-        currentPrice: existing.currentPrice,
-        name: form.name.trim() || existing.name,
-      };
-      if (nextEntry.currency === "USD") {
-        const px =
-          mergedPurchase ?? existing.purchaseUsdKrw ?? nextEntry.purchaseUsdKrw;
-        if (px != null && px > 0) merged.purchaseUsdKrw = px;
-        delete merged.purchaseEurKrw;
-      } else if (nextEntry.currency === "EUR") {
-        const px =
-          mergedEur ?? existing.purchaseEurKrw ?? nextEntry.purchaseEurKrw;
-        if (px != null && px > 0) merged.purchaseEurKrw = px;
-        delete merged.purchaseUsdKrw;
-      } else {
-        delete merged.purchaseUsdKrw;
-        delete merged.purchaseEurKrw;
+      let acc = prev;
+      for (const owner of ownersOrdered) {
+        const nextEntry: Position = { ...base, owner };
+        acc = applyPositionUpsert(acc, nextEntry);
       }
-      return prev.map((p, i) => (i === idx ? merged : p));
+      return acc;
     });
 
     setForm({
@@ -1208,7 +1203,7 @@ export default function Home() {
       currency: form.currency,
       accountType: form.accountType,
       accountName: form.accountName,
-      owner: form.owner,
+      selectedOwners: form.selectedOwners,
     });
   }
 
@@ -1412,19 +1407,6 @@ export default function Home() {
                   마지막 동기 시각: {new Date(lastSyncedAt).toLocaleString()}
                 </p>
               ) : null}
-              <div className="border-t border-dashed pt-3">
-                <p className="mb-2 text-xs text-muted-foreground">
-                  종목은 브라우저에만 저장됩니다. 코드에 넣은 기본 예시(강희진·김도율·김찬율 등)가
-                  화면에 안 보이면 예전 저장 데이터가 남아 있는 것입니다.
-                </p>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border border-amber-600/50 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-900 transition-all duration-100 hover:bg-amber-500/20 dark:text-amber-100"
-                  onClick={handleResetToDefaultPositions}
-                >
-                  기본 예시 종목으로 로컬 초기화
-                </button>
-              </div>
             </CardContent>
           </Card>
 
@@ -1904,7 +1886,8 @@ export default function Home() {
           <section className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-3 font-semibold">종목 추가</h2>
             <p className="mb-3 text-xs text-muted-foreground">
-              같은 티커·담당자·계좌(해외/국내+계좌명)·통화로 추가하면 기존 줄에{" "}
+              담당자를 여러 명 선택하면 같은 티커·수량·평단으로 각각 한 줄씩 추가됩니다.
+              같은 티커·담당자·계좌(해외/국내+계좌명)·통화로 다시 추가하면 기존 줄에{" "}
               <span className="font-medium text-foreground">수량이 더해지고 평단은 가중평균</span>으로
               갱신됩니다.
               국내 주식은 6자리 종목코드(예: <span className="font-medium text-foreground">005930</span>)
@@ -2001,24 +1984,37 @@ export default function Home() {
                 <option value="EUR">EUR</option>
                 <option value="KRW">KRW</option>
               </select>
-              <div className="col-span-2 flex flex-wrap gap-2 sm:col-span-3 md:col-span-6">
-                <select
-                  className="min-w-[7rem] rounded-md border bg-background px-3 py-2 text-sm"
-                  value={form.owner}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      owner: e.target.value as OwnerName,
-                    }))
-                  }
-                  aria-label="담당자"
-                >
+              <div className="col-span-2 flex flex-col gap-2 sm:col-span-3 md:col-span-6">
+                <span className="text-[11px] font-medium text-muted-foreground">담당자 (복수 선택)</span>
+                <div className="flex flex-wrap gap-x-3 gap-y-1.5">
                   {OWNER_NAMES.map((name) => (
-                    <option key={name} value={name}>
+                    <label
+                      key={name}
+                      className="flex cursor-pointer items-center gap-1.5 text-sm select-none"
+                    >
+                      <input
+                        type="checkbox"
+                        className="cursor-pointer accent-primary"
+                        checked={form.selectedOwners.includes(name)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setForm((prev) => {
+                            const next = checked
+                              ? OWNER_NAMES.filter(
+                                  (o) => prev.selectedOwners.includes(o) || o === name,
+                                )
+                              : prev.selectedOwners.filter((o) => o !== name);
+                            if (next.length === 0) return prev;
+                            return { ...prev, selectedOwners: next };
+                          });
+                        }}
+                      />
                       {name}
-                    </option>
+                    </label>
                   ))}
-                </select>
+                </div>
+              </div>
+              <div className="col-span-2 flex flex-wrap items-center gap-2 sm:col-span-3 md:col-span-6">
                 <select
                   className="min-w-[110px] rounded-md border bg-background px-3 py-2 text-sm"
                   value={form.accountType}
