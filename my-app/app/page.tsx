@@ -422,21 +422,25 @@ export default function Home() {
     return OWNER_NAMES.map((ownerName) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
       // 같은 티커(symbol)를 가진 종목은 차트에서 하나의 슬라이스로 합산
-      const symbolMap = new Map<string, { displayName: string; value: number }>();
+      const symbolMap = new Map<string, { displayName: string; allNames: string[]; value: number }>();
       for (const position of items) {
         const v = Math.max(0, Number.isFinite(position.valueKrw) ? position.valueKrw : 0);
         const existing = symbolMap.get(position.symbol);
         if (existing) {
           existing.value += v;
+          if (!existing.allNames.includes(position.name)) {
+            existing.allNames.push(position.name);
+          }
         } else {
-          symbolMap.set(position.symbol, { displayName: position.name, value: v });
+          symbolMap.set(position.symbol, { displayName: position.name, allNames: [position.name], value: v });
         }
       }
-      const stockSlices = Array.from(symbolMap.entries()).map(([symbol, { displayName, value }]) => ({
+      const stockSlices = Array.from(symbolMap.entries()).map(([symbol, { displayName, allNames, value }]) => ({
         /** Recharts·범례 충돌 방지를 위해 심볼+담당자 기준 고유 키 사용 */
         name: `stk|${symbol}|${ownerName}`,
         displayName,
         ticker: symbol,
+        allNames,
         value,
       }));
 
@@ -444,12 +448,13 @@ export default function Home() {
       const usd = Number.isFinite(c.usd) ? Math.max(0, c.usd) : 0;
       const krw = Number.isFinite(c.krw) ? Math.max(0, c.krw) : 0;
       const usdCashKrw = usd * usdKrw;
-      const extra: { name: string; displayName: string; ticker: string; value: number }[] = [];
+      const extra: { name: string; displayName: string; ticker: string; allNames: string[]; value: number }[] = [];
       if (usdCashKrw > 0) {
         extra.push({
           name: `cash-usd|${ownerName}`,
           displayName: "USD 현금",
           ticker: "USD 현금",
+          allNames: ["USD 현금"],
           value: usdCashKrw,
         });
       }
@@ -458,6 +463,7 @@ export default function Home() {
           name: `cash-krw|${ownerName}`,
           displayName: "KRW 현금",
           ticker: "KRW 현금",
+          allNames: ["KRW 현금"],
           value: krw,
         });
       }
@@ -872,6 +878,10 @@ export default function Home() {
     });
   }
 
+  function handleDeleteRow(rowKey: string) {
+    setPositions((prev) => prev.filter((p) => makePositionKey(p) !== rowKey));
+  }
+
   function startEditRow(p: Position) {
     const key = makePositionKey(p);
     setEditingRowKey(key);
@@ -970,7 +980,7 @@ export default function Home() {
                 </div>
                 <button
                   type="button"
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
+                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
                   onClick={handleSaveSyncKey}
                 >
                   키 저장
@@ -979,7 +989,7 @@ export default function Home() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className="rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                   disabled={syncBusy}
                   onClick={handlePullCloud}
                 >
@@ -987,7 +997,7 @@ export default function Home() {
                 </button>
                 <button
                   type="button"
-                  className="rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                   disabled={syncBusy}
                   onClick={handlePushCloud}
                 >
@@ -1164,7 +1174,7 @@ export default function Home() {
                 />
                 <button
                   type="submit"
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
+                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
                 >
                   추가
                 </button>
@@ -1224,7 +1234,7 @@ export default function Home() {
                   <p className="text-xs font-medium text-muted-foreground">알림 규칙</p>
                   <button
                     type="button"
-                    className="rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
+                    className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
                     onClick={() =>
                       setAlertRules((prev) => [
                         ...prev,
@@ -1316,7 +1326,7 @@ export default function Home() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                   disabled={alertBusy}
                   onClick={handleSaveAlertConfig}
                 >
@@ -1324,7 +1334,7 @@ export default function Home() {
                 </button>
                 <button
                   type="button"
-                  className="rounded-md border px-4 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  className="cursor-pointer rounded-md border px-4 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
                   disabled={alertBusy}
                   onClick={handleCheckAlertNow}
                 >
@@ -1388,8 +1398,8 @@ export default function Home() {
               </select>
               <button
                 type="button"
-                className="rounded-md border px-3 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95"
-                onClick={() => setSimForm({ symbol: "", name: "", quantity: "", avgPrice: "", currency: "USD", owner: "김승주" })}
+                  className="cursor-pointer rounded-md border px-3 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95"
+                  onClick={() => setSimForm({ symbol: "", name: "", quantity: "", avgPrice: "", currency: "USD", owner: "김승주" })}
               >
                 초기화
               </button>
@@ -1520,9 +1530,9 @@ export default function Home() {
                         <TableHead className="px-4 py-3 text-right">평단가</TableHead>
                         <TableHead className="px-4 py-3 text-right">매입환율</TableHead>
                         <TableHead className="px-4 py-3 text-right">현재가</TableHead>
+                        <TableHead className="px-4 py-3 text-right">평가금액</TableHead>
                         <TableHead className="px-4 py-3 text-right">수익률</TableHead>
-                        <TableHead className="px-4 py-3">계좌</TableHead>
-                        <TableHead className="px-4 py-3 w-[140px]">수정</TableHead>
+                        <TableHead className="px-4 py-3 w-[160px]">수정/삭제</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1531,6 +1541,7 @@ export default function Home() {
                           <TableCell
                             colSpan={8}
                             className="px-4 py-6 text-center text-sm text-muted-foreground"
+
                           >
                             등록된 종목이 없습니다.
                           </TableCell>
@@ -1628,6 +1639,11 @@ export default function Home() {
                               ).toLocaleString()}
                             </p>
                           </TableCell>
+                          <TableCell className="px-4 py-3 text-right">
+                            <p className="font-semibold">
+                              ₩{Math.round(position.valueKrw).toLocaleString()}
+                            </p>
+                          </TableCell>
                           <TableCell
                             className={`px-4 py-3 text-right font-semibold ${
                               position.pnl >= 0 ? "text-red-500" : "text-blue-500"
@@ -1650,37 +1666,41 @@ export default function Home() {
                               `${position.pnl.toFixed(2)}%`
                             )}
                           </TableCell>
-                          <TableCell className="px-4 py-3 text-sm">
-                            <span className="text-muted-foreground">{position.accountType}</span>
-                            <span className="mx-1">·</span>
-                            {position.accountName}
-                          </TableCell>
                           <TableCell className="px-4 py-3">
                             {isEditing ? (
                               <div className="flex flex-col gap-1">
                                 <button
                                   type="button"
-                                  className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
+                                  className="cursor-pointer rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
                                   onClick={saveEditRow}
                                 >
                                   저장
                                 </button>
                                 <button
                                   type="button"
-                                  className="rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
+                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
                                   onClick={cancelEditRow}
                                 >
                                   취소
                                 </button>
                               </div>
                             ) : (
-                              <button
-                                type="button"
-                                className="rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
-                                onClick={() => startEditRow(position)}
-                              >
-                                수정
-                              </button>
+                              <div className="flex flex-col gap-1">
+                                <button
+                                  type="button"
+                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
+                                  onClick={() => startEditRow(position)}
+                                >
+                                  수정
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs text-destructive transition-all duration-100 hover:bg-destructive/10 active:scale-95"
+                                  onClick={() => handleDeleteRow(rowKey)}
+                                >
+                                  삭제
+                                </button>
+                              </div>
                             )}
                           </TableCell>
                         </TableRow>

@@ -23,6 +23,7 @@ export type AllocationSlice = {
   name: string;
   displayName: string;
   ticker: string;
+  allNames: string[];
   value: number;
   weight: number;
 };
@@ -44,7 +45,15 @@ function NeonTooltip({
   const p = payload[0].payload;
   return (
     <div className="rounded-lg border border-white/15 bg-zinc-950/95 px-3 py-2 text-xs shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md">
-      <p className="font-semibold text-foreground">{p.displayName}</p>
+      {p.allNames.length > 1 ? (
+        <div className="mb-1 space-y-0.5">
+          {p.allNames.map((n) => (
+            <p key={n} className="font-semibold text-foreground">{n}</p>
+          ))}
+        </div>
+      ) : (
+        <p className="mb-1 font-semibold text-foreground">{p.displayName}</p>
+      )}
       <p className="text-muted-foreground">
         {formatKrw(p.value)} · {p.weight.toFixed(1)}%
       </p>
