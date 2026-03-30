@@ -1242,7 +1242,6 @@ export default function Home() {
                         <TableHead className="px-3 py-1.5 text-right">매입환율</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">현재가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">평가금액</TableHead>
-                        <TableHead className="px-3 py-1.5">계좌</TableHead>
                         <TableHead className="px-3 py-1.5 w-[140px]">수정/삭제</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1250,7 +1249,7 @@ export default function Home() {
                       {group.items.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={10}
+                            colSpan={9}
                             className="px-3 py-4 text-center text-xs text-muted-foreground"
                           >
                             등록된 종목이 없습니다.
@@ -1430,11 +1429,6 @@ export default function Home() {
                             <p className="text-[16px] font-semibold tabular-nums leading-none">
                               ₩{Math.round(position.valueKrw).toLocaleString()}
                             </p>
-                          </TableCell>
-                          <TableCell className="px-3 py-1.5 text-sm">
-                            <span className="text-muted-foreground">{position.accountType}</span>
-                            <span className="mx-1">·</span>
-                            {position.accountName}
                           </TableCell>
                           <TableCell className="px-3 py-1.5">
                             {isEditing ? (
