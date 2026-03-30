@@ -1,6 +1,11 @@
 "use client";
 
-/** 한국 시세 UI 관례: 상승 빨강, 하락 초록 */
+/** 한국 시세 앱 스타일: 상승 빨강(#ef5350 계열), 하락 청록(#00bfa5 계열) */
+const UP_BG = "bg-[#ef5350]";
+const DOWN_BG = "bg-[#00bfa5]";
+const UP_TEXT = "text-[#ef5350]";
+const DOWN_TEXT = "text-[#00bfa5]";
+
 export function LivePriceCell({
   currency,
   price,
@@ -23,26 +28,23 @@ export function LivePriceCell({
       ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
       : Math.round(n).toLocaleString();
 
-  const pillBg = !hasDay
+  const pillClass = !hasDay
     ? "bg-muted text-foreground"
     : up
-      ? "bg-red-600 text-white dark:bg-red-600"
-      : "bg-emerald-600 text-white dark:bg-emerald-600";
-  const subText = !hasDay
-    ? "text-muted-foreground"
-    : up
-      ? "text-red-600 dark:text-red-500"
-      : "text-emerald-600 dark:text-emerald-600";
+      ? `${UP_BG} text-white shadow-[0_1px_3px_rgba(239,83,80,0.45)]`
+      : `${DOWN_BG} text-white shadow-[0_1px_3px_rgba(0,191,165,0.4)]`;
+
+  const subClass = !hasDay ? "text-muted-foreground" : up ? UP_TEXT : DOWN_TEXT;
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex w-full min-w-[6.5rem] flex-col items-end gap-0.5">
       <div
-        className={`min-w-[5.5rem] rounded-full px-3 py-1.5 text-right font-bold tabular-nums shadow-sm ${pillBg}`}
+        className={`w-full max-w-[9rem] rounded-xl px-3 py-2 text-center text-[15px] font-semibold leading-none tracking-tight text-white tabular-nums ${pillClass}`}
       >
         {fmt(price)}
       </div>
       {change != null && changePct != null ? (
-        <p className={`text-xs font-medium tabular-nums ${subText}`}>
+        <p className={`text-[11px] font-semibold tabular-nums ${subClass}`}>
           {up ? "+" : ""}
           {fmt(change)} · {up ? "+" : ""}
           {changePct.toFixed(2)}%
@@ -50,7 +52,9 @@ export function LivePriceCell({
       ) : (
         <p className="text-[10px] text-muted-foreground">전일 종가 없음</p>
       )}
-      {krwLine ? <p className="text-[10px] text-muted-foreground">원화 {krwLine}</p> : null}
+      {krwLine ? (
+        <p className="text-[10px] leading-tight text-muted-foreground">원화 {krwLine}</p>
+      ) : null}
     </div>
   );
 }
