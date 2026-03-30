@@ -319,7 +319,6 @@ export default function Home() {
     name: "",
     quantity: "",
     avgPrice: "",
-    currentPrice: "",
     purchaseUsdKrw: "",
     currency: "USD" as "USD" | "KRW",
     accountType: "해외주식" as "해외주식" | "국내주식",
@@ -422,16 +421,25 @@ export default function Home() {
   const allocationByOwner = useMemo(() => {
     return OWNER_NAMES.map((ownerName) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
-      const stockSlices = items.map((position, idx) => {
-        const v = position.valueKrw;
-        const value = Math.max(0, Number.isFinite(v) ? v : 0);
-        return {
-          /** Recharts·범례 충돌 방지: 계좌까지 포함한 고유 키 */
-          name: `stk|${position.symbol}|${position.accountType}|${position.accountName}|${idx}`,
-          displayName: position.name,
-          value,
-        };
-      });
+      // 같은 티커(symbol)를 가진 종목은 차트에서 하나의 슬라이스로 합산
+      const symbolMap = new Map<string, { displayName: string; value: number }>();
+      for (const position of items) {
+        const v = Math.max(0, Number.isFinite(position.valueKrw) ? position.valueKrw : 0);
+        const existing = symbolMap.get(position.symbol);
+        if (existing) {
+          existing.value += v;
+        } else {
+          symbolMap.set(position.symbol, { displayName: position.name, value: v });
+        }
+      }
+      const stockSlices = Array.from(symbolMap.entries()).map(([symbol, { displayName, value }]) => ({
+        /** Recharts·범례 충돌 방지를 위해 심볼+담당자 기준 고유 키 사용 */
+        name: `stk|${symbol}|${ownerName}`,
+        displayName,
+        ticker: symbol,
+        value,
+      }));
+
       const c = cashByOwner[ownerName];
       const usd = Number.isFinite(c.usd) ? Math.max(0, c.usd) : 0;
       const krw = Number.isFinite(c.krw) ? Math.max(0, c.krw) : 0;
@@ -441,6 +449,7 @@ export default function Home() {
         extra.push({
           name: `cash-usd|${ownerName}`,
           displayName: "USD 현금",
+          ticker: "USD 현금",
           value: usdCashKrw,
         });
       }
@@ -448,6 +457,7 @@ export default function Home() {
         extra.push({
           name: `cash-krw|${ownerName}`,
           displayName: "KRW 현금",
+          ticker: "KRW 현금",
           value: krw,
         });
       }
@@ -798,12 +808,10 @@ export default function Home() {
 
     const quantity = Number(form.quantity);
     const avgPrice = Number(form.avgPrice);
-    const currentPrice = Number(form.currentPrice);
 
     if (!form.symbol.trim() || !form.name.trim()) return;
     if (!Number.isFinite(quantity) || quantity <= 0) return;
     if (!Number.isFinite(avgPrice) || avgPrice <= 0) return;
-    if (!Number.isFinite(currentPrice) || currentPrice <= 0) return;
 
     const purchaseUsdKrwNum = Number(form.purchaseUsdKrw);
     if (form.currency === "USD") {
@@ -817,7 +825,7 @@ export default function Home() {
       name: form.name.trim(),
       quantity,
       avgPrice,
-      currentPrice: currentPrice || avgPrice,
+      currentPrice: avgPrice,
       currency: form.currency,
       accountType: form.accountType,
       accountName,
@@ -838,7 +846,7 @@ export default function Home() {
         ...existing,
         quantity: newQty,
         avgPrice: newAvg,
-        currentPrice: currentPrice || existing.currentPrice,
+        currentPrice: existing.currentPrice,
         name: form.name.trim() || existing.name,
       };
       if (nextEntry.currency === "USD") {
@@ -856,7 +864,6 @@ export default function Home() {
       name: "",
       quantity: "",
       avgPrice: "",
-      currentPrice: "",
       purchaseUsdKrw: "",
       currency: form.currency,
       accountType: form.accountType,
@@ -1067,7 +1074,7 @@ export default function Home() {
             </p>
             <form
               onSubmit={handleSubmit}
-              className="grid grid-cols-1 gap-3 md:grid-cols-7"
+              className="grid grid-cols-1 gap-3 md:grid-cols-6"
             >
               <input
                 className="rounded-md border bg-background px-3 py-2 text-sm"
@@ -1101,18 +1108,6 @@ export default function Home() {
                 placeholder="평단가"
                 value={form.avgPrice}
                 onChange={(e) => setForm((prev) => ({ ...prev, avgPrice: e.target.value }))}
-                required
-              />
-              <input
-                type="number"
-                min="0.000001"
-                step="any"
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="현재가"
-                value={form.currentPrice}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, currentPrice: e.target.value }))
-                }
                 required
               />
               <select
@@ -1175,7 +1170,7 @@ export default function Home() {
                 </button>
               </div>
               {form.currency === "USD" ? (
-                <div className="mt-3 flex flex-col gap-1 md:col-span-7">
+                <div className="mt-3 flex flex-col gap-1 md:col-span-6">
                   <label className="text-xs font-medium text-muted-foreground">
                     매입 환율 (USD 1달러당 원화, 매수 시점)
                   </label>

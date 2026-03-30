@@ -22,6 +22,7 @@ const NEON_PALETTE = [
 export type AllocationSlice = {
   name: string;
   displayName: string;
+  ticker: string;
   value: number;
   weight: number;
 };
@@ -118,8 +119,8 @@ export function FamilyAllocationDonut({
                   boxShadow: `0 0 10px ${c}, 0 0 4px ${c}`,
                 }}
               />
-              <span>
-                {d.displayName}{" "}
+              <span title={d.displayName}>
+                {d.ticker}{" "}
                 <span className="text-zinc-400">{d.weight.toFixed(1)}%</span>
               </span>
             </div>
