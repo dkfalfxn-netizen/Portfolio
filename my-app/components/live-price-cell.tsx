@@ -37,14 +37,14 @@ export function LivePriceCell({
   const subClass = !hasDay ? "text-muted-foreground" : up ? UP_TEXT : DOWN_TEXT;
 
   return (
-    <div className="flex w-full min-w-[6.5rem] flex-col items-end gap-0.5">
+    <div className="flex w-full min-w-[6.5rem] flex-col items-end gap-1">
       <div
-        className={`w-full max-w-[9rem] rounded-xl px-3 py-2 text-center text-[15px] font-semibold leading-none tracking-tight text-white tabular-nums ${pillClass}`}
+        className={`w-full max-w-[8.5rem] rounded-xl px-2.5 py-1.5 text-center text-[12px] font-semibold leading-tight tracking-tight text-white tabular-nums ${pillClass}`}
       >
         {fmt(price)}
       </div>
       {change != null && changePct != null ? (
-        <p className={`text-[11px] font-semibold tabular-nums ${subClass}`}>
+        <p className={`text-[15px] font-bold leading-tight tabular-nums ${subClass}`}>
           {up ? "+" : ""}
           {fmt(change)} · {up ? "+" : ""}
           {changePct.toFixed(2)}%
