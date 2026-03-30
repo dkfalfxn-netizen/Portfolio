@@ -1553,6 +1553,15 @@ export default function Home() {
                           {Math.round(group.sectionCashKrw).toLocaleString()})
                         </span>
                       </p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        ≈{" "}
+                        {(group.sectionTotal / usdKrw).toLocaleString("en-US", {
+                          style: "currency",
+                          currency: "USD",
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </p>
                       <p className="font-semibold tabular-nums">
                         총 평가(주식+현금) ₩{Math.round(group.sectionTotal).toLocaleString()}
                       </p>
