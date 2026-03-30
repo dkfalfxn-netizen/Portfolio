@@ -8,8 +8,9 @@ function toYahooSymbol(symbol: string): string {
   if (normalized.startsWith("KRX:")) {
     return `${normalized.replace("KRX:", "")}.KS`;
   }
-  // 6자리 숫자 단독 입력 → KOSPI(.KS) 자동 변환 (예: 005930 → 005930.KS)
-  if (/^\d{6}$/.test(normalized)) {
+  // 6자리 영숫자(숫자로 시작) → KOSPI(.KS) 자동 변환
+  // 예: 005930, 488500, 0022T0, 0118S0, 0118Z0 등 KRX 코드 패턴
+  if (/^[0-9][0-9A-Z]{5}$/.test(normalized)) {
     return `${normalized}.KS`;
   }
   // KOSDAQ 접두사 지원 (예: KQ:293490)
