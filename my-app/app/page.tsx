@@ -325,6 +325,29 @@ function formatKrwApproxAsUsd(krw: number, usdKrwRate: number): string {
   return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** 종목 평가액을 통화 기준(수량×현재가) — USD/EUR 행에 표시 */
+function formatPositionMarketValueForeign(
+  position: Pick<Position, "currency" | "quantity" | "currentPrice">,
+): string | null {
+  if (position.currency !== "USD" && position.currency !== "EUR") return null;
+  const v = position.quantity * position.currentPrice;
+  if (!Number.isFinite(v)) return null;
+  if (position.currency === "USD") {
+    return v.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  return v.toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 /** 같은 담당자·같은 티커·같은 계좌·같은 통화면 한 줄로 합칩니다(가중 평단). */
 function makePositionKey(p: Pick<Position, "owner" | "symbol" | "accountType" | "accountName" | "currency">) {
   return `${p.owner}|${p.symbol}|${p.accountType}|${p.accountName}|${p.currency}`;
@@ -1684,6 +1707,7 @@ export default function Home() {
                               const posIdx = displayItems.indexOf(position);
                               const rowKey = makePositionKey(position);
                               const isEditing = editingRowKey === rowKey;
+                              const foreignMarketValue = formatPositionMarketValueForeign(position);
                               return (
                         <TableRow key={rowKey} className="group/row">
                           <TableCell className="px-3 py-1.5">
@@ -1721,6 +1745,11 @@ export default function Home() {
                             <p className="text-[16px] font-semibold tabular-nums leading-none">
                               ₩{Math.round(position.valueKrw).toLocaleString()}
                             </p>
+                            {foreignMarketValue ? (
+                              <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+                                {foreignMarketValue}
+                              </p>
+                            ) : null}
                           </TableCell>
                           <TableCell className="px-2 py-1.5 align-middle">
                             <div className="flex justify-center">
