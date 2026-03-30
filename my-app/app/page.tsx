@@ -296,6 +296,24 @@ export default function Home() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const pushDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 알림 설정 상태
+  type AlertRule = { owner: string; symbol: string; minPct: string; maxPct: string };
+  const [alertEmail, setAlertEmail] = useState("");
+  const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
+  const [alertBusy, setAlertBusy] = useState(false);
+  const [alertMessage, setAlertMessage] = useState("");
+  const [alertLoaded, setAlertLoaded] = useState(false);
+
+  // 가상 매수 시뮬레이터 상태
+  const [simForm, setSimForm] = useState({
+    symbol: "",
+    name: "",
+    quantity: "",
+    avgPrice: "",
+    currency: "USD" as "USD" | "KRW",
+    owner: "김승주" as OwnerName,
+  });
+
   const [form, setForm] = useState({
     symbol: "",
     name: "",
@@ -649,6 +667,131 @@ export default function Home() {
     setCloudSyncKey(k);
     setSyncMessage("키를 저장했습니다. 다른 기기에도 같은 키를 입력하세요.");
   }
+
+  // 알림 설정 불러오기 (동기화 키가 준비되면 한 번)
+  useEffect(() => {
+    if (!syncReady || !cloudSyncKey || alertLoaded) return;
+    setAlertLoaded(true);
+    void (async () => {
+      try {
+        const r = await fetch(`/api/alert/config?sync_key=${encodeURIComponent(cloudSyncKey)}`);
+        if (!r.ok) return;
+        const j = (await r.json()) as { found?: boolean; email?: string; rules?: AlertRule[] };
+        if (j.found) {
+          setAlertEmail(j.email ?? "");
+          setAlertRules(
+            (j.rules ?? []).map((rule) => ({
+              owner: rule.owner ?? "전체",
+              symbol: rule.symbol ?? "전체",
+              minPct: rule.minPct != null ? String(rule.minPct) : "",
+              maxPct: rule.maxPct != null ? String(rule.maxPct) : "",
+            })),
+          );
+        }
+      } catch {
+        // 네트워크 오류는 조용히 무시
+      }
+    })();
+  }, [syncReady, cloudSyncKey, alertLoaded]);
+
+  async function handleSaveAlertConfig() {
+    if (!cloudSyncKey || cloudSyncKey.length < 8) {
+      setAlertMessage("먼저 동기화 키를 저장해 주세요.");
+      return;
+    }
+    if (!alertEmail.includes("@")) {
+      setAlertMessage("유효한 이메일을 입력하세요.");
+      return;
+    }
+    setAlertBusy(true);
+    try {
+      const rules = alertRules
+        .filter((r) => r.owner && r.symbol)
+        .map((r) => ({
+          owner: r.owner,
+          symbol: r.symbol,
+          ...(r.minPct !== "" ? { minPct: Number(r.minPct) } : {}),
+          ...(r.maxPct !== "" ? { maxPct: Number(r.maxPct) } : {}),
+        }));
+      const res = await fetch("/api/alert/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_key: cloudSyncKey, email: alertEmail, rules }),
+      });
+      const j = (await res.json()) as { error?: string };
+      setAlertMessage(res.ok ? "알림 설정을 저장했습니다." : (j.error ?? "저장 실패"));
+    } catch {
+      setAlertMessage("네트워크 오류입니다.");
+    } finally {
+      setAlertBusy(false);
+    }
+  }
+
+  async function handleCheckAlertNow() {
+    if (!cloudSyncKey || cloudSyncKey.length < 8) {
+      setAlertMessage("먼저 동기화 키를 저장해 주세요.");
+      return;
+    }
+    setAlertBusy(true);
+    try {
+      const res = await fetch("/api/alert/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_key: cloudSyncKey }),
+      });
+      const j = (await res.json()) as { results?: { violations: number; sent: boolean }[]; error?: string };
+      if (!res.ok) {
+        setAlertMessage(j.error ?? "확인 실패");
+        return;
+      }
+      const r = j.results?.[0];
+      if (!r) {
+        setAlertMessage("저장된 알림 규칙이 없습니다.");
+      } else if (r.violations === 0) {
+        setAlertMessage("현재 이탈 종목 없음 — 모든 비중이 정상 범위입니다.");
+      } else {
+        setAlertMessage(
+          `${r.violations}건 이탈 감지${r.sent ? " — 이메일을 발송했습니다." : " — 이메일 발송 실패(RESEND_API_KEY 확인)"}`,
+        );
+      }
+    } catch {
+      setAlertMessage("네트워크 오류입니다.");
+    } finally {
+      setAlertBusy(false);
+    }
+  }
+
+  // 가상 매수 시뮬레이션 계산
+  const simResult = useMemo(() => {
+    const qty = Number(simForm.quantity);
+    const price = Number(simForm.avgPrice);
+    if (!simForm.symbol || !qty || !price || qty <= 0 || price <= 0) return null;
+
+    const simValueKrw = qty * price * (simForm.currency === "USD" ? usdKrw : 1);
+    const ownerData = positionsByOwner.find((g) => g.ownerName === simForm.owner);
+    if (!ownerData) return null;
+
+    const beforeTotal = ownerData.sectionTotal;
+    const afterTotal = beforeTotal + simValueKrw;
+
+    const rows = ownerData.items.map((p) => {
+      const beforePct = beforeTotal > 0 ? (p.valueKrw / beforeTotal) * 100 : 0;
+      const afterPct = afterTotal > 0 ? (p.valueKrw / afterTotal) * 100 : 0;
+      return { label: `${p.name} (${p.symbol})`, beforePct, afterPct, delta: afterPct - beforePct };
+    });
+
+    // 추가될 종목의 비중
+    const newBeforePct = 0;
+    const newAfterPct = afterTotal > 0 ? (simValueKrw / afterTotal) * 100 : 0;
+    rows.push({
+      label: `${simForm.symbol.toUpperCase()} (신규)`,
+      beforePct: newBeforePct,
+      afterPct: newAfterPct,
+      delta: newAfterPct,
+    });
+
+    return { beforeTotal, afterTotal, simValueKrw, rows };
+  }, [simForm, positionsByOwner, usdKrw]);
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1059,6 +1202,251 @@ export default function Home() {
               현금(USD·KRW)은 아래 각 보유 종목 표 상단에서 입력합니다. 전체 현금
               합계(원화): ₩{Math.round(totalCashKrw).toLocaleString()}
             </p>
+          </section>
+
+          {/* 알림 설정 섹션 */}
+          <section className="rounded-2xl border bg-card p-4 shadow-sm">
+            <h2 className="mb-1 font-semibold">비중 이탈 이메일 알림</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              설정한 비중(%)을 벗어나면 매일 오전 9시(KST)에 이메일을 보내드립니다.
+              동기화 키가 저장되어 있어야 합니다.
+            </p>
+            <div className="space-y-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-muted-foreground" htmlFor="alert-email">수신 이메일</label>
+                <input
+                  id="alert-email"
+                  type="email"
+                  className="max-w-xs rounded-md border bg-background px-3 py-2 text-sm"
+                  placeholder="example@gmail.com"
+                  value={alertEmail}
+                  onChange={(e) => setAlertEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-muted-foreground">알림 규칙</p>
+                  <button
+                    type="button"
+                    className="rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
+                    onClick={() =>
+                      setAlertRules((prev) => [
+                        ...prev,
+                        { owner: "전체", symbol: "전체", minPct: "", maxPct: "" },
+                      ])
+                    }
+                  >
+                    + 규칙 추가
+                  </button>
+                </div>
+                {alertRules.length === 0 && (
+                  <p className="text-xs text-muted-foreground">규칙이 없습니다. 위 버튼으로 추가하세요.</p>
+                )}
+                {alertRules.map((rule, idx) => (
+                  <div key={idx} className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+                    <select
+                      className="rounded border bg-background px-2 py-1 text-xs"
+                      value={rule.owner}
+                      onChange={(e) =>
+                        setAlertRules((prev) =>
+                          prev.map((r, i) => (i === idx ? { ...r, owner: e.target.value } : r)),
+                        )
+                      }
+                    >
+                      <option value="전체">전체</option>
+                      {OWNER_NAMES.map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs text-muted-foreground">의</span>
+                    <input
+                      className="w-24 rounded border bg-background px-2 py-1 text-xs"
+                      placeholder="종목 (예: NVDA)"
+                      value={rule.symbol}
+                      onChange={(e) =>
+                        setAlertRules((prev) =>
+                          prev.map((r, i) =>
+                            i === idx ? { ...r, symbol: e.target.value.toUpperCase() } : r,
+                          ),
+                        )
+                      }
+                    />
+                    <span className="text-xs text-muted-foreground">비중이</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        className="w-16 rounded border bg-background px-2 py-1 text-xs text-right"
+                        placeholder="최소%"
+                        value={rule.minPct}
+                        onChange={(e) =>
+                          setAlertRules((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, minPct: e.target.value } : r)),
+                          )
+                        }
+                      />
+                      <span className="text-xs text-muted-foreground">~</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        className="w-16 rounded border bg-background px-2 py-1 text-xs text-right"
+                        placeholder="최대%"
+                        value={rule.maxPct}
+                        onChange={(e) =>
+                          setAlertRules((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, maxPct: e.target.value } : r)),
+                          )
+                        }
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground">를 벗어나면 알림</span>
+                    <button
+                      type="button"
+                      className="ml-auto rounded px-1.5 py-0.5 text-xs text-destructive transition-all hover:bg-destructive/10 active:scale-95"
+                      onClick={() =>
+                        setAlertRules((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                    >
+                      삭제
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  disabled={alertBusy}
+                  onClick={handleSaveAlertConfig}
+                >
+                  알림 설정 저장
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border px-4 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  disabled={alertBusy}
+                  onClick={handleCheckAlertNow}
+                >
+                  지금 확인 (수동)
+                </button>
+              </div>
+              {alertMessage && (
+                <p className="text-xs text-muted-foreground">{alertMessage}</p>
+              )}
+              {alertBusy && <p className="text-xs text-amber-600">처리 중…</p>}
+            </div>
+          </section>
+
+          {/* 가상 매수 시뮬레이터 섹션 */}
+          <section className="rounded-2xl border bg-card p-4 shadow-sm">
+            <h2 className="mb-1 font-semibold">가상 매수 시뮬레이터</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              종목을 추가로 매수했을 때의 예상 비중 변화를 미리 확인합니다.
+            </p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
+              <input
+                className="rounded-md border bg-background px-3 py-2 text-sm"
+                placeholder="티커 (예: NVDA)"
+                value={simForm.symbol}
+                onChange={(e) => setSimForm((p) => ({ ...p, symbol: e.target.value }))}
+              />
+              <input
+                type="number"
+                min="0"
+                step="any"
+                className="rounded-md border bg-background px-3 py-2 text-sm"
+                placeholder="수량"
+                value={simForm.quantity}
+                onChange={(e) => setSimForm((p) => ({ ...p, quantity: e.target.value }))}
+              />
+              <input
+                type="number"
+                min="0"
+                step="any"
+                className="rounded-md border bg-background px-3 py-2 text-sm"
+                placeholder="매수 단가"
+                value={simForm.avgPrice}
+                onChange={(e) => setSimForm((p) => ({ ...p, avgPrice: e.target.value }))}
+              />
+              <select
+                className="rounded-md border bg-background px-3 py-2 text-sm"
+                value={simForm.currency}
+                onChange={(e) => setSimForm((p) => ({ ...p, currency: e.target.value as "USD" | "KRW" }))}
+              >
+                <option value="USD">USD</option>
+                <option value="KRW">KRW</option>
+              </select>
+              <select
+                className="rounded-md border bg-background px-3 py-2 text-sm"
+                value={simForm.owner}
+                onChange={(e) => setSimForm((p) => ({ ...p, owner: e.target.value as OwnerName }))}
+              >
+                {OWNER_NAMES.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="rounded-md border px-3 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95"
+                onClick={() => setSimForm({ symbol: "", name: "", quantity: "", avgPrice: "", currency: "USD", owner: "김승주" })}
+              >
+                초기화
+              </button>
+            </div>
+
+            {simResult && (
+              <div className="mt-4 space-y-2">
+                <p className="text-sm font-medium">
+                  {simForm.owner} 총 평가: ₩{Math.round(simResult.beforeTotal).toLocaleString()}
+                  {" → "}
+                  <span className="text-primary">₩{Math.round(simResult.afterTotal).toLocaleString()}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    (매수 금액 ₩{Math.round(simResult.simValueKrw).toLocaleString()} 추가)
+                  </span>
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-xs text-muted-foreground">
+                        <th className="pb-1 text-left font-medium">종목</th>
+                        <th className="pb-1 text-right font-medium">현재 비중</th>
+                        <th className="pb-1 text-right font-medium">매수 후 비중</th>
+                        <th className="pb-1 text-right font-medium">변화</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {simResult.rows.map((row) => (
+                        <tr key={row.label} className="border-b last:border-0">
+                          <td className="py-1.5 pr-4">{row.label}</td>
+                          <td className="py-1.5 text-right text-muted-foreground">
+                            {row.beforePct.toFixed(1)}%
+                          </td>
+                          <td className="py-1.5 text-right font-medium text-primary">
+                            {row.afterPct.toFixed(1)}%
+                          </td>
+                          <td
+                            className={`py-1.5 text-right text-xs font-medium ${
+                              row.delta > 0 ? "text-red-500" : row.delta < 0 ? "text-blue-500" : "text-muted-foreground"
+                            }`}
+                          >
+                            {row.delta > 0 ? "+" : ""}{row.delta.toFixed(1)}%p
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {!simResult && simForm.symbol && (
+              <p className="mt-3 text-xs text-muted-foreground">수량과 매수 단가를 입력하면 결과가 표시됩니다.</p>
+            )}
           </section>
 
           <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
