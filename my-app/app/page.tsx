@@ -54,7 +54,9 @@ type MarketResponse = {
   fetchedAt: number;
 };
 
-const STORAGE_KEY = "portfolio_positions_v1";
+/** 로컬 저장 키 — v1에서 한 번만 마이그레이션 후 v2만 사용 */
+const STORAGE_KEY = "portfolio_positions_v2";
+const LEGACY_POSITIONS_STORAGE_KEY = "portfolio_positions_v1";
 const CASH_STORAGE_KEY = "portfolio_cash_v1";
 const SYNC_KEY_STORAGE = "portfolio_sync_key_v1";
 const AUTO_SYNC_STORAGE = "portfolio_auto_sync_v1";
@@ -382,65 +384,77 @@ function isValidPosition(value: unknown): value is Position {
   );
 }
 
+function parsePositionsArray(parsed: unknown): Position[] {
+  if (!Array.isArray(parsed)) return DEFAULT_POSITIONS;
+  const migrated = parsed
+    .map((item) => {
+      if (isValidPosition(item)) return item;
+      if (item && typeof item === "object") {
+        const p = item as Partial<Position> & { account?: string };
+        const withOwner: Partial<Position> = {
+          ...p,
+          owner: isOwnerName(p.owner) ? p.owner : "김승주",
+        };
+        if (isValidPosition(withOwner)) return withOwner as Position;
+      }
+      if (!item || typeof item !== "object") return null;
+      const legacy = item as {
+        symbol?: unknown;
+        name?: unknown;
+        quantity?: unknown;
+        avgPrice?: unknown;
+        currentPrice?: unknown;
+        currency?: unknown;
+        account?: unknown;
+      };
+      if (
+        typeof legacy.symbol !== "string" ||
+        typeof legacy.name !== "string" ||
+        typeof legacy.quantity !== "number" ||
+        typeof legacy.avgPrice !== "number" ||
+        typeof legacy.currentPrice !== "number" ||
+        (legacy.currency !== "USD" &&
+          legacy.currency !== "EUR" &&
+          legacy.currency !== "KRW")
+      ) {
+        return null;
+      }
+      const accountType =
+        legacy.account === "국내주식" || legacy.currency === "KRW" ? "국내주식" : "해외주식";
+      const accountName =
+        accountType === "국내주식" ? "국내주식-주계좌" : "미국주식-주계좌";
+      return {
+        symbol: legacy.symbol,
+        name: legacy.name,
+        quantity: legacy.quantity,
+        avgPrice: legacy.avgPrice,
+        currentPrice: legacy.currentPrice,
+        currency: legacy.currency,
+        accountType,
+        accountName,
+        owner: "김승주",
+      } satisfies Position;
+    })
+    .filter((item): item is Position => item !== null);
+  const list = migrated.length > 0 ? migrated : DEFAULT_POSITIONS;
+  return mergeDuplicatePositions(list);
+}
+
 function loadPositions(): Position[] {
   if (typeof window === "undefined") return DEFAULT_POSITIONS;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_POSITIONS;
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return DEFAULT_POSITIONS;
-    const migrated = parsed
-      .map((item) => {
-        if (isValidPosition(item)) return item;
-        if (item && typeof item === "object") {
-          const p = item as Partial<Position> & { account?: string };
-          const withOwner: Partial<Position> = {
-            ...p,
-            owner: isOwnerName(p.owner) ? p.owner : "김승주",
-          };
-          if (isValidPosition(withOwner)) return withOwner as Position;
-        }
-        if (!item || typeof item !== "object") return null;
-        const legacy = item as {
-          symbol?: unknown;
-          name?: unknown;
-          quantity?: unknown;
-          avgPrice?: unknown;
-          currentPrice?: unknown;
-          currency?: unknown;
-          account?: unknown;
-        };
-        if (
-          typeof legacy.symbol !== "string" ||
-          typeof legacy.name !== "string" ||
-          typeof legacy.quantity !== "number" ||
-          typeof legacy.avgPrice !== "number" ||
-          typeof legacy.currentPrice !== "number" ||
-          (legacy.currency !== "USD" &&
-            legacy.currency !== "EUR" &&
-            legacy.currency !== "KRW")
-        ) {
-          return null;
-        }
-        const accountType =
-          legacy.account === "국내주식" || legacy.currency === "KRW" ? "국내주식" : "해외주식";
-        const accountName =
-          accountType === "국내주식" ? "국내주식-주계좌" : "미국주식-주계좌";
-        return {
-          symbol: legacy.symbol,
-          name: legacy.name,
-          quantity: legacy.quantity,
-          avgPrice: legacy.avgPrice,
-          currentPrice: legacy.currentPrice,
-          currency: legacy.currency,
-          accountType,
-          accountName,
-          owner: "김승주",
-        } satisfies Position;
-      })
-      .filter((item): item is Position => item !== null);
-    const list = migrated.length > 0 ? migrated : DEFAULT_POSITIONS;
-    return mergeDuplicatePositions(list);
+    const rawV2 = window.localStorage.getItem(STORAGE_KEY);
+    if (rawV2) {
+      return parsePositionsArray(JSON.parse(rawV2) as unknown);
+    }
+    const rawV1 = window.localStorage.getItem(LEGACY_POSITIONS_STORAGE_KEY);
+    if (rawV1) {
+      const list = parsePositionsArray(JSON.parse(rawV1) as unknown);
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      window.localStorage.removeItem(LEGACY_POSITIONS_STORAGE_KEY);
+      return list;
+    }
+    return DEFAULT_POSITIONS;
   } catch {
     return DEFAULT_POSITIONS;
   }
@@ -959,6 +973,22 @@ export default function Home() {
     }
   }
 
+  function handleResetToDefaultPositions() {
+    if (
+      !window.confirm(
+        "브라우저에 저장된 종목을 모두 지우고, 앱에 포함된 기본 예시 종목으로 바꿉니다.\n\n" +
+          "동기화 키로 서버에 이미 올린 데이터가 있으면, 나중에 「서버에서 불러오기」를 하면 서버 내용이 다시 덮어씁니다.\n\n" +
+          "계속할까요?",
+      )
+    ) {
+      return;
+    }
+    const next = mergeDuplicatePositions(DEFAULT_POSITIONS);
+    setPositions(next);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    setSyncMessage("기본 예시 종목으로 로컬을 초기화했습니다.");
+  }
+
   async function handleSaveSyncKey() {
     const k = syncKeyDraft.trim();
     if (k.length < 8) {
@@ -1382,6 +1412,19 @@ export default function Home() {
                   마지막 동기 시각: {new Date(lastSyncedAt).toLocaleString()}
                 </p>
               ) : null}
+              <div className="border-t border-dashed pt-3">
+                <p className="mb-2 text-xs text-muted-foreground">
+                  종목은 브라우저에만 저장됩니다. 코드에 넣은 기본 예시(강희진·김도율·김찬율 등)가
+                  화면에 안 보이면 예전 저장 데이터가 남아 있는 것입니다.
+                </p>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border border-amber-600/50 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-900 transition-all duration-100 hover:bg-amber-500/20 dark:text-amber-100"
+                  onClick={handleResetToDefaultPositions}
+                >
+                  기본 예시 종목으로 로컬 초기화
+                </button>
+              </div>
             </CardContent>
           </Card>
 
@@ -1592,7 +1635,7 @@ export default function Home() {
                               </div>
                             ) : (
                               <>
-                                <p className="text-[15px] font-semibold leading-snug text-foreground sm:text-base">
+                                <p className="!text-base font-semibold !leading-snug text-foreground sm:!text-lg">
                                   {position.name}
                                 </p>
                                 <p className="text-xs text-muted-foreground">{position.symbol}</p>
