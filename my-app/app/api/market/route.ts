@@ -4,9 +4,17 @@ type ChartQuote = { price: number | null; currency: string | null };
 
 function toYahooSymbol(symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
+  // KRX:XXXXXX → XXXXXX.KS
   if (normalized.startsWith("KRX:")) {
-    const code = normalized.replace("KRX:", "");
-    return `${code}.KS`;
+    return `${normalized.replace("KRX:", "")}.KS`;
+  }
+  // 6자리 숫자 단독 입력 → KOSPI(.KS) 자동 변환 (예: 005930 → 005930.KS)
+  if (/^\d{6}$/.test(normalized)) {
+    return `${normalized}.KS`;
+  }
+  // KOSDAQ 접두사 지원 (예: KQ:293490)
+  if (normalized.startsWith("KQ:")) {
+    return `${normalized.replace("KQ:", "")}.KQ`;
   }
   return normalized;
 }

@@ -1090,6 +1090,9 @@ export default function Home() {
               같은 티커·담당자·계좌(해외/국내+계좌명)·통화로 추가하면 기존 줄에{" "}
               <span className="font-medium text-foreground">수량이 더해지고 평단은 가중평균</span>으로
               갱신됩니다.
+              국내 주식은 6자리 종목코드(예: <span className="font-medium text-foreground">005930</span>)
+              또는 <span className="font-medium text-foreground">KRX:005930</span> 형식으로 입력하면 실시간 시세가 반영됩니다.
+              KOSDAQ은 <span className="font-medium text-foreground">KQ:293490</span> 형식을 사용하세요.
             </p>
             <form
               onSubmit={handleSubmit}
@@ -1097,7 +1100,7 @@ export default function Home() {
             >
               <input
                 className="rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="티커 (예: NVDA)"
+                placeholder="티커 (예: NVDA, 005930)"
                 value={form.symbol}
                 onChange={(e) => setForm((prev) => ({ ...prev, symbol: e.target.value }))}
                 required
