@@ -1426,8 +1426,8 @@ export default function Home() {
                               }
                             />
                           </TableCell>
-                          <TableCell className="px-3 py-1.5 text-right">
-                            <p className="font-semibold">
+                          <TableCell className="px-3 py-1.5 text-right align-top">
+                            <p className="text-[16px] font-semibold tabular-nums leading-none">
                               ₩{Math.round(position.valueKrw).toLocaleString()}
                             </p>
                           </TableCell>
