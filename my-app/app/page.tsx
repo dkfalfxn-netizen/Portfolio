@@ -1144,7 +1144,7 @@ export default function Home() {
           <section className="space-y-4">
             <h2 className="font-semibold">포트폴리오 비중 (가족·퇴직연금)</h2>
             <p className="text-xs text-muted-foreground">
-              도넛 중앙은 담당자명과 평가 합계, 상단은 범례입니다. 비중 5% 미만 조각은 퍼센트만 생략됩니다.
+              도넛 중앙은 담당자명과 평가 합계, 상단은 범례입니다. 조각 안에 비중(%)이 표시됩니다.
             </p>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               {allocationByOwner.map(({ ownerName, data, total }) => (

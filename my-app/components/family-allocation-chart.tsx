@@ -167,7 +167,6 @@ export function FamilyAllocationDonut({
               labelLine={false}
               label={(props: PieLabelRenderProps) => {
                 const pct = (props.percent ?? 0) * 100;
-                if (pct < 5) return null;
                 const RADIAN = Math.PI / 180;
                 const cx = props.cx ?? 0;
                 const cy = props.cy ?? 0;
@@ -185,12 +184,14 @@ export function FamilyAllocationDonut({
                     fill="white"
                     textAnchor="middle"
                     dominantBaseline="central"
-                    className="pointer-events-none select-none text-[11px] font-semibold"
+                    className={`pointer-events-none select-none font-semibold ${
+                      pct < 5 ? "text-[9px]" : "text-[11px]"
+                    }`}
                     style={{
                       textShadow: `0 0 8px ${c}, 0 0 2px rgba(0,0,0,0.9)`,
                     }}
                   >
-                    {pct.toFixed(0)}%
+                    {pct.toFixed(1)}%
                   </text>
                 );
               }}
