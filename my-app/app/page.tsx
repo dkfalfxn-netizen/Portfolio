@@ -314,6 +314,17 @@ function isOwnerName(value: unknown): value is OwnerName {
   return typeof value === "string" && (OWNER_NAMES as readonly string[]).includes(value);
 }
 
+/** 원화를 USD/KRW로 나눈 달러 표기 (Intl currency 심볼 대신 `$` 고정 — 가독성·환경 차이 대비) */
+function formatKrwApproxAsUsd(krw: number, usdKrwRate: number): string {
+  const rate =
+    typeof usdKrwRate === "number" && usdKrwRate > 0 && Number.isFinite(usdKrwRate)
+      ? usdKrwRate
+      : 1350;
+  const usd = krw / rate;
+  if (!Number.isFinite(usd)) return "—";
+  return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /** 같은 담당자·같은 티커·같은 계좌·같은 통화면 한 줄로 합칩니다(가중 평단). */
 function makePositionKey(p: Pick<Position, "owner" | "symbol" | "accountType" | "accountName" | "currency">) {
   return `${p.owner}|${p.symbol}|${p.accountType}|${p.accountName}|${p.currency}`;
@@ -713,7 +724,7 @@ export default function Home() {
       {
         label: "총 자산 (원화)",
         value: `₩${Math.round(totalValue).toLocaleString()}`,
-        sub: `주식 ₩${Math.round(stockValue).toLocaleString()} · 현금 ₩${Math.round(totalCashKrw).toLocaleString()}`,
+        sub: `약 ${formatKrwApproxAsUsd(totalValue, usdKrw)} · 주식 ₩${Math.round(stockValue).toLocaleString()} · 현금 ₩${Math.round(totalCashKrw).toLocaleString()}`,
         change: "",
         positive: null as boolean | null,
       },
@@ -732,7 +743,7 @@ export default function Home() {
         positive: totalProfit >= 0,
       },
     ];
-  }, [enrichedPositions, totalCashKrw]);
+  }, [enrichedPositions, totalCashKrw, usdKrw]);
 
   const allocationByOwner = useMemo(() => {
     return OWNER_NAMES.map((ownerName) => {
@@ -1553,14 +1564,9 @@ export default function Home() {
                           {Math.round(group.sectionCashKrw).toLocaleString()})
                         </span>
                       </p>
-                      <p className="text-xs text-muted-foreground tabular-nums">
-                        ≈{" "}
-                        {(group.sectionTotal / usdKrw).toLocaleString("en-US", {
-                          style: "currency",
-                          currency: "USD",
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
+                      <p className="text-sm font-semibold tabular-nums text-foreground">
+                        ≈ {formatKrwApproxAsUsd(group.sectionTotal, usdKrw)}{" "}
+                        <span className="text-xs font-normal text-muted-foreground">(USD)</span>
                       </p>
                       <p className="font-semibold tabular-nums">
                         총 평가(주식+현금) ₩{Math.round(group.sectionTotal).toLocaleString()}
