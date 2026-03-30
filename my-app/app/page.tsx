@@ -55,6 +55,66 @@ const STORAGE_KEY = "portfolio_positions_v1";
 const CASH_STORAGE_KEY = "portfolio_cash_v1";
 const SYNC_KEY_STORAGE = "portfolio_sync_key_v1";
 const AUTO_SYNC_STORAGE = "portfolio_auto_sync_v1";
+const HOLDINGS_SORT_STORAGE_KEY = "portfolio_holdings_sort_v1";
+
+/** 보유 종목 표시 순: 입력 순(저장된 배열 순) / 평가금액 / 차트 그룹 */
+type HoldingsSortMode = "manual" | "valueAsc" | "valueDesc" | "group";
+
+function defaultHoldingsSort(): Record<OwnerName, HoldingsSortMode> {
+  return {
+    김승주: "manual",
+    강희진: "manual",
+    김도율: "manual",
+    김찬율: "manual",
+    퇴직연금: "manual",
+  };
+}
+
+function loadHoldingsSort(): Record<OwnerName, HoldingsSortMode> {
+  const base = defaultHoldingsSort();
+  if (typeof window === "undefined") return base;
+  try {
+    const raw = window.localStorage.getItem(HOLDINGS_SORT_STORAGE_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw) as unknown;
+    return normalizeHoldingsSortFromServer(parsed);
+  } catch {
+    return base;
+  }
+}
+
+function normalizeHoldingsSortFromServer(raw: unknown): Record<OwnerName, HoldingsSortMode> {
+  const base = defaultHoldingsSort();
+  if (!raw || typeof raw !== "object") return base;
+  const o = raw as Record<string, unknown>;
+  for (const name of OWNER_NAMES) {
+    const v = o[name];
+    if (v === "manual" || v === "valueAsc" || v === "valueDesc" || v === "group") {
+      base[name] = v;
+    }
+  }
+  return base;
+}
+
+function sortHoldingsItems<
+  T extends { valueKrw: number; chartGroup?: string; symbol: string },
+>(items: T[], mode: HoldingsSortMode): T[] {
+  const copy = [...items];
+  if (mode === "manual") return copy;
+  if (mode === "valueAsc") return copy.sort((a, b) => a.valueKrw - b.valueKrw);
+  if (mode === "valueDesc") return copy.sort((a, b) => b.valueKrw - a.valueKrw);
+  if (mode === "group") {
+    return copy.sort((a, b) => {
+      const ga = (a.chartGroup ?? "").trim();
+      const gb = (b.chartGroup ?? "").trim();
+      if (ga === "" && gb !== "") return 1;
+      if (gb === "" && ga !== "") return -1;
+      if (ga !== gb) return ga.localeCompare(gb, "ko");
+      return a.symbol.localeCompare(b.symbol);
+    });
+  }
+  return copy;
+}
 const DEFAULT_POSITIONS: Position[] = [
   {
     symbol: "NVDA",
@@ -308,6 +368,8 @@ export default function Home() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [serverHealth, setServerHealth] = useState<"loading" | "ok" | "error">("loading");
   const pushDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [holdingsSortByOwner, setHoldingsSortByOwner] =
+    useState<Record<OwnerName, HoldingsSortMode>>(defaultHoldingsSort);
 
   // 알림 설정 상태
   type AlertRule = { owner: string; symbol: string; minPct: string; maxPct: string };
@@ -521,8 +583,14 @@ export default function Home() {
     });
   }, [enrichedPositions, cashByOwner, usdKrw]);
 
-  /** pull → 있으면 반영, 없으면 이 기기(pos/cash)를 push (최초 기기·키 저장 직후 공통) */
-  const syncWithServerForKey = useCallback(async (key: string, pos: Position[], cash: CashByOwner) => {
+  /** pull → 있으면 반영, 없으면 이 기기(pos/cash/정렬)를 push (최초 기기·키 저장 직후 공통) */
+  const syncWithServerForKey = useCallback(
+    async (
+      key: string,
+      pos: Position[],
+      cash: CashByOwner,
+      holdingsSort: Record<OwnerName, HoldingsSortMode>,
+    ) => {
     setSyncBusy(true);
     try {
       const r = await fetch("/api/sync", {
@@ -535,6 +603,7 @@ export default function Home() {
         found?: boolean;
         positions?: unknown;
         cash_by_owner?: unknown;
+        holdings_sort_by_owner?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -547,6 +616,7 @@ export default function Home() {
           : [];
         setPositions(mergeDuplicatePositions(valid));
         setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
+        setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
         setSyncMessage("서버에서 잔고를 불러왔습니다. (다른 PC와 같은 키면 같은 데이터입니다.)");
         setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
       } else {
@@ -558,6 +628,7 @@ export default function Home() {
             key,
             positions: pos,
             cashByOwner: cash,
+            holdingsSortByOwner: holdingsSort,
           }),
         });
         const j2 = (await r2.json()) as { error?: string };
@@ -572,7 +643,9 @@ export default function Home() {
     } finally {
       setSyncBusy(false);
     }
-  }, []);
+  },
+  [],
+  );
 
   useEffect(() => {
     void fetch("/api/sync")
@@ -592,7 +665,8 @@ export default function Home() {
     setCloudSyncKey(savedKey);
     setSyncKeyDraft(savedKey);
     const auto = typeof window !== "undefined" && window.localStorage.getItem(AUTO_SYNC_STORAGE) === "1";
-    setAutoSync(auto);
+    const holdSort = loadHoldingsSort();
+    setHoldingsSortByOwner(holdSort);
     setIsHydrated(true);
 
     if (savedKey.length < 8) {
@@ -601,10 +675,15 @@ export default function Home() {
     }
 
     void (async () => {
-      await syncWithServerForKey(savedKey, pos, cash);
+      await syncWithServerForKey(savedKey, pos, cash, holdSort);
       setSyncReady(true);
     })();
   }, [syncWithServerForKey]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    window.localStorage.setItem(HOLDINGS_SORT_STORAGE_KEY, JSON.stringify(holdingsSortByOwner));
+  }, [holdingsSortByOwner, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -628,6 +707,7 @@ export default function Home() {
           key: cloudSyncKey,
           positions,
           cashByOwner,
+          holdingsSortByOwner,
         }),
       }).then(async (r) => {
         if (r.ok) {
@@ -642,7 +722,7 @@ export default function Home() {
     return () => {
       if (pushDebounceRef.current) clearTimeout(pushDebounceRef.current);
     };
-  }, [positions, cashByOwner, isHydrated, syncReady, autoSync, cloudSyncKey]);
+  }, [positions, cashByOwner, holdingsSortByOwner, isHydrated, syncReady, autoSync, cloudSyncKey]);
 
   async function handlePullCloud() {
     const key = cloudSyncKey.trim();
@@ -662,6 +742,7 @@ export default function Home() {
         found?: boolean;
         positions?: unknown;
         cash_by_owner?: unknown;
+        holdings_sort_by_owner?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -674,6 +755,7 @@ export default function Home() {
           : [];
         setPositions(mergeDuplicatePositions(valid));
         setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
+        setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
         setSyncMessage("서버에서 불러왔습니다.");
         setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
       } else {
@@ -697,7 +779,13 @@ export default function Home() {
       const r = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "push", key, positions, cashByOwner }),
+        body: JSON.stringify({
+          action: "push",
+          key,
+          positions,
+          cashByOwner,
+          holdingsSortByOwner,
+        }),
       });
       const j = (await r.json()) as { error?: string };
       if (!r.ok) setSyncMessage(j.error ?? "업로드 실패");
@@ -721,7 +809,7 @@ export default function Home() {
     window.localStorage.setItem(SYNC_KEY_STORAGE, k);
     setCloudSyncKey(k);
     setSyncMessage("키를 저장했습니다. 서버와 맞추는 중…");
-    await syncWithServerForKey(k, positions, cashByOwner);
+    await syncWithServerForKey(k, positions, cashByOwner, holdingsSortByOwner);
   }
 
   // 알림 설정 불러오기 (동기화 키가 준비되면 한 번)
@@ -1163,10 +1251,44 @@ export default function Home() {
               <h2 className="font-semibold">보유 종목 (가족·퇴직연금)</h2>
             </div>
             <div className="space-y-5 p-4">
-              {positionsByOwner.map((group) => (
+              {positionsByOwner.map((group) => {
+                const sortMode = holdingsSortByOwner[group.ownerName] ?? "manual";
+                const displayItems = sortHoldingsItems(group.items, sortMode);
+                const sortBtn = (mode: HoldingsSortMode, label: string) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                      sortMode === mode
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background hover:bg-muted"
+                    }`}
+                    onClick={() =>
+                      setHoldingsSortByOwner((prev) => ({
+                        ...prev,
+                        [group.ownerName]: mode,
+                      }))
+                    }
+                  >
+                    {label}
+                  </button>
+                );
+                return (
                 <div key={group.ownerName} className="rounded-xl border">
-                  <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="font-semibold">보유 종목({group.ownerName})</p>
+                  <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-2">
+                      <p className="font-semibold">보유 종목({group.ownerName})</p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-medium text-muted-foreground">정렬</span>
+                        {sortBtn("manual", "입력 순")}
+                        {sortBtn("valueAsc", "평가금액 ↑")}
+                        {sortBtn("valueDesc", "평가금액 ↓")}
+                        {sortBtn("group", "그룹별")}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        입력 순은 ▲▼로 저장됩니다. 다른 정렬일 때는 순서 변경이 비활성화됩니다.
+                      </p>
+                    </div>
                     <div className="text-right text-sm">
                       <p className="font-semibold">
                         총 평가(주식+현금): ₩{Math.round(group.sectionTotal).toLocaleString()}
@@ -1246,7 +1368,7 @@ export default function Home() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {group.items.length === 0 ? (
+                      {displayItems.length === 0 ? (
                         <TableRow>
                           <TableCell
                             colSpan={9}
@@ -1256,7 +1378,7 @@ export default function Home() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        group.items.map((position, posIdx) => {
+                        displayItems.map((position, posIdx) => {
                           const rowKey = makePositionKey(position);
                           const isEditing = editingRowKey === rowKey;
                           return (
@@ -1453,18 +1575,29 @@ export default function Home() {
                                 <div className="flex gap-1">
                                   <button
                                     type="button"
-                                    title="위로"
+                                    title={
+                                      sortMode !== "manual"
+                                        ? "입력 순 정렬일 때만 순서를 바꿀 수 있습니다"
+                                        : "위로"
+                                    }
                                     className="cursor-pointer rounded border px-1.5 py-0.5 text-xs transition-all duration-100 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
-                                    disabled={posIdx === 0}
+                                    disabled={sortMode !== "manual" || posIdx === 0}
                                     onClick={() => moveRow(rowKey, "up")}
                                   >
                                     ▲
                                   </button>
                                   <button
                                     type="button"
-                                    title="아래로"
+                                    title={
+                                      sortMode !== "manual"
+                                        ? "입력 순 정렬일 때만 순서를 바꿀 수 있습니다"
+                                        : "아래로"
+                                    }
                                     className="cursor-pointer rounded border px-1.5 py-0.5 text-xs transition-all duration-100 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
-                                    disabled={posIdx === group.items.length - 1}
+                                    disabled={
+                                      sortMode !== "manual" ||
+                                      posIdx === displayItems.length - 1
+                                    }
                                     onClick={() => moveRow(rowKey, "down")}
                                   >
                                     ▼
@@ -1494,7 +1627,8 @@ export default function Home() {
                     </TableBody>
                   </Table>
                 </div>
-              ))}
+              );
+              })}
             </div>
           </section>
 

@@ -3,6 +3,7 @@ create table if not exists public.portfolio_snapshots (
   sync_key text primary key,
   positions jsonb not null default '[]'::jsonb,
   cash_by_owner jsonb not null default '{}'::jsonb,
+  holdings_sort_by_owner jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
 

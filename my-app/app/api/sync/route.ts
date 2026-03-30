@@ -52,12 +52,30 @@ export async function GET() {
   });
 }
 
+const OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율", "퇴직연금"] as const;
+const HOLDINGS_SORT_MODES = new Set(["manual", "valueAsc", "valueDesc", "group"]);
+
+/** 클라이언트와 동일한 키만 허용해 jsonb에 저장 */
+function parseHoldingsSortFromJson(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== "object") return out;
+  const o = raw as Record<string, unknown>;
+  for (const name of OWNER_NAMES) {
+    const v = o[name];
+    if (typeof v === "string" && HOLDINGS_SORT_MODES.has(v)) {
+      out[name] = v;
+    }
+  }
+  return out;
+}
+
 type PullBody = { action: "pull"; key: string };
 type PushBody = {
   action: "push";
   key: string;
   positions: unknown;
   cashByOwner: unknown;
+  holdingsSortByOwner?: unknown;
 };
 
 export async function POST(req: NextRequest) {
@@ -92,7 +110,7 @@ export async function POST(req: NextRequest) {
   if (action === "pull") {
     const { data, error } = await admin
       .from("portfolio_snapshots")
-      .select("positions, cash_by_owner, updated_at")
+      .select("positions, cash_by_owner, holdings_sort_by_owner, updated_at")
       .eq("sync_key", key)
       .maybeSingle();
 
@@ -104,6 +122,7 @@ export async function POST(req: NextRequest) {
         found: false,
         positions: [],
         cash_by_owner: {},
+        holdings_sort_by_owner: {},
         updated_at: null,
       });
     }
@@ -111,6 +130,7 @@ export async function POST(req: NextRequest) {
       found: true,
       positions: data.positions ?? [],
       cash_by_owner: data.cash_by_owner ?? {},
+      holdings_sort_by_owner: data.holdings_sort_by_owner ?? {},
       updated_at: data.updated_at,
     });
   }
@@ -121,11 +141,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "positions·cashByOwner 형식이 올바르지 않습니다." }, { status: 400 });
     }
 
+    let holdingsSort: Record<string, string>;
+    if ("holdingsSortByOwner" in b && b.holdingsSortByOwner != null && typeof b.holdingsSortByOwner === "object") {
+      holdingsSort = parseHoldingsSortFromJson(b.holdingsSortByOwner);
+    } else {
+      const { data: existing } = await admin
+        .from("portfolio_snapshots")
+        .select("holdings_sort_by_owner")
+        .eq("sync_key", key)
+        .maybeSingle();
+      holdingsSort = parseHoldingsSortFromJson(existing?.holdings_sort_by_owner ?? {});
+    }
+
     const { error } = await admin.from("portfolio_snapshots").upsert(
       {
         sync_key: key,
         positions: b.positions,
         cash_by_owner: b.cashByOwner,
+        holdings_sort_by_owner: holdingsSort,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "sync_key" },
