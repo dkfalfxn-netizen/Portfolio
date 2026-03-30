@@ -1,7 +1,15 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { FamilyAllocationDonut } from "@/components/family-allocation-chart";
 import { IntradaySparkline } from "@/components/intraday-sparkline";
 import { LivePriceCell } from "@/components/live-price-cell";
@@ -119,6 +127,28 @@ function sortHoldingsItems<
     });
   }
   return copy;
+}
+
+/** 보유 표: 차트 그룹명(없으면 티커) 기준으로 묶어 헤더 아래에 종목 표시 — 원형 차트와 동일 키 */
+function buildHoldingsGroupBlocks<
+  T extends { chartGroup?: string; symbol: string; valueKrw: number },
+>(items: T[]): { label: string; items: T[]; sumKrw: number }[] {
+  const keyFor = (p: T) => p.chartGroup?.trim() || p.symbol;
+  const order: string[] = [];
+  const map = new Map<string, T[]>();
+  for (const p of items) {
+    const k = keyFor(p);
+    if (!map.has(k)) {
+      map.set(k, []);
+      order.push(k);
+    }
+    map.get(k)!.push(p);
+  }
+  return order.map((label) => {
+    const groupItems = map.get(label)!;
+    const sumKrw = groupItems.reduce((s, x) => s + x.valueKrw, 0);
+    return { label, items: groupItems, sumKrw };
+  });
 }
 
 /** 강희진 실제 보유 기준 시드 — 김도율·김찬율도 동일 수량·평단가로 복제 */
@@ -1464,6 +1494,7 @@ export default function Home() {
               {positionsByOwner.map((group) => {
                 const sortMode = holdingsSortByOwner[group.ownerName] ?? "manual";
                 const displayItems = sortHoldingsItems(group.items, sortMode);
+                const holdingsGroupBlocks = buildHoldingsGroupBlocks(displayItems);
                 const sortBtn = (mode: HoldingsSortMode, label: string) => (
                   <button
                     key={mode}
@@ -1496,7 +1527,8 @@ export default function Home() {
                         {sortBtn("group", "그룹별")}
                       </div>
                       <p className="text-[10px] text-muted-foreground">
-                        입력 순은 ▲▼로 저장됩니다. 다른 정렬일 때는 순서 변경이 비활성화됩니다.
+                        입력 순은 ▲▼로 저장됩니다. 다른 정렬일 때는 순서 변경이 비활성화됩니다. 표는
+                        차트 그룹(미입력 시 티커)별로 묶여 보입니다.
                       </p>
                     </div>
                     <div className="text-right text-sm">
@@ -1588,10 +1620,25 @@ export default function Home() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        displayItems.map((position, posIdx) => {
-                          const rowKey = makePositionKey(position);
-                          const isEditing = editingRowKey === rowKey;
-                          return (
+                        holdingsGroupBlocks.map((block) => (
+                          <Fragment key={`${group.ownerName}-${block.label}`}>
+                            <TableRow className="border-b border-border/60 bg-muted/25 hover:bg-muted/25">
+                              <TableCell colSpan={9} className="px-3 py-2">
+                                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                  <span className="text-sm font-semibold tracking-tight">
+                                    {block.label}
+                                  </span>
+                                  <span className="text-xs tabular-nums text-muted-foreground">
+                                    그룹 합계 ₩{Math.round(block.sumKrw).toLocaleString()}
+                                  </span>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                            {block.items.map((position) => {
+                              const posIdx = displayItems.indexOf(position);
+                              const rowKey = makePositionKey(position);
+                              const isEditing = editingRowKey === rowKey;
+                              return (
                         <TableRow key={rowKey} className="group/row">
                           <TableCell className="px-3 py-1.5">
                             {isEditing ? (
@@ -1621,11 +1668,6 @@ export default function Home() {
                                   {position.name}
                                 </p>
                                 <p className="text-xs text-muted-foreground">{position.symbol}</p>
-                                {position.chartGroup && (
-                                  <p className="mt-0.5 w-fit rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                    그룹: {position.chartGroup}
-                                  </p>
-                                )}
                               </>
                             )}
                           </TableCell>
@@ -1872,8 +1914,10 @@ export default function Home() {
                             )}
                           </TableCell>
                         </TableRow>
-                          );
-                        })
+                              );
+                            })}
+                          </Fragment>
+                        ))
                       )}
                     </TableBody>
                   </Table>

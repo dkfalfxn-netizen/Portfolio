@@ -105,7 +105,7 @@ export function FamilyAllocationDonut({
           `,
         }}
       >
-        <p className="flex min-h-[200px] items-center justify-center text-sm text-zinc-500">
+        <p className="flex min-h-[260px] items-center justify-center text-sm text-zinc-500">
           보유 종목·현금 없음
         </p>
       </div>
@@ -155,17 +155,17 @@ export function FamilyAllocationDonut({
         })}
       </div>
 
-      <div className="relative h-[220px] w-full">
+      <div className="relative h-[280px] w-full sm:h-[320px]">
         <ResponsiveContainer width="100%" height="100%">
-          <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+          <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
             <Pie
               data={chartData}
               dataKey="value"
               nameKey="name"
               cx="50%"
               cy="50%"
-              innerRadius="58%"
-              outerRadius="82%"
+              innerRadius="52%"
+              outerRadius="88%"
               startAngle={90}
               endAngle={-270}
               paddingAngle={2.5}
@@ -193,7 +193,7 @@ export function FamilyAllocationDonut({
                     textAnchor="middle"
                     dominantBaseline="central"
                     className={`pointer-events-none select-none font-semibold ${
-                      pct < 5 ? "text-[9px]" : "text-[11px]"
+                      pct < 5 ? "text-[10px]" : "text-xs sm:text-[13px]"
                     }`}
                     style={{
                       textShadow: `0 0 8px ${c}, 0 0 2px rgba(0,0,0,0.9)`,
@@ -228,7 +228,7 @@ export function FamilyAllocationDonut({
         {/* 중앙 허브 (이름 + 합계) */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div
-            className="flex h-[88px] w-[88px] flex-col items-center justify-center rounded-full border border-white/10 bg-zinc-950/90 text-center backdrop-blur-sm"
+            className="flex h-[100px] w-[100px] flex-col items-center justify-center rounded-full border border-white/10 bg-zinc-950/90 text-center backdrop-blur-sm sm:h-[108px] sm:w-[108px]"
             style={{
               boxShadow: `
                 inset 0 2px 16px rgba(0,0,0,0.65),
@@ -240,7 +240,7 @@ export function FamilyAllocationDonut({
             <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
               {ownerName}
             </span>
-            <span className="mt-0.5 max-w-[88px] truncate text-xs font-bold tabular-nums text-zinc-100">
+            <span className="mt-0.5 max-w-[100px] truncate text-[13px] font-bold tabular-nums leading-tight text-zinc-100 sm:max-w-[108px] sm:text-sm">
               {formatKrw(total)}
             </span>
           </div>
