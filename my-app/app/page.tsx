@@ -283,6 +283,8 @@ export default function Home() {
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
+  const [editSymbol, setEditSymbol] = useState("");
+  const [editName, setEditName] = useState("");
   const [editQuantity, setEditQuantity] = useState("");
   const [editAvgPrice, setEditAvgPrice] = useState("");
   const [editPurchaseUsdKrw, setEditPurchaseUsdKrw] = useState("");
@@ -885,6 +887,8 @@ export default function Home() {
   function startEditRow(p: Position) {
     const key = makePositionKey(p);
     setEditingRowKey(key);
+    setEditSymbol(p.symbol);
+    setEditName(p.name);
     setEditQuantity(String(p.quantity));
     setEditAvgPrice(String(p.avgPrice));
     setEditPurchaseUsdKrw(
@@ -894,6 +898,8 @@ export default function Home() {
 
   function cancelEditRow() {
     setEditingRowKey(null);
+    setEditSymbol("");
+    setEditName("");
     setEditQuantity("");
     setEditAvgPrice("");
     setEditPurchaseUsdKrw("");
@@ -904,6 +910,9 @@ export default function Home() {
     const q = Number(editQuantity);
     const a = Number(editAvgPrice);
     const px = Number(editPurchaseUsdKrw);
+    const sym = editSymbol.trim().toUpperCase();
+    const nm = editName.trim();
+    if (!sym || !nm) return;
     if (!Number.isFinite(q) || q <= 0) return;
     if (!Number.isFinite(a) || a <= 0) return;
     setPositions((prev) =>
@@ -911,9 +920,9 @@ export default function Home() {
         if (makePositionKey(p) !== editingRowKey) return p;
         if (p.currency === "USD") {
           if (!Number.isFinite(px) || px <= 0) return p;
-          return { ...p, quantity: q, avgPrice: a, purchaseUsdKrw: px };
+          return { ...p, symbol: sym, name: nm, quantity: q, avgPrice: a, purchaseUsdKrw: px };
         }
-        return { ...p, quantity: q, avgPrice: a };
+        return { ...p, symbol: sym, name: nm, quantity: q, avgPrice: a };
       }),
     );
     cancelEditRow();
@@ -1553,8 +1562,27 @@ export default function Home() {
                           return (
                         <TableRow key={rowKey}>
                           <TableCell className="px-4 py-3">
-                            <p className="font-medium">{position.name}</p>
-                            <p className="text-xs text-muted-foreground">{position.symbol}</p>
+                            {isEditing ? (
+                              <div className="flex flex-col gap-1">
+                                <input
+                                  className="w-24 rounded-md border bg-background px-2 py-1 text-sm font-medium"
+                                  placeholder="티커"
+                                  value={editSymbol}
+                                  onChange={(e) => setEditSymbol(e.target.value)}
+                                />
+                                <input
+                                  className="w-32 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground"
+                                  placeholder="종목명"
+                                  value={editName}
+                                  onChange={(e) => setEditName(e.target.value)}
+                                />
+                              </div>
+                            ) : (
+                              <>
+                                <p className="font-medium">{position.name}</p>
+                                <p className="text-xs text-muted-foreground">{position.symbol}</p>
+                              </>
+                            )}
                           </TableCell>
                           <TableCell className="px-4 py-3 text-right">
                             {isEditing ? (
