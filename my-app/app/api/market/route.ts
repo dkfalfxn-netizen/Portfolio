@@ -17,6 +17,24 @@ function readPreviousClose(meta: unknown): number | null {
   return null;
 }
 
+/** Yahoo chart meta에서 표시용 현재가(장중·장외·전일 종가 순으로 후보) */
+function readChartHeadlinePrice(meta: unknown): number | null {
+  const m = meta as Record<string, unknown> | undefined;
+  if (!m) return null;
+  const keys = [
+    "regularMarketPrice",
+    "postMarketPrice",
+    "preMarketPrice",
+    "chartPreviousClose",
+    "previousClose",
+  ] as const;
+  for (const k of keys) {
+    const v = m[k];
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  }
+  return null;
+}
+
 function extractSparklinePoints(data: unknown): number[] {
   const result = (data as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as
     | { indicators?: { quote?: Array<{ close?: unknown[] }> } }
@@ -90,8 +108,16 @@ async function fetchNaverPrice(code: string): Promise<ChartQuote> {
   return emptyQuote();
 }
 
+/** 티커만 넣는 경우가 많은 종목 → Yahoo 표준 심볼 */
+const YAHOO_INPUT_ALIASES: Record<string, string> = {
+  /** 에르메스 — Euronext Paris (RMS 단독은 미국/다른 종목과 충돌 가능성 있어 .PA 고정) */
+  RMS: "RMS.PA",
+};
+
 function toYahooSymbol(symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
+  const aliased = YAHOO_INPUT_ALIASES[normalized];
+  if (aliased) return aliased;
   if (normalized.startsWith("KRX:")) {
     return `${normalized.replace("KRX:", "")}.KS`;
   }
@@ -123,9 +149,7 @@ export async function GET(req: NextRequest) {
       if (!response.ok) return null;
       const data = await response.json();
       const meta = data?.chart?.result?.[0]?.meta;
-      const price =
-        typeof meta?.regularMarketPrice === "number" ? meta.regularMarketPrice : null;
-      return price;
+      return readChartHeadlinePrice(meta);
     } catch {
       return null;
     }
@@ -143,9 +167,7 @@ export async function GET(req: NextRequest) {
       if (!response.ok) return null;
       const data = await response.json();
       const meta = data?.chart?.result?.[0]?.meta;
-      const price =
-        typeof meta?.regularMarketPrice === "number" ? meta.regularMarketPrice : null;
-      return price;
+      return readChartHeadlinePrice(meta);
     } catch {
       return null;
     }
@@ -191,8 +213,7 @@ export async function GET(req: NextRequest) {
 
           const data = await response.json();
           const meta = data?.chart?.result?.[0]?.meta;
-          const price =
-            typeof meta?.regularMarketPrice === "number" ? meta.regularMarketPrice : null;
+          const price = readChartHeadlinePrice(meta);
           const currency = typeof meta?.currency === "string" ? meta.currency : null;
           const previousClose = readPreviousClose(meta);
           const sparkline = extractSparklinePoints(data);

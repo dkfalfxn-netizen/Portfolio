@@ -1754,7 +1754,9 @@ export default function Home() {
               또는 <span className="font-medium text-foreground">KRX:005930</span> 형식으로 입력하면 실시간 시세가 반영됩니다.
               KOSDAQ은 <span className="font-medium text-foreground">KQ:293490</span> 형식을 사용하세요.
               유로 표시 종목은 통화를 <span className="font-medium text-foreground">EUR</span>로 두고, 티커는 Yahoo Finance 심볼(예: 유럽{" "}
-              <span className="font-medium text-foreground">ASML.AS</span>)을 입력하면 시세가 반영됩니다.
+              <span className="font-medium text-foreground">ASML.AS</span>, 에르메스{" "}
+              <span className="font-medium text-foreground">RMS</span> 또는 <span className="font-medium text-foreground">RMS.PA</span>
+              )을 입력하면 시세가 반영됩니다.
             </p>
             <form
               onSubmit={handleSubmit}
