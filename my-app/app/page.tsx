@@ -1,8 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FamilyAllocationDonut } from "@/components/family-allocation-chart";
+import { IntradaySparkline } from "@/components/intraday-sparkline";
+import { LivePriceCell } from "@/components/live-price-cell";
 import {
   Card,
   CardContent,
@@ -39,7 +41,12 @@ type Position = {
 };
 
 type MarketResponse = {
-  quotes: Record<string, { price: number | null; currency: string | null }>;
+  quotes: Record<
+    string,
+    { price: number | null; currency: string | null; previousClose: number | null }
+  >;
+  /** 티커별 당일 분봉 종가 시계열 */
+  intraday?: Record<string, number[]>;
   usdKrw: number | null;
   fetchedAt: number;
 };
@@ -299,6 +306,7 @@ export default function Home() {
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [serverHealth, setServerHealth] = useState<"loading" | "ok" | "error">("loading");
   const pushDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 알림 설정 상태
@@ -361,7 +369,10 @@ export default function Home() {
 
   const enrichedPositions = useMemo(() => {
     return positions.map((position) => {
-      const livePrice = marketQuery.data?.quotes?.[position.symbol]?.price;
+      const q = marketQuery.data?.quotes?.[position.symbol];
+      const livePrice = q?.price;
+      const previousClose =
+        typeof q?.previousClose === "number" && q.previousClose > 0 ? q.previousClose : null;
       const currentPrice = livePrice ?? position.currentPrice;
       const pnl = ((currentPrice - position.avgPrice) / position.avgPrice) * 100;
       /** 매입 시 환율 없으면 현재 환율로 원가 추정(기존 데이터 호환) */
@@ -380,6 +391,7 @@ export default function Home() {
       return {
         ...position,
         currentPrice,
+        previousClose,
         pnl,
         valueKrw,
         costKrw,
@@ -509,6 +521,68 @@ export default function Home() {
     });
   }, [enrichedPositions, cashByOwner, usdKrw]);
 
+  /** pull → 있으면 반영, 없으면 이 기기(pos/cash)를 push (최초 기기·키 저장 직후 공통) */
+  const syncWithServerForKey = useCallback(async (key: string, pos: Position[], cash: CashByOwner) => {
+    setSyncBusy(true);
+    try {
+      const r = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "pull", key }),
+      });
+      const j = (await r.json()) as {
+        error?: string;
+        found?: boolean;
+        positions?: unknown;
+        cash_by_owner?: unknown;
+        updated_at?: string | null;
+      };
+      if (!r.ok) {
+        setSyncMessage(j.error ?? "동기화를 사용할 수 없습니다.");
+        return;
+      }
+      if (j.found) {
+        const valid = Array.isArray(j.positions)
+          ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
+          : [];
+        setPositions(mergeDuplicatePositions(valid));
+        setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
+        setSyncMessage("서버에서 잔고를 불러왔습니다. (다른 PC와 같은 키면 같은 데이터입니다.)");
+        setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
+      } else {
+        const r2 = await fetch("/api/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "push",
+            key,
+            positions: pos,
+            cashByOwner: cash,
+          }),
+        });
+        const j2 = (await r2.json()) as { error?: string };
+        if (!r2.ok) setSyncMessage(j2.error ?? "서버 업로드 실패");
+        else {
+          setSyncMessage("서버에 기존 데이터가 없어 이 기기 내용을 올렸습니다.");
+          setLastSyncedAt(new Date().toISOString());
+        }
+      }
+    } catch {
+      setSyncMessage("네트워크 오류로 동기화에 실패했습니다.");
+    } finally {
+      setSyncBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetch("/api/sync")
+      .then((r) => r.json())
+      .then((j: { ok?: boolean }) => {
+        setServerHealth(j.ok === true ? "ok" : "error");
+      })
+      .catch(() => setServerHealth("error"));
+  }, []);
+
   useEffect(() => {
     const pos = loadPositions();
     const cash = loadCashByOwner();
@@ -527,58 +601,10 @@ export default function Home() {
     }
 
     void (async () => {
-      setSyncBusy(true);
-      try {
-        const r = await fetch("/api/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "pull", key: savedKey }),
-        });
-        const j = (await r.json()) as {
-          error?: string;
-          found?: boolean;
-          positions?: unknown;
-          cash_by_owner?: unknown;
-          updated_at?: string | null;
-        };
-        if (!r.ok) {
-          setSyncMessage(j.error ?? "동기화를 사용할 수 없습니다.");
-          return;
-        }
-        if (j.found) {
-          const valid = Array.isArray(j.positions)
-            ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
-            : [];
-          setPositions(mergeDuplicatePositions(valid));
-          setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
-          setSyncMessage("서버 데이터를 불러왔습니다.");
-          setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
-        } else {
-          const r2 = await fetch("/api/sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "push",
-              key: savedKey,
-              positions: pos,
-              cashByOwner: cash,
-            }),
-          });
-          const j2 = (await r2.json()) as { error?: string };
-          if (!r2.ok) setSyncMessage(j2.error ?? "서버 업로드 실패");
-          else {
-            setSyncMessage("로컬 데이터를 서버에 저장했습니다.");
-            setLastSyncedAt(new Date().toISOString());
-          }
-        }
-      } catch {
-        setSyncMessage("네트워크 오류로 동기화에 실패했습니다.");
-      } finally {
-        setSyncBusy(false);
-        setSyncReady(true);
-      }
+      await syncWithServerForKey(savedKey, pos, cash);
+      setSyncReady(true);
     })();
-  }, []);
+  }, [syncWithServerForKey]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -686,7 +712,7 @@ export default function Home() {
     }
   }
 
-  function handleSaveSyncKey() {
+  async function handleSaveSyncKey() {
     const k = syncKeyDraft.trim();
     if (k.length < 8) {
       setSyncMessage("동기화 키는 8자 이상으로 정해 주세요.");
@@ -694,7 +720,8 @@ export default function Home() {
     }
     window.localStorage.setItem(SYNC_KEY_STORAGE, k);
     setCloudSyncKey(k);
-    setSyncMessage("키를 저장했습니다. 다른 기기에도 같은 키를 입력하세요.");
+    setSyncMessage("키를 저장했습니다. 서버와 맞추는 중…");
+    await syncWithServerForKey(k, positions, cashByOwner);
   }
 
   // 알림 설정 불러오기 (동기화 키가 준비되면 한 번)
@@ -999,10 +1026,23 @@ export default function Home() {
               <CardDescription>클라우드 동기화 (폰·PC 같은 데이터)</CardDescription>
               <CardTitle className="text-lg">동기화 키</CardTitle>
               <p className="text-xs text-muted-foreground">
-                같은 키를 여러 기기에 저장하면 Supabase에 올린 스냅샷을 공유합니다. 키는 비밀번호처럼
-                길게 정하세요. Vercel에{" "}
-                <code className="rounded bg-muted px-1">SUPABASE_SERVICE_ROLE_KEY</code>가 있어야
-                합니다.
+                다른 PC·폰에서는 브라우저마다 저장소가 달라서, 집에서 쓰는 동기화 키를 그대로 입력한 뒤
+                「키 저장」만 하면 서버에서 자동으로 불러옵니다. 키는 비밀번호처럼 길게 정하세요.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                서버(Supabase) 연결:{" "}
+                {serverHealth === "loading" ? (
+                  <span>확인 중…</span>
+                ) : serverHealth === "ok" ? (
+                  <span className="text-emerald-600 dark:text-emerald-400">정상</span>
+                ) : (
+                  <span className="text-amber-600 dark:text-amber-400">
+                    문제 있음 — Vercel 환경 변수{" "}
+                    <code className="rounded bg-muted px-1">NEXT_PUBLIC_SUPABASE_URL</code>,{" "}
+                    <code className="rounded bg-muted px-1">SUPABASE_SERVICE_ROLE_KEY</code> 확인 후
+                    재배포
+                  </span>
+                )}
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1190,12 +1230,19 @@ export default function Home() {
                     <TableHeader className="bg-muted/40">
                       <TableRow>
                         <TableHead className="px-3 py-1.5">종목</TableHead>
+                        <TableHead
+                          className="w-[72px] px-1 py-1.5 text-center"
+                          title="당일 분봉 기준 가격 흐름"
+                        >
+                          일중
+                        </TableHead>
                         <TableHead className="px-3 py-1.5 text-right">수량</TableHead>
+                        <TableHead className="px-3 py-1.5 text-right">수익률</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">평단가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">매입환율</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">현재가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">평가금액</TableHead>
-                        <TableHead className="px-3 py-1.5 text-right">수익률</TableHead>
+                        <TableHead className="px-3 py-1.5">계좌</TableHead>
                         <TableHead className="px-3 py-1.5 w-[140px]">수정/삭제</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1203,9 +1250,8 @@ export default function Home() {
                       {group.items.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={8}
+                            colSpan={10}
                             className="px-3 py-4 text-center text-xs text-muted-foreground"
-
                           >
                             등록된 종목이 없습니다.
                           </TableCell>
@@ -1250,6 +1296,13 @@ export default function Home() {
                               </>
                             )}
                           </TableCell>
+                          <TableCell className="px-2 py-1.5 align-middle">
+                            <div className="flex justify-center">
+                              <IntradaySparkline
+                                points={marketQuery.data?.intraday?.[position.symbol] ?? []}
+                              />
+                            </div>
+                          </TableCell>
                           <TableCell className="px-3 py-1.5 text-right">
                             {isEditing ? (
                               <input
@@ -1262,6 +1315,41 @@ export default function Home() {
                               />
                             ) : (
                               position.quantity
+                            )}
+                          </TableCell>
+                          <TableCell
+                            className={`px-3 py-1.5 text-right font-semibold ${
+                              position.pnl >= 0 ? "text-red-500" : "text-blue-500"
+                            }`}
+                          >
+                            {position.currency === "USD" &&
+                            position.pnlUsdPct != null &&
+                            position.pnlKrwEquityPct != null ? (
+                              <div className="flex flex-col items-end gap-0.5 leading-tight">
+                                <span>
+                                  USD {position.pnlUsdPct >= 0 ? "+" : ""}
+                                  {position.pnlUsdPct.toFixed(2)}%
+                                </span>
+                                <span className="text-xs font-normal opacity-90">
+                                  원화 {position.pnlKrwEquityPct >= 0 ? "+" : ""}
+                                  {position.pnlKrwEquityPct.toFixed(2)}%
+                                </span>
+                                <span className="text-xs font-normal opacity-75">
+                                  {position.valueKrw - position.costKrw >= 0 ? "+" : ""}₩
+                                  {Math.round(position.valueKrw - position.costKrw).toLocaleString()}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-end gap-0.5 leading-tight">
+                                <span>
+                                  {position.pnl >= 0 ? "+" : ""}
+                                  {position.pnl.toFixed(2)}%
+                                </span>
+                                <span className="text-xs font-normal opacity-75">
+                                  {position.valueKrw - position.costKrw >= 0 ? "+" : ""}₩
+                                  {Math.round(position.valueKrw - position.costKrw).toLocaleString()}
+                                </span>
+                              </div>
                             )}
                           </TableCell>
                           <TableCell className="px-3 py-1.5 text-right">
@@ -1324,51 +1412,29 @@ export default function Home() {
                               "—"
                             )}
                           </TableCell>
-                          <TableCell className="px-3 py-1.5 text-right">
-                            {position.currentPrice.toLocaleString()} {position.currency}
-                            <p className="text-xs text-muted-foreground">
-                              원화: ₩
-                              {Math.round(
-                                position.currentPrice * (position.currency === "USD" ? usdKrw : 1),
-                              ).toLocaleString()}
-                            </p>
+                          <TableCell className="px-3 py-1.5 align-top">
+                            <LivePriceCell
+                              currency={position.currency}
+                              price={position.currentPrice}
+                              previousClose={position.previousClose}
+                              krwLine={
+                                position.currency === "USD"
+                                  ? `₩${Math.round(
+                                      position.currentPrice * usdKrw,
+                                    ).toLocaleString()}`
+                                  : undefined
+                              }
+                            />
                           </TableCell>
                           <TableCell className="px-3 py-1.5 text-right">
                             <p className="font-semibold">
                               ₩{Math.round(position.valueKrw).toLocaleString()}
                             </p>
                           </TableCell>
-                          <TableCell
-                            className={`px-3 py-1.5 text-right font-semibold ${
-                              position.pnl >= 0 ? "text-red-500" : "text-blue-500"
-                            }`}
-                          >
-                            {position.currency === "USD" &&
-                            position.pnlUsdPct != null &&
-                            position.pnlKrwEquityPct != null ? (
-                              <div className="flex flex-col items-end gap-0.5 leading-tight">
-                                <span>
-                                  USD {position.pnlUsdPct >= 0 ? "+" : ""}
-                                  {position.pnlUsdPct.toFixed(2)}%
-                                </span>
-                                <span className="text-xs font-normal opacity-90">
-                                  원화 {position.pnlKrwEquityPct >= 0 ? "+" : ""}
-                                  {position.pnlKrwEquityPct.toFixed(2)}%
-                                </span>
-                                <span className="text-xs font-normal opacity-75">
-                                  {(position.valueKrw - position.costKrw) >= 0 ? "+" : ""}
-                                  ₩{Math.round(position.valueKrw - position.costKrw).toLocaleString()}
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="flex flex-col items-end gap-0.5 leading-tight">
-                                <span>{position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)}%</span>
-                                <span className="text-xs font-normal opacity-75">
-                                  {(position.valueKrw - position.costKrw) >= 0 ? "+" : ""}
-                                  ₩{Math.round(position.valueKrw - position.costKrw).toLocaleString()}
-                                </span>
-                              </div>
-                            )}
+                          <TableCell className="px-3 py-1.5 text-sm">
+                            <span className="text-muted-foreground">{position.accountType}</span>
+                            <span className="mx-1">·</span>
+                            {position.accountName}
                           </TableCell>
                           <TableCell className="px-3 py-1.5">
                             {isEditing ? (

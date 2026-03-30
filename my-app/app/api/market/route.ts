@@ -1,15 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
 
-type ChartQuote = { price: number | null; currency: string | null };
+type ChartQuote = {
+  price: number | null;
+  currency: string | null;
+  previousClose: number | null;
+  sparkline: number[];
+};
+
+function readPreviousClose(meta: unknown): number | null {
+  const m = meta as Record<string, unknown> | undefined;
+  if (!m) return null;
+  for (const k of ["chartPreviousClose", "previousClose"]) {
+    const v = m[k];
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  }
+  return null;
+}
+
+function extractSparklinePoints(data: unknown): number[] {
+  const result = (data as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as
+    | { indicators?: { quote?: Array<{ close?: unknown[] }> } }
+    | undefined;
+  const closes = result?.indicators?.quote?.[0]?.close;
+  if (!Array.isArray(closes)) return [];
+  const nums = closes.filter(
+    (v): v is number => typeof v === "number" && Number.isFinite(v),
+  );
+  if (nums.length <= 1) return nums;
+  const maxPts = 100;
+  if (nums.length <= maxPts) return nums;
+  const step = Math.ceil(nums.length / maxPts);
+  const out: number[] = [];
+  for (let i = 0; i < nums.length; i += step) out.push(nums[i]!);
+  if (out[out.length - 1] !== nums[nums.length - 1]) out.push(nums[nums.length - 1]!);
+  return out;
+}
 
 /** KRX 상품(금현물 등) 코드 판별: M + 8자리 숫자 (예: M04020000) */
 function isKrxCommodity(symbol: string): boolean {
   return /^M\d{8}$/i.test(symbol.trim());
 }
 
+const emptyQuote = (): ChartQuote => ({
+  price: null,
+  currency: null,
+  previousClose: null,
+  sparkline: [],
+});
+
 /**
  * 네이버 금융 KRX 금현물 일별시세 페이지에서 최근 표준가격(KRW/g) 파싱
- * goldDailyQuote.nhn HTML: <td class="date">YYYY.MM.DD</td><td class="num">NNN,NNN.NN</td>
  */
 async function fetchNaverGoldPrice(): Promise<ChartQuote> {
   try {
@@ -19,53 +59,45 @@ async function fetchNaverGoldPrice(): Promise<ChartQuote> {
       cache: "no-store",
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml",
-        "Referer": "https://finance.naver.com/",
+        Accept: "text/html,application/xhtml+xml",
+        Referer: "https://finance.naver.com/",
       },
     });
-    if (!res.ok) return { price: null, currency: null };
+    if (!res.ok) return emptyQuote();
 
-    // EUC-KR로 인코딩된 HTML이지만 숫자는 ASCII이므로 UTF-8로도 파싱 가능
     const html = await res.text();
-
-    // 패턴: <td class="date">2026.03.30</td> 다음에 오는 <td class="num">221,008.87</td>
     const match = html.match(
       /<td class="date">\d{4}\.\d{2}\.\d{2}<\/td>\s*<td class="num">([\d,]+(?:\.\d+)?)<\/td>/,
     );
-    if (!match) return { price: null, currency: null };
+    if (!match) return emptyQuote();
 
     const price = parseFloat(match[1].replace(/,/g, ""));
     return {
       price: Number.isFinite(price) ? price : null,
       currency: "KRW",
+      previousClose: null,
+      sparkline: [],
     };
   } catch {
-    return { price: null, currency: null };
+    return emptyQuote();
   }
 }
 
-/** KRX 상품 코드별 시세 조회 라우팅 */
 async function fetchNaverPrice(code: string): Promise<ChartQuote> {
-  // M04020000 = KRX 금현물(금 99.99 1kg) — 일별시세 HTML에서 파싱
   if (/^M040200/i.test(code)) {
     return fetchNaverGoldPrice();
   }
-  // 다른 KRX 상품 코드는 현재 지원 안 함
-  return { price: null, currency: null };
+  return emptyQuote();
 }
 
 function toYahooSymbol(symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
-  // KRX:XXXXXX → XXXXXX.KS
   if (normalized.startsWith("KRX:")) {
     return `${normalized.replace("KRX:", "")}.KS`;
   }
-  // 6자리 영숫자(숫자로 시작) → KOSPI(.KS) 자동 변환
-  // 예: 005930, 488500, 0022T0, 0118S0, 0118Z0 등 KRX 코드 패턴
   if (/^[0-9][0-9A-Z]{5}$/.test(normalized)) {
     return `${normalized}.KS`;
   }
-  // KOSDAQ 접두사 지원 (예: KQ:293490)
   if (normalized.startsWith("KQ:")) {
     return `${normalized.replace("KQ:", "")}.KQ`;
   }
@@ -101,10 +133,14 @@ export async function GET(req: NextRequest) {
 
   if (rawSymbols.length === 0) {
     const usdKrw = await fetchUsdKrwOnly();
-    return NextResponse.json({ quotes: {}, usdKrw, fetchedAt: Date.now() });
+    return NextResponse.json({
+      quotes: {},
+      intraday: {},
+      usdKrw,
+      fetchedAt: Date.now(),
+    });
   }
 
-  // KRX 상품 코드(네이버)와 일반 코드(Yahoo) 분리
   const commoditySymbols = rawSymbols.filter(isKrxCommodity);
   const yahooInputSymbols = rawSymbols.filter((s) => !isKrxCommodity(s));
 
@@ -116,7 +152,6 @@ export async function GET(req: NextRequest) {
   const yahooSymbols = [...new Set([...mapping.map((m) => m.yahoo), "KRW=X"])];
 
   try {
-    // Yahoo Finance + 네이버 금융 병렬 요청
     const [quoteEntries, commodityResults] = await Promise.all([
       Promise.all(
         yahooSymbols.map(async (symbol) => {
@@ -130,7 +165,7 @@ export async function GET(req: NextRequest) {
           });
 
           if (!response.ok) {
-            return [symbol.toUpperCase(), { price: null, currency: null } satisfies ChartQuote] as const;
+            return [symbol.toUpperCase(), emptyQuote()] as const;
           }
 
           const data = await response.json();
@@ -138,10 +173,14 @@ export async function GET(req: NextRequest) {
           const price =
             typeof meta?.regularMarketPrice === "number" ? meta.regularMarketPrice : null;
           const currency = typeof meta?.currency === "string" ? meta.currency : null;
-          return [symbol.toUpperCase(), { price, currency } satisfies ChartQuote] as const;
+          const previousClose = readPreviousClose(meta);
+          const sparkline = extractSparklinePoints(data);
+          return [
+            symbol.toUpperCase(),
+            { price, currency, previousClose, sparkline } satisfies ChartQuote,
+          ] as const;
         }),
       ),
-      // KRX 상품은 네이버 금융에서 조회
       Promise.all(
         commoditySymbols.map(async (symbol) => {
           const quote = await fetchNaverPrice(symbol);
@@ -152,20 +191,30 @@ export async function GET(req: NextRequest) {
 
     const byYahooSymbol = new Map<string, ChartQuote>(quoteEntries);
 
-    const quotes: Record<string, { price: number | null; currency: string | null }> = {};
+    const quotes: Record<
+      string,
+      { price: number | null; currency: string | null; previousClose: number | null }
+    > = {};
+    const intraday: Record<string, number[]> = {};
 
-    // Yahoo Finance 결과 매핑
     for (const mapItem of mapping) {
       const quote = byYahooSymbol.get(mapItem.yahoo.toUpperCase());
       quotes[mapItem.input] = {
         price: quote?.price ?? null,
         currency: quote?.currency ?? null,
+        previousClose: quote?.previousClose ?? null,
       };
+      const sl = quote?.sparkline;
+      if (sl && sl.length >= 2) intraday[mapItem.input] = sl;
     }
 
-    // 네이버 금융 결과 매핑 (KRX 상품)
     for (const [symbol, quote] of commodityResults) {
-      quotes[symbol] = quote;
+      quotes[symbol] = {
+        price: quote.price,
+        currency: quote.currency,
+        previousClose: quote.previousClose,
+      };
+      if (quote.sparkline.length >= 2) intraday[symbol] = quote.sparkline;
     }
 
     const fxQuote = byYahooSymbol.get("KRW=X");
@@ -173,6 +222,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       quotes,
+      intraday,
       usdKrw,
       fetchedAt: Date.now(),
     });

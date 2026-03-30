@@ -3,6 +3,20 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 const MIN_KEY_LEN = 8;
 
+/** supabase-js가 네트워크 실패 시 영문 기술 메시지를 주는 경우 한국어 안내로 바꿉니다 */
+function friendlyDbError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("fetch failed") || m.includes("econnrefused") || m.includes("enotfound") || m.includes("getaddrinfo")) {
+    return "Supabase에 연결하지 못했습니다. Vercel의 NEXT_PUBLIC_SUPABASE_URL이 대시보드 Project URL과 한 글자도 같게 맞는지, 프로젝트가 일시 중지(Paused) 상태가 아닌지 확인하세요.";
+  }
+  return message;
+}
+
+function isNetworkLayerError(message: string): boolean {
+  const m = message.toLowerCase();
+  return m.includes("fetch failed") || m.includes("econnrefused") || m.includes("enotfound") || m.includes("getaddrinfo");
+}
+
 /** 배포 후 브라우저에서 GET /api/sync 로 Supabase·테이블 연결 여부 확인 */
 export async function GET() {
   const admin = createSupabaseAdmin();
@@ -18,12 +32,15 @@ export async function GET() {
   }
   const { error } = await admin.from("portfolio_snapshots").select("sync_key").limit(1);
   if (error) {
+    const network = isNetworkLayerError(error.message);
     return NextResponse.json(
       {
         ok: false,
         supabaseConfigured: true,
-        tableError: error.message,
-        hint: "Supabase SQL 편집기에서 supabase/portfolio_snapshots.sql을 실행해 테이블을 만드세요.",
+        tableError: friendlyDbError(error.message),
+        hint: network
+          ? "URL/프로젝트 상태를 먼저 확인하세요. fetch failed는 보통 테이블이 없어서가 아니라 Supabase 주소에 연결 자체가 안 될 때 납니다."
+          : "Supabase SQL 편집기에서 supabase/portfolio_snapshots.sql을 실행해 테이블을 만드세요.",
       },
       { status: 500 },
     );
@@ -80,7 +97,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });
     }
     if (!data) {
       return NextResponse.json({
@@ -115,7 +132,7 @@ export async function POST(req: NextRequest) {
     );
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });
     }
     return NextResponse.json({ ok: true });
   }
