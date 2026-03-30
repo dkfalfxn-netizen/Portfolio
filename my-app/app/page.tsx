@@ -1118,6 +1118,326 @@ export default function Home() {
             </div>
           </section>
 
+          <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+            <div className="border-b px-4 py-3">
+              <h2 className="font-semibold">보유 종목 (가족·퇴직연금)</h2>
+            </div>
+            <div className="space-y-5 p-4">
+              {positionsByOwner.map((group) => (
+                <div key={group.ownerName} className="rounded-xl border">
+                  <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="font-semibold">보유 종목({group.ownerName})</p>
+                    <div className="text-right text-sm">
+                      <p className="font-semibold">
+                        총 평가(주식+현금): ₩{Math.round(group.sectionTotal).toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        주식 ₩{Math.round(group.sectionStockValue).toLocaleString()} · 현금 ₩
+                        {Math.round(group.sectionCashKrw).toLocaleString()}{" "}
+                        <span className="hidden sm:inline">
+                          (USD {group.cashUsd.toLocaleString()} / KRW{" "}
+                          {group.cashKrw.toLocaleString()})
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-3 border-b bg-muted/10 px-4 py-2 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">현금</span>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground">USD</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="w-28 rounded-md border bg-background px-2 py-1.5 text-right"
+                        placeholder="0"
+                        value={group.cashUsd === 0 ? "" : group.cashUsd}
+                        onChange={(e) =>
+                          setCashByOwner((prev) => ({
+                            ...prev,
+                            [group.ownerName]: {
+                              ...prev[group.ownerName],
+                              usd: e.target.value === "" ? 0 : Number(e.target.value),
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground">KRW</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="w-32 rounded-md border bg-background px-2 py-1.5 text-right"
+                        placeholder="0"
+                        value={group.cashKrw}
+                        onChange={(e) =>
+                          setCashByOwner((prev) => ({
+                            ...prev,
+                            [group.ownerName]: {
+                              ...prev[group.ownerName],
+                              krw: Number.isFinite(Number(e.target.value))
+                                ? Number(e.target.value)
+                                : 0,
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  <Table className="min-w-full text-xs">
+                    <TableHeader className="bg-muted/40">
+                      <TableRow>
+                        <TableHead className="px-3 py-1.5">종목</TableHead>
+                        <TableHead className="px-3 py-1.5 text-right">수량</TableHead>
+                        <TableHead className="px-3 py-1.5 text-right">평단가</TableHead>
+                        <TableHead className="px-3 py-1.5 text-right">매입환율</TableHead>
+                        <TableHead className="px-3 py-1.5 text-right">현재가</TableHead>
+                        <TableHead className="px-3 py-1.5 text-right">평가금액</TableHead>
+                        <TableHead className="px-3 py-1.5 text-right">수익률</TableHead>
+                        <TableHead className="px-3 py-1.5 w-[140px]">수정/삭제</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {group.items.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={8}
+                            className="px-3 py-4 text-center text-xs text-muted-foreground"
+
+                          >
+                            등록된 종목이 없습니다.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        group.items.map((position, posIdx) => {
+                          const rowKey = makePositionKey(position);
+                          const isEditing = editingRowKey === rowKey;
+                          return (
+                        <TableRow key={rowKey} className="group/row">
+                          <TableCell className="px-3 py-1.5">
+                            {isEditing ? (
+                              <div className="flex flex-col gap-1">
+                                <input
+                                  className="w-24 rounded-md border bg-background px-2 py-1 text-sm font-medium"
+                                  placeholder="티커"
+                                  value={editSymbol}
+                                  onChange={(e) => setEditSymbol(e.target.value)}
+                                />
+                                <input
+                                  className="w-32 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground"
+                                  placeholder="종목명"
+                                  value={editName}
+                                  onChange={(e) => setEditName(e.target.value)}
+                                />
+                                <input
+                                  className="w-32 rounded-md border bg-background px-2 py-1 text-xs"
+                                  placeholder="차트 그룹 (선택)"
+                                  value={editChartGroup}
+                                  onChange={(e) => setEditChartGroup(e.target.value)}
+                                />
+                              </div>
+                            ) : (
+                              <>
+                                <p className="font-medium">{position.name}</p>
+                                <p className="text-xs text-muted-foreground">{position.symbol}</p>
+                                {position.chartGroup && (
+                                  <p className="mt-0.5 w-fit rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                    그룹: {position.chartGroup}
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 text-right">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="0.000001"
+                                step="any"
+                                className="w-24 rounded-md border bg-background px-2 py-1 text-right text-sm"
+                                value={editQuantity}
+                                onChange={(e) => setEditQuantity(e.target.value)}
+                              />
+                            ) : (
+                              position.quantity
+                            )}
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 text-right">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="0.000001"
+                                step="any"
+                                className="w-28 rounded-md border bg-background px-2 py-1 text-right text-sm"
+                                value={editAvgPrice}
+                                onChange={(e) => setEditAvgPrice(e.target.value)}
+                              />
+                            ) : (
+                              <>
+                                {position.avgPrice.toLocaleString()} {position.currency}
+                                <p className="text-xs text-muted-foreground">
+                                  {position.currency === "USD" ? (
+                                    <>
+                                      원화(매입환율): ₩
+                                      {Math.round(
+                                        position.avgPrice * position.purchaseFxUsed,
+                                      ).toLocaleString()}
+                                    </>
+                                  ) : (
+                                    <>
+                                      원화: ₩
+                                      {Math.round(position.avgPrice).toLocaleString()}
+                                    </>
+                                  )}
+                                </p>
+                              </>
+                            )}
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 text-right text-xs">
+                            {position.currency === "USD" ? (
+                              isEditing ? (
+                                <input
+                                  type="number"
+                                  min="0.000001"
+                                  step="any"
+                                  className="w-24 rounded-md border bg-background px-2 py-1 text-right text-sm"
+                                  value={editPurchaseUsdKrw}
+                                  onChange={(e) => setEditPurchaseUsdKrw(e.target.value)}
+                                />
+                              ) : (
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span>
+                                    {position.purchaseUsdKrw != null
+                                      ? `${position.purchaseUsdKrw.toLocaleString()} ₩/$`
+                                      : `${usdKrw.toLocaleString()} ₩/$`}
+                                  </span>
+                                  {position.purchaseUsdKrw == null ? (
+                                    <span className="text-[10px] text-muted-foreground">
+                                      미입력·현재환율 추정
+                                    </span>
+                                  ) : null}
+                                </div>
+                              )
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 text-right">
+                            {position.currentPrice.toLocaleString()} {position.currency}
+                            <p className="text-xs text-muted-foreground">
+                              원화: ₩
+                              {Math.round(
+                                position.currentPrice * (position.currency === "USD" ? usdKrw : 1),
+                              ).toLocaleString()}
+                            </p>
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 text-right">
+                            <p className="font-semibold">
+                              ₩{Math.round(position.valueKrw).toLocaleString()}
+                            </p>
+                          </TableCell>
+                          <TableCell
+                            className={`px-3 py-1.5 text-right font-semibold ${
+                              position.pnl >= 0 ? "text-red-500" : "text-blue-500"
+                            }`}
+                          >
+                            {position.currency === "USD" &&
+                            position.pnlUsdPct != null &&
+                            position.pnlKrwEquityPct != null ? (
+                              <div className="flex flex-col items-end gap-0.5 leading-tight">
+                                <span>
+                                  USD {position.pnlUsdPct >= 0 ? "+" : ""}
+                                  {position.pnlUsdPct.toFixed(2)}%
+                                </span>
+                                <span className="text-xs font-normal opacity-90">
+                                  원화 {position.pnlKrwEquityPct >= 0 ? "+" : ""}
+                                  {position.pnlKrwEquityPct.toFixed(2)}%
+                                </span>
+                                <span className="text-xs font-normal opacity-75">
+                                  {(position.valueKrw - position.costKrw) >= 0 ? "+" : ""}
+                                  ₩{Math.round(position.valueKrw - position.costKrw).toLocaleString()}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-end gap-0.5 leading-tight">
+                                <span>{position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)}%</span>
+                                <span className="text-xs font-normal opacity-75">
+                                  {(position.valueKrw - position.costKrw) >= 0 ? "+" : ""}
+                                  ₩{Math.round(position.valueKrw - position.costKrw).toLocaleString()}
+                                </span>
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5">
+                            {isEditing ? (
+                              <div className="flex flex-col gap-1">
+                                <button
+                                  type="button"
+                                  className="cursor-pointer rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
+                                  onClick={saveEditRow}
+                                >
+                                  저장
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
+                                  onClick={cancelEditRow}
+                                >
+                                  취소
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1 opacity-0 transition-opacity duration-150 group-hover/row:opacity-100">
+                                <div className="flex gap-1">
+                                  <button
+                                    type="button"
+                                    title="위로"
+                                    className="cursor-pointer rounded border px-1.5 py-0.5 text-xs transition-all duration-100 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
+                                    disabled={posIdx === 0}
+                                    onClick={() => moveRow(rowKey, "up")}
+                                  >
+                                    ▲
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="아래로"
+                                    className="cursor-pointer rounded border px-1.5 py-0.5 text-xs transition-all duration-100 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
+                                    disabled={posIdx === group.items.length - 1}
+                                    onClick={() => moveRow(rowKey, "down")}
+                                  >
+                                    ▼
+                                  </button>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
+                                  onClick={() => startEditRow(position)}
+                                >
+                                  수정
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs text-destructive transition-all duration-100 hover:bg-destructive/10 active:scale-95"
+                                  onClick={() => handleDeleteRow(rowKey)}
+                                >
+                                  삭제
+                                </button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              ))}
+            </div>
+          </section>
+
           <section className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-3 font-semibold">종목 추가</h2>
             <p className="mb-3 text-xs text-muted-foreground">
@@ -1130,7 +1450,7 @@ export default function Home() {
             </p>
             <form
               onSubmit={handleSubmit}
-              className="grid grid-cols-1 gap-3 md:grid-cols-6"
+              className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6"
             >
               <input
                 className="rounded-md border bg-background px-3 py-2 text-sm"
@@ -1166,6 +1486,23 @@ export default function Home() {
                 onChange={(e) => setForm((prev) => ({ ...prev, avgPrice: e.target.value }))}
                 required
               />
+              {/* 매입 환율: USD일 때만 표시, 평단가 바로 다음 */}
+              {form.currency === "USD" ? (
+                <input
+                  type="number"
+                  min="0.000001"
+                  step="any"
+                  required
+                  className="rounded-md border bg-background px-3 py-2 text-sm"
+                  placeholder={`매입환율 (예: ${Math.round(usdKrw)})`}
+                  value={form.purchaseUsdKrw}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, purchaseUsdKrw: e.target.value }))
+                  }
+                />
+              ) : (
+                <div />
+              )}
               <select
                 className="rounded-md border bg-background px-3 py-2 text-sm"
                 value={form.currency}
@@ -1181,7 +1518,7 @@ export default function Home() {
                 <option value="USD">USD</option>
                 <option value="KRW">KRW</option>
               </select>
-              <div className="flex flex-wrap gap-2 md:col-span-2">
+              <div className="col-span-2 flex flex-wrap gap-2 sm:col-span-3 md:col-span-6">
                 <select
                   className="min-w-[7rem] rounded-md border bg-background px-3 py-2 text-sm"
                   value={form.owner}
@@ -1225,29 +1562,6 @@ export default function Home() {
                   추가
                 </button>
               </div>
-              {form.currency === "USD" ? (
-                <div className="mt-3 flex flex-col gap-1 md:col-span-6">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    매입 환율 (USD 1달러당 원화, 매수 시점)
-                  </label>
-                  <input
-                    type="number"
-                    min="0.000001"
-                    step="any"
-                    required
-                    className="max-w-xs rounded-md border bg-background px-3 py-2 text-sm"
-                    placeholder={`예: ${Math.round(usdKrw)}`}
-                    value={form.purchaseUsdKrw}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, purchaseUsdKrw: e.target.value }))
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    원화 매입원가·원화 수익률에 반영됩니다. 위 환율 배지({usdKrw.toLocaleString()})는
-                    시세·평가액용 현재 환율입니다.
-                  </p>
-                </div>
-              ) : null}
             </form>
             <p className="mt-2 text-xs text-muted-foreground">
               현금(USD·KRW)은 아래 각 보유 종목 표 상단에서 입력합니다. 전체 현금
@@ -1500,325 +1814,6 @@ export default function Home() {
             )}
           </section>
 
-          <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
-            <div className="border-b px-4 py-3">
-              <h2 className="font-semibold">보유 종목 (가족·퇴직연금)</h2>
-            </div>
-            <div className="space-y-5 p-4">
-              {positionsByOwner.map((group) => (
-                <div key={group.ownerName} className="rounded-xl border">
-                  <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="font-semibold">보유 종목({group.ownerName})</p>
-                    <div className="text-right text-sm">
-                      <p className="font-semibold">
-                        총 평가(주식+현금): ₩{Math.round(group.sectionTotal).toLocaleString()}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        주식 ₩{Math.round(group.sectionStockValue).toLocaleString()} · 현금 ₩
-                        {Math.round(group.sectionCashKrw).toLocaleString()}{" "}
-                        <span className="hidden sm:inline">
-                          (USD {group.cashUsd.toLocaleString()} / KRW{" "}
-                          {group.cashKrw.toLocaleString()})
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-end gap-3 border-b bg-muted/10 px-4 py-2 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">현금</span>
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground">USD</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        className="w-28 rounded-md border bg-background px-2 py-1.5 text-right"
-                        placeholder="0"
-                        value={group.cashUsd === 0 ? "" : group.cashUsd}
-                        onChange={(e) =>
-                          setCashByOwner((prev) => ({
-                            ...prev,
-                            [group.ownerName]: {
-                              ...prev[group.ownerName],
-                              usd: e.target.value === "" ? 0 : Number(e.target.value),
-                            },
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground">KRW</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        className="w-32 rounded-md border bg-background px-2 py-1.5 text-right"
-                        placeholder="0"
-                        value={group.cashKrw}
-                        onChange={(e) =>
-                          setCashByOwner((prev) => ({
-                            ...prev,
-                            [group.ownerName]: {
-                              ...prev[group.ownerName],
-                              krw: Number.isFinite(Number(e.target.value))
-                                ? Number(e.target.value)
-                                : 0,
-                            },
-                          }))
-                        }
-                      />
-                    </label>
-                  </div>
-                  <Table className="min-w-full text-sm">
-                    <TableHeader className="bg-muted/40">
-                      <TableRow>
-                        <TableHead className="px-4 py-3">종목</TableHead>
-                        <TableHead className="px-4 py-3 text-right">수량</TableHead>
-                        <TableHead className="px-4 py-3 text-right">평단가</TableHead>
-                        <TableHead className="px-4 py-3 text-right">매입환율</TableHead>
-                        <TableHead className="px-4 py-3 text-right">현재가</TableHead>
-                        <TableHead className="px-4 py-3 text-right">평가금액</TableHead>
-                        <TableHead className="px-4 py-3 text-right">수익률</TableHead>
-                        <TableHead className="px-4 py-3 w-[160px]">수정/삭제</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {group.items.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={8}
-                            className="px-4 py-6 text-center text-sm text-muted-foreground"
-
-                          >
-                            등록된 종목이 없습니다.
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        group.items.map((position, posIdx) => {
-                          const rowKey = makePositionKey(position);
-                          const isEditing = editingRowKey === rowKey;
-                          return (
-                        <TableRow key={rowKey} className="group/row">
-                          <TableCell className="px-4 py-3">
-                            {isEditing ? (
-                              <div className="flex flex-col gap-1">
-                                <input
-                                  className="w-24 rounded-md border bg-background px-2 py-1 text-sm font-medium"
-                                  placeholder="티커"
-                                  value={editSymbol}
-                                  onChange={(e) => setEditSymbol(e.target.value)}
-                                />
-                                <input
-                                  className="w-32 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground"
-                                  placeholder="종목명"
-                                  value={editName}
-                                  onChange={(e) => setEditName(e.target.value)}
-                                />
-                                <input
-                                  className="w-32 rounded-md border bg-background px-2 py-1 text-xs"
-                                  placeholder="차트 그룹 (선택)"
-                                  value={editChartGroup}
-                                  onChange={(e) => setEditChartGroup(e.target.value)}
-                                />
-                              </div>
-                            ) : (
-                              <>
-                                <p className="font-medium">{position.name}</p>
-                                <p className="text-xs text-muted-foreground">{position.symbol}</p>
-                                {position.chartGroup && (
-                                  <p className="mt-0.5 w-fit rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                    그룹: {position.chartGroup}
-                                  </p>
-                                )}
-                              </>
-                            )}
-                          </TableCell>
-                          <TableCell className="px-4 py-3 text-right">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                min="0.000001"
-                                step="any"
-                                className="w-24 rounded-md border bg-background px-2 py-1 text-right text-sm"
-                                value={editQuantity}
-                                onChange={(e) => setEditQuantity(e.target.value)}
-                              />
-                            ) : (
-                              position.quantity
-                            )}
-                          </TableCell>
-                          <TableCell className="px-4 py-3 text-right">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                min="0.000001"
-                                step="any"
-                                className="w-28 rounded-md border bg-background px-2 py-1 text-right text-sm"
-                                value={editAvgPrice}
-                                onChange={(e) => setEditAvgPrice(e.target.value)}
-                              />
-                            ) : (
-                              <>
-                                {position.avgPrice.toLocaleString()} {position.currency}
-                                <p className="text-xs text-muted-foreground">
-                                  {position.currency === "USD" ? (
-                                    <>
-                                      원화(매입환율): ₩
-                                      {Math.round(
-                                        position.avgPrice * position.purchaseFxUsed,
-                                      ).toLocaleString()}
-                                    </>
-                                  ) : (
-                                    <>
-                                      원화: ₩
-                                      {Math.round(position.avgPrice).toLocaleString()}
-                                    </>
-                                  )}
-                                </p>
-                              </>
-                            )}
-                          </TableCell>
-                          <TableCell className="px-4 py-3 text-right text-xs">
-                            {position.currency === "USD" ? (
-                              isEditing ? (
-                                <input
-                                  type="number"
-                                  min="0.000001"
-                                  step="any"
-                                  className="w-24 rounded-md border bg-background px-2 py-1 text-right text-sm"
-                                  value={editPurchaseUsdKrw}
-                                  onChange={(e) => setEditPurchaseUsdKrw(e.target.value)}
-                                />
-                              ) : (
-                                <div className="flex flex-col items-end gap-0.5">
-                                  <span>
-                                    {position.purchaseUsdKrw != null
-                                      ? `${position.purchaseUsdKrw.toLocaleString()} ₩/$`
-                                      : `${usdKrw.toLocaleString()} ₩/$`}
-                                  </span>
-                                  {position.purchaseUsdKrw == null ? (
-                                    <span className="text-[10px] text-muted-foreground">
-                                      미입력·현재환율 추정
-                                    </span>
-                                  ) : null}
-                                </div>
-                              )
-                            ) : (
-                              "—"
-                            )}
-                          </TableCell>
-                          <TableCell className="px-4 py-3 text-right">
-                            {position.currentPrice.toLocaleString()} {position.currency}
-                            <p className="text-xs text-muted-foreground">
-                              원화: ₩
-                              {Math.round(
-                                position.currentPrice * (position.currency === "USD" ? usdKrw : 1),
-                              ).toLocaleString()}
-                            </p>
-                          </TableCell>
-                          <TableCell className="px-4 py-3 text-right">
-                            <p className="font-semibold">
-                              ₩{Math.round(position.valueKrw).toLocaleString()}
-                            </p>
-                          </TableCell>
-                          <TableCell
-                            className={`px-4 py-3 text-right font-semibold ${
-                              position.pnl >= 0 ? "text-red-500" : "text-blue-500"
-                            }`}
-                          >
-                            {position.currency === "USD" &&
-                            position.pnlUsdPct != null &&
-                            position.pnlKrwEquityPct != null ? (
-                              <div className="flex flex-col items-end gap-0.5 leading-tight">
-                                <span>
-                                  USD {position.pnlUsdPct >= 0 ? "+" : ""}
-                                  {position.pnlUsdPct.toFixed(2)}%
-                                </span>
-                                <span className="text-xs font-normal opacity-90">
-                                  원화 {position.pnlKrwEquityPct >= 0 ? "+" : ""}
-                                  {position.pnlKrwEquityPct.toFixed(2)}%
-                                </span>
-                                <span className="text-xs font-normal opacity-75">
-                                  {(position.valueKrw - position.costKrw) >= 0 ? "+" : ""}
-                                  ₩{Math.round(position.valueKrw - position.costKrw).toLocaleString()}
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="flex flex-col items-end gap-0.5 leading-tight">
-                                <span>{position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)}%</span>
-                                <span className="text-xs font-normal opacity-75">
-                                  {(position.valueKrw - position.costKrw) >= 0 ? "+" : ""}
-                                  ₩{Math.round(position.valueKrw - position.costKrw).toLocaleString()}
-                                </span>
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell className="px-4 py-3">
-                            {isEditing ? (
-                              <div className="flex flex-col gap-1">
-                                <button
-                                  type="button"
-                                  className="cursor-pointer rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
-                                  onClick={saveEditRow}
-                                >
-                                  저장
-                                </button>
-                                <button
-                                  type="button"
-                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
-                                  onClick={cancelEditRow}
-                                >
-                                  취소
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex flex-col gap-1 opacity-0 transition-opacity duration-150 group-hover/row:opacity-100">
-                                <div className="flex gap-1">
-                                  <button
-                                    type="button"
-                                    title="위로"
-                                    className="cursor-pointer rounded border px-1.5 py-0.5 text-xs transition-all duration-100 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
-                                    disabled={posIdx === 0}
-                                    onClick={() => moveRow(rowKey, "up")}
-                                  >
-                                    ▲
-                                  </button>
-                                  <button
-                                    type="button"
-                                    title="아래로"
-                                    className="cursor-pointer rounded border px-1.5 py-0.5 text-xs transition-all duration-100 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
-                                    disabled={posIdx === group.items.length - 1}
-                                    onClick={() => moveRow(rowKey, "down")}
-                                  >
-                                    ▼
-                                  </button>
-                                </div>
-                                <button
-                                  type="button"
-                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
-                                  onClick={() => startEditRow(position)}
-                                >
-                                  수정
-                                </button>
-                                <button
-                                  type="button"
-                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs text-destructive transition-all duration-100 hover:bg-destructive/10 active:scale-95"
-                                  onClick={() => handleDeleteRow(rowKey)}
-                                >
-                                  삭제
-                                </button>
-                              </div>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              ))}
-            </div>
-          </section>
         </main>
       </div>
     </div>

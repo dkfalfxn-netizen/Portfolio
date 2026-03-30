@@ -126,9 +126,10 @@ export function FamilyAllocationDonut({
         `,
       }}
     >
-      {/* 상단 글래스 범례 */}
+      {/* 상단 글래스 범례 — 비중 내림차순 */}
       <div className="mb-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 backdrop-blur-md">
-        {data.map((d, i) => {
+        {[...data].sort((a, b) => b.weight - a.weight).map((d) => {
+          const i = data.indexOf(d);
           const c = NEON_PALETTE[i % NEON_PALETTE.length];
           return (
             <div key={d.name} className="flex items-center gap-2 text-[11px] font-medium tracking-tight text-zinc-200">
