@@ -131,12 +131,33 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  async function fetchEurKrwOnly(): Promise<number | null> {
+    try {
+      const chartUrl =
+        "https://query1.finance.yahoo.com/v8/finance/chart/EURKRW=X?interval=1m&range=1d";
+      const response = await fetch(chartUrl, {
+        method: "GET",
+        cache: "no-store",
+        headers: { "User-Agent": "Mozilla/5.0" },
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      const meta = data?.chart?.result?.[0]?.meta;
+      const price =
+        typeof meta?.regularMarketPrice === "number" ? meta.regularMarketPrice : null;
+      return price;
+    } catch {
+      return null;
+    }
+  }
+
   if (rawSymbols.length === 0) {
-    const usdKrw = await fetchUsdKrwOnly();
+    const [usdKrw, eurKrw] = await Promise.all([fetchUsdKrwOnly(), fetchEurKrwOnly()]);
     return NextResponse.json({
       quotes: {},
       intraday: {},
       usdKrw,
+      eurKrw,
       fetchedAt: Date.now(),
     });
   }
@@ -149,7 +170,7 @@ export async function GET(req: NextRequest) {
     yahoo: toYahooSymbol(symbol),
   }));
 
-  const yahooSymbols = [...new Set([...mapping.map((m) => m.yahoo), "KRW=X"])];
+  const yahooSymbols = [...new Set([...mapping.map((m) => m.yahoo), "KRW=X", "EURKRW=X"])];
 
   try {
     const [quoteEntries, commodityResults] = await Promise.all([
@@ -219,11 +240,14 @@ export async function GET(req: NextRequest) {
 
     const fxQuote = byYahooSymbol.get("KRW=X");
     const usdKrw = typeof fxQuote?.price === "number" ? fxQuote.price : null;
+    const eurFx = byYahooSymbol.get("EURKRW=X");
+    const eurKrw = typeof eurFx?.price === "number" ? eurFx.price : null;
 
     return NextResponse.json({
       quotes,
       intraday,
       usdKrw,
+      eurKrw,
       fetchedAt: Date.now(),
     });
   } catch {

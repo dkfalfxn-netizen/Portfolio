@@ -12,10 +12,10 @@ export function LivePriceCell({
   previousClose,
   krwLine,
 }: {
-  currency: "USD" | "KRW";
+  currency: "USD" | "EUR" | "KRW";
   price: number;
   previousClose: number | null;
-  /** USD 종목일 때 원화 환산 한 줄 (선택) */
+  /** USD/EUR 종목일 때 원화 환산 한 줄 (선택) */
   krwLine?: string;
 }) {
   const hasDay = previousClose != null && previousClose > 0;
@@ -24,7 +24,7 @@ export function LivePriceCell({
   const up = change != null && change >= 0;
 
   const fmt = (n: number) =>
-    currency === "USD"
+    currency === "USD" || currency === "EUR"
       ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
       : Math.round(n).toLocaleString();
 

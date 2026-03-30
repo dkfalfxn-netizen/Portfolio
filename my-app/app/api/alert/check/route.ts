@@ -9,8 +9,9 @@ type Position = {
   quantity: number;
   avgPrice: number;
   currentPrice: number;
-  currency: "USD" | "KRW";
+  currency: "USD" | "EUR" | "KRW";
   purchaseUsdKrw?: number;
+  purchaseEurKrw?: number;
   accountType: "해외주식" | "국내주식";
   accountName: string;
   owner: string;
@@ -19,9 +20,12 @@ type Position = {
 type CashEntry = { usd: number; krw: number };
 
 const FALLBACK_USD_KRW = 1350;
+const FALLBACK_EUR_KRW = 1450;
 
-function calcValueKrw(p: Position, usdKrw: number): number {
-  return p.quantity * p.currentPrice * (p.currency === "USD" ? usdKrw : 1);
+function calcValueKrw(p: Position, usdKrw: number, eurKrw: number): number {
+  if (p.currency === "USD") return p.quantity * p.currentPrice * usdKrw;
+  if (p.currency === "EUR") return p.quantity * p.currentPrice * eurKrw;
+  return p.quantity * p.currentPrice;
 }
 
 function checkRules(
@@ -29,6 +33,7 @@ function checkRules(
   cashByOwner: Record<string, CashEntry>,
   rules: AlertRule[],
   usdKrw: number,
+  eurKrw: number,
 ): AlertViolation[] {
   const violations: AlertViolation[] = [];
 
@@ -41,7 +46,7 @@ function checkRules(
       const ownerPositions = positions.filter((p) => p.owner === owner);
       const cash = cashByOwner[owner] ?? { usd: 0, krw: 0 };
       const totalKrw =
-        ownerPositions.reduce((s, p) => s + calcValueKrw(p, usdKrw), 0) +
+        ownerPositions.reduce((s, p) => s + calcValueKrw(p, usdKrw, eurKrw), 0) +
         cash.krw +
         cash.usd * usdKrw;
 
@@ -53,7 +58,7 @@ function checkRules(
           : ownerPositions.filter((p) => p.symbol === rule.symbol);
 
       const symbolValue = symbolPositions.reduce(
-        (s, p) => s + calcValueKrw(p, usdKrw),
+        (s, p) => s + calcValueKrw(p, usdKrw, eurKrw),
         0,
       );
       const currentPct = (symbolValue / totalKrw) * 100;
@@ -110,7 +115,13 @@ async function handleCheck(syncKey?: string | null) {
     const cashByOwner = (snap.cash_by_owner ?? {}) as Record<string, CashEntry>;
     const rules = Array.isArray(cfg.rules) ? (cfg.rules as AlertRule[]) : [];
 
-    const violations = checkRules(positions, cashByOwner, rules, FALLBACK_USD_KRW);
+    const violations = checkRules(
+      positions,
+      cashByOwner,
+      rules,
+      FALLBACK_USD_KRW,
+      FALLBACK_EUR_KRW,
+    );
 
     let sent = false;
     if (violations.length > 0 && cfg.email) {

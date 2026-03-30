@@ -30,9 +30,11 @@ type Position = {
   quantity: number;
   avgPrice: number;
   currentPrice: number;
-  currency: "USD" | "KRW";
+  currency: "USD" | "EUR" | "KRW";
   /** 해외(USD) 매수 시점 USD/KRW — 원화 매입원가·원화 수익률에 사용 */
   purchaseUsdKrw?: number;
+  /** 해외(EUR) 매수 시점 EUR/KRW */
+  purchaseEurKrw?: number;
   accountType: "해외주식" | "국내주식";
   accountName: string;
   owner: OwnerName;
@@ -48,6 +50,7 @@ type MarketResponse = {
   /** 티커별 당일 분봉 종가 시계열 */
   intraday?: Record<string, number[]>;
   usdKrw: number | null;
+  eurKrw: number | null;
   fetchedAt: number;
 };
 
@@ -187,6 +190,21 @@ function blendPurchaseUsdKrw(existing: Position, added: Position): number | unde
   return undefined;
 }
 
+/** EUR 종목 합산 시 매입 EUR/KRW 가중평균 */
+function blendPurchaseEurKrw(existing: Position, added: Position): number | undefined {
+  if (existing.currency !== "EUR") return undefined;
+  const eurCostE = existing.quantity * existing.avgPrice;
+  const eurCostP = added.quantity * added.avgPrice;
+  const fxE = existing.purchaseEurKrw;
+  const fxP = added.purchaseEurKrw;
+  const rE = fxE ?? fxP;
+  const rP = fxP ?? fxE;
+  if (rE != null && rP != null && rE > 0 && rP > 0) {
+    return (eurCostE * rE + eurCostP * rP) / (eurCostE + eurCostP);
+  }
+  return undefined;
+}
+
 function mergeDuplicatePositions(positions: Position[]): Position[] {
   const map = new Map<string, Position>();
   for (const p of positions) {
@@ -200,8 +218,11 @@ function mergeDuplicatePositions(positions: Position[]): Position[] {
     const newAvg =
       (existing.quantity * existing.avgPrice + p.quantity * p.avgPrice) / newQty;
     const mergedPurchase = blendPurchaseUsdKrw(existing, p);
+    const mergedEur = blendPurchaseEurKrw(existing, p);
     const nextPurchase =
       mergedPurchase ?? existing.purchaseUsdKrw ?? p.purchaseUsdKrw;
+    const nextEurPurchase =
+      mergedEur ?? existing.purchaseEurKrw ?? p.purchaseEurKrw;
     map.set(key, {
       ...existing,
       quantity: newQty,
@@ -211,6 +232,9 @@ function mergeDuplicatePositions(positions: Position[]): Position[] {
       ...(existing.currency === "USD" && nextPurchase != null && nextPurchase > 0
         ? { purchaseUsdKrw: nextPurchase }
         : {}),
+      ...(existing.currency === "EUR" && nextEurPurchase != null && nextEurPurchase > 0
+        ? { purchaseEurKrw: nextEurPurchase }
+        : {}),
     });
   }
   return Array.from(map.values());
@@ -219,22 +243,30 @@ function mergeDuplicatePositions(positions: Position[]): Position[] {
 function isValidPosition(value: unknown): value is Position {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<Position>;
-  const purchaseOk =
+  const purchaseUsdOk =
+    item.currency !== "USD" ||
     item.purchaseUsdKrw === undefined ||
     (typeof item.purchaseUsdKrw === "number" &&
       Number.isFinite(item.purchaseUsdKrw) &&
       item.purchaseUsdKrw > 0);
+  const purchaseEurOk =
+    item.currency !== "EUR" ||
+    item.purchaseEurKrw === undefined ||
+    (typeof item.purchaseEurKrw === "number" &&
+      Number.isFinite(item.purchaseEurKrw) &&
+      item.purchaseEurKrw > 0);
   return (
     typeof item.symbol === "string" &&
     typeof item.name === "string" &&
     typeof item.quantity === "number" &&
     typeof item.avgPrice === "number" &&
     typeof item.currentPrice === "number" &&
-    (item.currency === "USD" || item.currency === "KRW") &&
+    (item.currency === "USD" || item.currency === "EUR" || item.currency === "KRW") &&
     (item.accountType === "해외주식" || item.accountType === "국내주식") &&
     typeof item.accountName === "string" &&
     isOwnerName(item.owner) &&
-    purchaseOk
+    purchaseUsdOk &&
+    purchaseEurOk
   );
 }
 
@@ -272,7 +304,9 @@ function loadPositions(): Position[] {
           typeof legacy.quantity !== "number" ||
           typeof legacy.avgPrice !== "number" ||
           typeof legacy.currentPrice !== "number" ||
-          (legacy.currency !== "USD" && legacy.currency !== "KRW")
+          (legacy.currency !== "USD" &&
+            legacy.currency !== "EUR" &&
+            legacy.currency !== "KRW")
         ) {
           return null;
         }
@@ -358,6 +392,7 @@ export default function Home() {
   const [editQuantity, setEditQuantity] = useState("");
   const [editAvgPrice, setEditAvgPrice] = useState("");
   const [editPurchaseUsdKrw, setEditPurchaseUsdKrw] = useState("");
+  const [editPurchaseEurKrw, setEditPurchaseEurKrw] = useState("");
 
   const [cloudSyncKey, setCloudSyncKey] = useState("");
   const [syncKeyDraft, setSyncKeyDraft] = useState("");
@@ -385,7 +420,7 @@ export default function Home() {
     name: "",
     quantity: "",
     avgPrice: "",
-    currency: "USD" as "USD" | "KRW",
+    currency: "USD" as "USD" | "EUR" | "KRW",
     owner: "김승주" as OwnerName,
   });
 
@@ -395,7 +430,8 @@ export default function Home() {
     quantity: "",
     avgPrice: "",
     purchaseUsdKrw: "",
-    currency: "USD" as "USD" | "KRW",
+    purchaseEurKrw: "",
+    currency: "USD" as "USD" | "EUR" | "KRW",
     accountType: "해외주식" as "해외주식" | "국내주식",
     accountName: "미국주식-주계좌",
     owner: "김승주" as OwnerName,
@@ -421,6 +457,7 @@ export default function Home() {
   });
 
   const usdKrw = marketQuery.data?.usdKrw ?? 1350;
+  const eurKrw = marketQuery.data?.eurKrw ?? 1450;
 
   const totalCashKrw = useMemo(() => {
     return OWNER_NAMES.reduce((sum, owner) => {
@@ -439,15 +476,24 @@ export default function Home() {
       const pnl = ((currentPrice - position.avgPrice) / position.avgPrice) * 100;
       /** 매입 시 환율 없으면 현재 환율로 원가 추정(기존 데이터 호환) */
       const purchaseFx =
-        position.currency === "USD" ? (position.purchaseUsdKrw ?? usdKrw) : 1;
+        position.currency === "USD"
+          ? (position.purchaseUsdKrw ?? usdKrw)
+          : position.currency === "EUR"
+            ? (position.purchaseEurKrw ?? eurKrw)
+            : 1;
       const valueKrw =
-        position.quantity * currentPrice * (position.currency === "USD" ? usdKrw : 1);
+        position.currency === "USD"
+          ? position.quantity * currentPrice * usdKrw
+          : position.currency === "EUR"
+            ? position.quantity * currentPrice * eurKrw
+            : position.quantity * currentPrice;
       const costKrw = position.quantity * position.avgPrice * purchaseFx;
-      /** 해외(USD): 달러 주가 수익률(종목 통화) */
+      /** 해외(USD/EUR): 종목 통화 기준 주가 수익률 */
       const pnlUsdPct = position.currency === "USD" ? pnl : null;
-      /** 해외(USD): 매입 환율 기준 원화 매입액 대비 현재 원화 평가 수익률 */
+      const pnlEurPct = position.currency === "EUR" ? pnl : null;
+      /** 매입 환율 기준 원화 매입액 대비 현재 원화 평가 수익률 */
       const pnlKrwEquityPct =
-        position.currency === "USD" && costKrw > 0
+        (position.currency === "USD" || position.currency === "EUR") && costKrw > 0
           ? ((valueKrw - costKrw) / costKrw) * 100
           : null;
       return {
@@ -459,10 +505,11 @@ export default function Home() {
         costKrw,
         purchaseFxUsed: purchaseFx,
         pnlUsdPct,
+        pnlEurPct,
         pnlKrwEquityPct,
       };
     });
-  }, [positions, marketQuery.data, usdKrw]);
+  }, [positions, marketQuery.data, usdKrw, eurKrw]);
 
   const summaryCards = useMemo(() => {
     const stockValue = enrichedPositions.reduce((sum, position) => sum + position.valueKrw, 0);
@@ -911,7 +958,10 @@ export default function Home() {
     const price = Number(simForm.avgPrice);
     if (!simForm.symbol || !qty || !price || qty <= 0 || price <= 0) return null;
 
-    const simValueKrw = qty * price * (simForm.currency === "USD" ? usdKrw : 1);
+    const simValueKrw =
+      qty *
+      price *
+      (simForm.currency === "USD" ? usdKrw : simForm.currency === "EUR" ? eurKrw : 1);
     const ownerData = positionsByOwner.find((g) => g.ownerName === simForm.owner);
     if (!ownerData) return null;
 
@@ -935,7 +985,7 @@ export default function Home() {
     });
 
     return { beforeTotal, afterTotal, simValueKrw, rows };
-  }, [simForm, positionsByOwner, usdKrw]);
+  }, [simForm, positionsByOwner, usdKrw, eurKrw]);
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -948,8 +998,12 @@ export default function Home() {
     if (!Number.isFinite(avgPrice) || avgPrice <= 0) return;
 
     const purchaseUsdKrwNum = Number(form.purchaseUsdKrw);
+    const purchaseEurKrwNum = Number(form.purchaseEurKrw);
     if (form.currency === "USD") {
       if (!Number.isFinite(purchaseUsdKrwNum) || purchaseUsdKrwNum <= 0) return;
+    }
+    if (form.currency === "EUR") {
+      if (!Number.isFinite(purchaseEurKrwNum) || purchaseEurKrwNum <= 0) return;
     }
 
     const symbol = form.symbol.trim().toUpperCase();
@@ -965,6 +1019,7 @@ export default function Home() {
       accountName,
       owner: form.owner,
       ...(form.currency === "USD" ? { purchaseUsdKrw: purchaseUsdKrwNum } : {}),
+      ...(form.currency === "EUR" ? { purchaseEurKrw: purchaseEurKrwNum } : {}),
     };
 
     setPositions((prev) => {
@@ -976,6 +1031,7 @@ export default function Home() {
       const newAvg =
         (existing.quantity * existing.avgPrice + quantity * avgPrice) / newQty;
       const mergedPurchase = blendPurchaseUsdKrw(existing, nextEntry);
+      const mergedEur = blendPurchaseEurKrw(existing, nextEntry);
       const merged: Position = {
         ...existing,
         quantity: newQty,
@@ -987,8 +1043,15 @@ export default function Home() {
         const px =
           mergedPurchase ?? existing.purchaseUsdKrw ?? nextEntry.purchaseUsdKrw;
         if (px != null && px > 0) merged.purchaseUsdKrw = px;
+        delete merged.purchaseEurKrw;
+      } else if (nextEntry.currency === "EUR") {
+        const px =
+          mergedEur ?? existing.purchaseEurKrw ?? nextEntry.purchaseEurKrw;
+        if (px != null && px > 0) merged.purchaseEurKrw = px;
+        delete merged.purchaseUsdKrw;
       } else {
         delete merged.purchaseUsdKrw;
+        delete merged.purchaseEurKrw;
       }
       return prev.map((p, i) => (i === idx ? merged : p));
     });
@@ -999,6 +1062,7 @@ export default function Home() {
       quantity: "",
       avgPrice: "",
       purchaseUsdKrw: "",
+      purchaseEurKrw: "",
       currency: form.currency,
       accountType: form.accountType,
       accountName: form.accountName,
@@ -1021,6 +1085,9 @@ export default function Home() {
     setEditPurchaseUsdKrw(
       p.currency === "USD" ? String(p.purchaseUsdKrw ?? "") : "",
     );
+    setEditPurchaseEurKrw(
+      p.currency === "EUR" ? String(p.purchaseEurKrw ?? "") : "",
+    );
   }
 
   function cancelEditRow() {
@@ -1031,6 +1098,7 @@ export default function Home() {
     setEditQuantity("");
     setEditAvgPrice("");
     setEditPurchaseUsdKrw("");
+    setEditPurchaseEurKrw("");
   }
 
   function saveEditRow() {
@@ -1038,6 +1106,7 @@ export default function Home() {
     const q = Number(editQuantity);
     const a = Number(editAvgPrice);
     const px = Number(editPurchaseUsdKrw);
+    const peur = Number(editPurchaseEurKrw);
     const sym = editSymbol.trim().toUpperCase();
     const nm = editName.trim();
     const cg = editChartGroup.trim() || undefined;
@@ -1050,6 +1119,10 @@ export default function Home() {
         if (p.currency === "USD") {
           if (!Number.isFinite(px) || px <= 0) return p;
           return { ...p, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a, purchaseUsdKrw: px };
+        }
+        if (p.currency === "EUR") {
+          if (!Number.isFinite(peur) || peur <= 0) return p;
+          return { ...p, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a, purchaseEurKrw: peur };
         }
         return { ...p, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a };
       }),
@@ -1102,7 +1175,7 @@ export default function Home() {
               가족(담당자)별·계좌별 자산과 종목별 수익률을 한눈에 확인합니다.
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              환율(USD/KRW): {usdKrw.toLocaleString()} | 시세 갱신:{" "}
+              환율 USD/KRW: {usdKrw.toLocaleString()} · EUR/KRW: {eurKrw.toLocaleString()} | 시세 갱신:{" "}
               {marketQuery.data?.fetchedAt
                 ? new Date(marketQuery.data.fetchedAt).toLocaleTimeString()
                 : "대기 중"}
@@ -1439,7 +1512,11 @@ export default function Home() {
                                   ? `₩${Math.round(
                                       position.currentPrice * usdKrw,
                                     ).toLocaleString()}`
-                                  : undefined
+                                  : position.currency === "EUR"
+                                    ? `₩${Math.round(
+                                        position.currentPrice * eurKrw,
+                                      ).toLocaleString()}`
+                                    : undefined
                               }
                             />
                           </TableCell>
@@ -1462,13 +1539,24 @@ export default function Home() {
                               position.pnl >= 0 ? "text-red-500" : "text-blue-500"
                             }`}
                           >
-                            {position.currency === "USD" &&
-                            position.pnlUsdPct != null &&
-                            position.pnlKrwEquityPct != null ? (
+                            {(position.currency === "USD" || position.currency === "EUR") &&
+                            position.pnlKrwEquityPct != null &&
+                            (position.currency === "USD"
+                              ? position.pnlUsdPct != null
+                              : position.pnlEurPct != null) ? (
                               <div className="flex flex-col items-end gap-0.5 leading-tight">
                                 <span>
-                                  USD {position.pnlUsdPct >= 0 ? "+" : ""}
-                                  {position.pnlUsdPct.toFixed(2)}%
+                                  {position.currency === "USD" ? "USD" : "EUR"}{" "}
+                                  {(position.currency === "USD"
+                                    ? position.pnlUsdPct!
+                                    : position.pnlEurPct!) >= 0
+                                    ? "+"
+                                    : ""}
+                                  {(position.currency === "USD"
+                                    ? position.pnlUsdPct!
+                                    : position.pnlEurPct!
+                                  ).toFixed(2)}
+                                  %
                                 </span>
                                 <span className="text-xs font-normal opacity-90">
                                   원화 {position.pnlKrwEquityPct >= 0 ? "+" : ""}
@@ -1506,7 +1594,7 @@ export default function Home() {
                               <>
                                 {position.avgPrice.toLocaleString()} {position.currency}
                                 <p className="text-xs text-muted-foreground">
-                                  {position.currency === "USD" ? (
+                                  {position.currency === "USD" || position.currency === "EUR" ? (
                                     <>
                                       원화(매입환율): ₩
                                       {Math.round(
@@ -1542,6 +1630,30 @@ export default function Home() {
                                       : `${usdKrw.toLocaleString()} ₩/$`}
                                   </span>
                                   {position.purchaseUsdKrw == null ? (
+                                    <span className="text-[10px] text-muted-foreground">
+                                      미입력·현재환율 추정
+                                    </span>
+                                  ) : null}
+                                </div>
+                              )
+                            ) : position.currency === "EUR" ? (
+                              isEditing ? (
+                                <input
+                                  type="number"
+                                  min="0.000001"
+                                  step="any"
+                                  className="w-24 rounded-md border bg-background px-2 py-1 text-right text-sm"
+                                  value={editPurchaseEurKrw}
+                                  onChange={(e) => setEditPurchaseEurKrw(e.target.value)}
+                                />
+                              ) : (
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span>
+                                    {position.purchaseEurKrw != null
+                                      ? `${position.purchaseEurKrw.toLocaleString()} ₩/EUR`
+                                      : `${eurKrw.toLocaleString()} ₩/EUR`}
+                                  </span>
+                                  {position.purchaseEurKrw == null ? (
                                     <span className="text-[10px] text-muted-foreground">
                                       미입력·현재환율 추정
                                     </span>
@@ -1641,6 +1753,8 @@ export default function Home() {
               국내 주식은 6자리 종목코드(예: <span className="font-medium text-foreground">005930</span>)
               또는 <span className="font-medium text-foreground">KRX:005930</span> 형식으로 입력하면 실시간 시세가 반영됩니다.
               KOSDAQ은 <span className="font-medium text-foreground">KQ:293490</span> 형식을 사용하세요.
+              유로 표시 종목은 통화를 <span className="font-medium text-foreground">EUR</span>로 두고, 티커는 Yahoo Finance 심볼(예: 유럽{" "}
+              <span className="font-medium text-foreground">ASML.AS</span>)을 입력하면 시세가 반영됩니다.
             </p>
             <form
               onSubmit={handleSubmit}
@@ -1680,7 +1794,7 @@ export default function Home() {
                 onChange={(e) => setForm((prev) => ({ ...prev, avgPrice: e.target.value }))}
                 required
               />
-              {/* 매입 환율: USD일 때만 표시, 평단가 바로 다음 */}
+              {/* 매입 환율: USD/EUR 해외 통화일 때 표시, 평단가 바로 다음 */}
               {form.currency === "USD" ? (
                 <input
                   type="number"
@@ -1688,10 +1802,23 @@ export default function Home() {
                   step="any"
                   required
                   className="rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder={`매입환율 (예: ${Math.round(usdKrw)})`}
+                  placeholder={`매입 USD/KRW (예: ${Math.round(usdKrw)})`}
                   value={form.purchaseUsdKrw}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, purchaseUsdKrw: e.target.value }))
+                  }
+                />
+              ) : form.currency === "EUR" ? (
+                <input
+                  type="number"
+                  min="0.000001"
+                  step="any"
+                  required
+                  className="rounded-md border bg-background px-3 py-2 text-sm"
+                  placeholder={`매입 EUR/KRW (예: ${Math.round(eurKrw)})`}
+                  value={form.purchaseEurKrw}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, purchaseEurKrw: e.target.value }))
                   }
                 />
               ) : (
@@ -1700,16 +1827,19 @@ export default function Home() {
               <select
                 className="rounded-md border bg-background px-3 py-2 text-sm"
                 value={form.currency}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const c = e.target.value as "USD" | "EUR" | "KRW";
                   setForm((prev) => ({
                     ...prev,
-                    currency: e.target.value as "USD" | "KRW",
-                    accountType: e.target.value === "KRW" ? "국내주식" : "해외주식",
-                    purchaseUsdKrw: e.target.value === "KRW" ? "" : prev.purchaseUsdKrw,
-                  }))
-                }
+                    currency: c,
+                    accountType: c === "KRW" ? "국내주식" : "해외주식",
+                    purchaseUsdKrw: c === "USD" ? prev.purchaseUsdKrw : "",
+                    purchaseEurKrw: c === "EUR" ? prev.purchaseEurKrw : "",
+                  }));
+                }}
               >
                 <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
                 <option value="KRW">KRW</option>
               </select>
               <div className="col-span-2 flex flex-wrap gap-2 sm:col-span-3 md:col-span-6">
@@ -1936,9 +2066,12 @@ export default function Home() {
               <select
                 className="rounded-md border bg-background px-3 py-2 text-sm"
                 value={simForm.currency}
-                onChange={(e) => setSimForm((p) => ({ ...p, currency: e.target.value as "USD" | "KRW" }))}
+                onChange={(e) =>
+                  setSimForm((p) => ({ ...p, currency: e.target.value as "USD" | "EUR" | "KRW" }))
+                }
               >
                 <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
                 <option value="KRW">KRW</option>
               </select>
               <select
@@ -1953,7 +2086,16 @@ export default function Home() {
               <button
                 type="button"
                   className="cursor-pointer rounded-md border px-3 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95"
-                  onClick={() => setSimForm({ symbol: "", name: "", quantity: "", avgPrice: "", currency: "USD", owner: "김승주" })}
+                  onClick={() =>
+                    setSimForm({
+                      symbol: "",
+                      name: "",
+                      quantity: "",
+                      avgPrice: "",
+                      currency: "USD",
+                      owner: "김승주",
+                    })
+                  }
               >
                 초기화
               </button>
