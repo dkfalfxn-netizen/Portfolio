@@ -37,9 +37,9 @@ export function LivePriceCell({
   const subClass = !hasDay ? "text-muted-foreground" : up ? UP_TEXT : DOWN_TEXT;
 
   return (
-    <div className="flex w-full min-w-[6.5rem] flex-col items-end gap-1">
+    <div className="ml-auto flex w-fit min-w-0 flex-col items-end gap-1">
       <div
-        className={`w-full max-w-[8.5rem] rounded-xl px-2.5 py-1.5 text-center text-[12px] font-semibold leading-tight tracking-tight text-white tabular-nums ${pillClass}`}
+        className={`w-fit min-w-0 rounded-xl px-2 py-1.5 text-center text-[16px] font-semibold leading-none tracking-tight text-white tabular-nums ${pillClass}`}
       >
         {fmt(price)}
       </div>
