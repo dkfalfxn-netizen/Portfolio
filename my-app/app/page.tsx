@@ -444,7 +444,7 @@ export default function Home() {
       const usd = Number.isFinite(c.usd) ? Math.max(0, c.usd) : 0;
       const krw = Number.isFinite(c.krw) ? Math.max(0, c.krw) : 0;
       const usdCashKrw = usd * usdKrw;
-      const extra: { name: string; displayName: string; value: number }[] = [];
+      const extra: { name: string; displayName: string; ticker: string; value: number }[] = [];
       if (usdCashKrw > 0) {
         extra.push({
           name: `cash-usd|${ownerName}`,
