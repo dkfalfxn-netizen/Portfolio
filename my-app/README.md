@@ -10,3 +10,5 @@
 4. 개발: `npm run dev` → [http://localhost:3000](http://localhost:3000)
 
 배포는 저장소 루트 또는 여기서 `npm run deploy` (빌드 후 Git 푸시 → Vercel).
+
+새 PC에서는 종목 데이터가 비어 있을 수 있습니다. 상위 **`README.md`** 의 **포트폴리오 데이터** 절을 참고해 동기화 키·`.env.local` 을 맞추세요.
