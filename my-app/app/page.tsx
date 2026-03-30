@@ -34,6 +34,8 @@ type Position = {
   accountType: "해외주식" | "국내주식";
   accountName: string;
   owner: OwnerName;
+  /** 원형 차트에서 같은 값끼리 합산할 그룹명 (미입력 시 티커 기준) */
+  chartGroup?: string;
 };
 
 type MarketResponse = {
@@ -285,6 +287,7 @@ export default function Home() {
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [editSymbol, setEditSymbol] = useState("");
   const [editName, setEditName] = useState("");
+  const [editChartGroup, setEditChartGroup] = useState("");
   const [editQuantity, setEditQuantity] = useState("");
   const [editAvgPrice, setEditAvgPrice] = useState("");
   const [editPurchaseUsdKrw, setEditPurchaseUsdKrw] = useState("");
@@ -423,25 +426,30 @@ export default function Home() {
   const allocationByOwner = useMemo(() => {
     return OWNER_NAMES.map((ownerName) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
-      // 같은 티커(symbol)를 가진 종목은 차트에서 하나의 슬라이스로 합산
-      const symbolMap = new Map<string, { displayName: string; allNames: string[]; value: number }>();
+      // chartGroup이 있으면 그룹명 기준, 없으면 symbol 기준으로 차트 슬라이스 합산
+      const groupMap = new Map<string, { displayName: string; allNames: string[]; value: number }>();
       for (const position of items) {
         const v = Math.max(0, Number.isFinite(position.valueKrw) ? position.valueKrw : 0);
-        const existing = symbolMap.get(position.symbol);
+        const groupKey = position.chartGroup?.trim() || position.symbol;
+        const existing = groupMap.get(groupKey);
         if (existing) {
           existing.value += v;
           if (!existing.allNames.includes(position.name)) {
             existing.allNames.push(position.name);
           }
         } else {
-          symbolMap.set(position.symbol, { displayName: position.name, allNames: [position.name], value: v });
+          groupMap.set(groupKey, {
+            displayName: position.chartGroup?.trim() || position.name,
+            allNames: [position.name],
+            value: v,
+          });
         }
       }
-      const stockSlices = Array.from(symbolMap.entries()).map(([symbol, { displayName, allNames, value }]) => ({
-        /** Recharts·범례 충돌 방지를 위해 심볼+담당자 기준 고유 키 사용 */
-        name: `stk|${symbol}|${ownerName}`,
+      const stockSlices = Array.from(groupMap.entries()).map(([groupKey, { displayName, allNames, value }]) => ({
+        /** Recharts·범례 충돌 방지를 위해 그룹키+담당자 기준 고유 키 사용 */
+        name: `stk|${groupKey}|${ownerName}`,
         displayName,
-        ticker: symbol,
+        ticker: groupKey,
         allNames,
         value,
       }));
@@ -889,6 +897,7 @@ export default function Home() {
     setEditingRowKey(key);
     setEditSymbol(p.symbol);
     setEditName(p.name);
+    setEditChartGroup(p.chartGroup ?? "");
     setEditQuantity(String(p.quantity));
     setEditAvgPrice(String(p.avgPrice));
     setEditPurchaseUsdKrw(
@@ -900,6 +909,7 @@ export default function Home() {
     setEditingRowKey(null);
     setEditSymbol("");
     setEditName("");
+    setEditChartGroup("");
     setEditQuantity("");
     setEditAvgPrice("");
     setEditPurchaseUsdKrw("");
@@ -912,6 +922,7 @@ export default function Home() {
     const px = Number(editPurchaseUsdKrw);
     const sym = editSymbol.trim().toUpperCase();
     const nm = editName.trim();
+    const cg = editChartGroup.trim() || undefined;
     if (!sym || !nm) return;
     if (!Number.isFinite(q) || q <= 0) return;
     if (!Number.isFinite(a) || a <= 0) return;
@@ -920,12 +931,32 @@ export default function Home() {
         if (makePositionKey(p) !== editingRowKey) return p;
         if (p.currency === "USD") {
           if (!Number.isFinite(px) || px <= 0) return p;
-          return { ...p, symbol: sym, name: nm, quantity: q, avgPrice: a, purchaseUsdKrw: px };
+          return { ...p, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a, purchaseUsdKrw: px };
         }
-        return { ...p, symbol: sym, name: nm, quantity: q, avgPrice: a };
+        return { ...p, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a };
       }),
     );
     cancelEditRow();
+  }
+
+  function moveRow(rowKey: string, direction: "up" | "down") {
+    setPositions((prev) => {
+      const idx = prev.findIndex((p) => makePositionKey(p) === rowKey);
+      if (idx === -1) return prev;
+      const owner = prev[idx].owner;
+      const ownerIndices = prev
+        .map((p, i) => ({ p, i }))
+        .filter(({ p }) => p.owner === owner)
+        .map(({ i }) => i);
+      const posInOwner = ownerIndices.indexOf(idx);
+      if (direction === "up" && posInOwner === 0) return prev;
+      if (direction === "down" && posInOwner === ownerIndices.length - 1) return prev;
+      const swapIdx =
+        direction === "up" ? ownerIndices[posInOwner - 1] : ownerIndices[posInOwner + 1];
+      const next = [...prev];
+      [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+      return next;
+    });
   }
 
   return (
@@ -1559,7 +1590,7 @@ export default function Home() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        group.items.map((position) => {
+                        group.items.map((position, posIdx) => {
                           const rowKey = makePositionKey(position);
                           const isEditing = editingRowKey === rowKey;
                           return (
@@ -1579,11 +1610,22 @@ export default function Home() {
                                   value={editName}
                                   onChange={(e) => setEditName(e.target.value)}
                                 />
+                                <input
+                                  className="w-32 rounded-md border bg-background px-2 py-1 text-xs"
+                                  placeholder="차트 그룹 (선택)"
+                                  value={editChartGroup}
+                                  onChange={(e) => setEditChartGroup(e.target.value)}
+                                />
                               </div>
                             ) : (
                               <>
                                 <p className="font-medium">{position.name}</p>
                                 <p className="text-xs text-muted-foreground">{position.symbol}</p>
+                                {position.chartGroup && (
+                                  <p className="mt-0.5 w-fit rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                    그룹: {position.chartGroup}
+                                  </p>
+                                )}
                               </>
                             )}
                           </TableCell>
@@ -1717,6 +1759,26 @@ export default function Home() {
                               </div>
                             ) : (
                               <div className="flex flex-col gap-1">
+                                <div className="flex gap-1">
+                                  <button
+                                    type="button"
+                                    title="위로"
+                                    className="cursor-pointer rounded border px-1.5 py-0.5 text-xs transition-all duration-100 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
+                                    disabled={posIdx === 0}
+                                    onClick={() => moveRow(rowKey, "up")}
+                                  >
+                                    ▲
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="아래로"
+                                    className="cursor-pointer rounded border px-1.5 py-0.5 text-xs transition-all duration-100 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
+                                    disabled={posIdx === group.items.length - 1}
+                                    onClick={() => moveRow(rowKey, "down")}
+                                  >
+                                    ▼
+                                  </button>
+                                </div>
                                 <button
                                   type="button"
                                   className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
