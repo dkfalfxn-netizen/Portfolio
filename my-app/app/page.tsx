@@ -1519,19 +1519,33 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex w-full max-w-7xl gap-6 px-4 py-6 md:px-6">
-        <aside className="hidden w-64 shrink-0 rounded-2xl border bg-card p-4 shadow-sm md:block">
-          <h2 className="mb-6 text-lg font-semibold">포트폴리오</h2>
-          <nav className="space-y-2 text-sm">
-            <a className="block cursor-pointer rounded-lg bg-primary px-3 py-2 text-primary-foreground transition-all duration-100 active:scale-95">
-              대시보드
-            </a>
-            <a className="block cursor-pointer rounded-lg px-3 py-2 transition-all duration-100 hover:bg-muted active:scale-95">
-              계좌관리
-            </a>
-            <a className="block cursor-pointer rounded-lg px-3 py-2 transition-all duration-100 hover:bg-muted active:scale-95">
-              설정
-            </a>
-          </nav>
+        <aside className="hidden w-52 shrink-0 md:block">
+          <div className="sticky top-6 rounded-2xl border bg-card p-4 shadow-sm">
+            <h2 className="mb-4 text-base font-semibold">포트폴리오</h2>
+            <nav className="space-y-1 text-sm">
+              {([
+                { id: "section-sync",      icon: "🔑", label: "동기화 키" },
+                { id: "section-trend",     icon: "📈", label: "일별 자산 추이" },
+                { id: "section-rebalance", icon: "⚖️", label: "리밸런싱 계산기" },
+                { id: "section-holdings",  icon: "📋", label: "보유 종목" },
+                { id: "section-add",       icon: "➕", label: "종목 추가" },
+                { id: "section-alert",     icon: "🔔", label: "이메일 알림" },
+                { id: "section-simulator", icon: "🧮", label: "가상 매수" },
+              ] as const).map(({ id, icon, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-muted active:scale-95"
+                >
+                  <span className="text-base leading-none">{icon}</span>
+                  <span>{label}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
         </aside>
 
         <main className="flex-1 space-y-6">
@@ -1548,7 +1562,7 @@ export default function Home() {
             </p>
           </header>
 
-          <Card className="border-dashed">
+          <Card id="section-sync" className="border-dashed">
             <CardHeader className="pb-2">
               <CardDescription>클라우드 동기화 (폰·PC 같은 데이터)</CardDescription>
               <CardTitle className="text-lg">동기화 키</CardTitle>
@@ -1686,7 +1700,7 @@ export default function Home() {
           </section>
 
           {/* 일별 자산 추이 */}
-          <section className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-trend" className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-1 font-semibold">일별 자산 추이</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               앱을 방문할 때마다 오늘 날짜의 평가액을 자동 기록합니다 (최대 180일).
@@ -1695,7 +1709,7 @@ export default function Home() {
           </section>
 
           {/* 리밸런싱 계산기 */}
-          <section className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-rebalance" className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-1 font-semibold">리밸런싱 계산기</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               그룹별 목표 비중(%)을 입력하면 필요한 매수/매도 금액과 주수를 자동으로 계산합니다.
@@ -1707,7 +1721,7 @@ export default function Home() {
             />
           </section>
 
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+          <div id="section-holdings" className="flex flex-col gap-4 xl:flex-row xl:items-start">
           <section className="min-w-0 flex-1 overflow-hidden rounded-2xl border bg-card shadow-sm">
             <div className="border-b px-4 py-3">
               <h2 className="font-semibold">보유 종목 (가족·퇴직연금)</h2>
@@ -2268,7 +2282,7 @@ export default function Home() {
 
           </div>{/* flex wrapper end */}
 
-          <section className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-add" className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-3 font-semibold">종목 추가</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               담당자를 여러 명 선택하면 같은 티커·수량·평단으로 각각 한 줄씩 추가됩니다.
@@ -2434,7 +2448,7 @@ export default function Home() {
           </section>
 
           {/* 알림 설정 섹션 */}
-          <section className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-alert" className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-1 font-semibold">비중 이탈 이메일 알림</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               설정한 비중(%)을 벗어나면 매일 오전 9시(KST)에 이메일을 보내드립니다.
@@ -2573,7 +2587,7 @@ export default function Home() {
           </section>
 
           {/* 가상 매수 시뮬레이터 섹션 */}
-          <section className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-simulator" className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-1 font-semibold">가상 매수 시뮬레이터</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               종목을 추가로 매수했을 때의 예상 비중 변화를 미리 확인합니다.
