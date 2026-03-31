@@ -1518,7 +1518,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="flex w-full gap-4 px-2 py-6 md:px-4">
+      <div className="flex w-full gap-3 px-2 py-4 sm:gap-4 sm:py-6 md:px-4">
         <aside className="hidden w-48 shrink-0 md:block">
           <div className="sticky top-6 rounded-2xl border bg-card p-3 shadow-sm">
             <h2 className="mb-3 px-1 text-sm font-semibold">포트폴리오</h2>
@@ -1578,10 +1578,10 @@ export default function Home() {
           </div>
         </aside>
 
-        <main className="flex-1 space-y-6">
+        <main className="flex-1 space-y-4 sm:space-y-6">
           <header>
-            <h1 className="text-2xl font-bold tracking-tight">주식 대시보드</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <h1 className="text-xl font-bold tracking-tight sm:text-2xl">주식 대시보드</h1>
+            <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
               가족(담당자)별·계좌별 자산과 종목별 수익률을 한눈에 확인합니다.
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -1591,6 +1591,53 @@ export default function Home() {
                 : "대기 중"}
             </p>
           </header>
+
+          {/* 모바일 전용 빠른 이동 메뉴 (정보/순서/기능은 PC와 동일) */}
+          <section className="md:hidden">
+            <div className="rounded-xl border bg-card p-2 shadow-sm">
+              <div className="mb-2 overflow-x-auto">
+                <div className="flex min-w-max items-center gap-1.5">
+                  {([
+                    { id: "section-trend", icon: "📈", label: "일별 자산 추이" },
+                    { id: "section-rebalance", icon: "⚖️", label: "리밸런싱" },
+                    { id: "section-holdings", icon: "📋", label: "보유 종목" },
+                    { id: "section-add", icon: "➕", label: "종목 추가" },
+                    { id: "section-alert", icon: "🔔", label: "이메일 알림" },
+                    { id: "section-simulator", icon: "🧮", label: "가상 매수" },
+                    { id: "section-sync", icon: "🔑", label: "동기화 키" },
+                  ] as const).map(({ id, icon, label }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() =>
+                        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                      }
+                      className="shrink-0 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+                    >
+                      <span className="mr-1">{icon}</span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <div className="flex min-w-max items-center gap-1.5">
+                  {OWNER_NAMES.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() =>
+                        document.getElementById(`owner-${name}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                      }
+                      className="shrink-0 rounded-md border bg-background px-2.5 py-1 text-xs text-muted-foreground"
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {summaryCards.map((card) => (
@@ -1639,7 +1686,7 @@ export default function Home() {
           </section>
 
           {/* 일별 자산 추이 */}
-          <section id="section-trend" className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-trend" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">일별 자산 추이</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               앱을 방문할 때마다 오늘 날짜의 평가액을 자동 기록합니다 (최대 180일).
@@ -1648,7 +1695,7 @@ export default function Home() {
           </section>
 
           {/* 리밸런싱 계산기 */}
-          <section id="section-rebalance" className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-rebalance" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">리밸런싱 계산기</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               그룹별 목표 비중(%)을 입력하면 필요한 매수/매도 금액과 주수를 자동으로 계산합니다.
@@ -2221,7 +2268,7 @@ export default function Home() {
 
           </div>{/* flex wrapper end */}
 
-          <section id="section-add" className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-add" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-3 font-semibold">종목 추가</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               담당자를 여러 명 선택하면 같은 티커·수량·평단으로 각각 한 줄씩 추가됩니다.
@@ -2387,7 +2434,7 @@ export default function Home() {
           </section>
 
           {/* 알림 설정 섹션 */}
-          <section id="section-alert" className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-alert" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">비중 이탈 이메일 알림</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               설정한 비중(%)을 벗어나면 매일 오전 9시(KST)에 이메일을 보내드립니다.
@@ -2526,7 +2573,7 @@ export default function Home() {
           </section>
 
           {/* 가상 매수 시뮬레이터 섹션 */}
-          <section id="section-simulator" className="rounded-2xl border bg-card p-4 shadow-sm">
+          <section id="section-simulator" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">가상 매수 시뮬레이터</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               종목을 추가로 매수했을 때의 예상 비중 변화를 미리 확인합니다.
