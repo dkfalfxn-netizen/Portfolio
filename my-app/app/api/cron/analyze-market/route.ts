@@ -38,10 +38,11 @@ type VideoMeta = {
   videoId: string;
   title: string;
   publishedAt: string;
+  description: string;
 };
 
 type TranscriptResult = VideoMeta & {
-  transcript: string;
+  transcript: string;   // RSS description 또는 실제 자막
   transcriptChars: number;
 };
 
@@ -112,7 +113,8 @@ function todayKST(): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 1: YouTube RSS로 채널 최신 영상 ID/제목 가져오기 (API 키 불필요)
+// Step 1: YouTube RSS로 채널 최신 영상 메타 가져오기 (API 키 불필요)
+//         title + media:description 을 분석 소스로 활용
 // ─────────────────────────────────────────────────────────────────────────────
 async function fetchLatestVideos(
   channel: YoutubeChannel,
@@ -127,7 +129,6 @@ async function fetchLatestVideos(
   }
   const xml = await res.text();
 
-  // entry 블록 파싱 (videoId, title, published)
   const entries = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)];
   const videos: VideoMeta[] = [];
 
@@ -136,14 +137,24 @@ async function fetchLatestVideos(
     const videoIdMatch = block.match(/<yt:videoId>([^<]+)<\/yt:videoId>/);
     const titleMatch = block.match(/<title>([^<]+)<\/title>/);
     const publishedMatch = block.match(/<published>([^<]+)<\/published>/);
+    // RSS에 포함된 영상 설명 (media:description)
+    const descMatch = block.match(/<media:description>([\s\S]*?)<\/media:description>/);
 
     if (videoIdMatch && titleMatch) {
+      const rawDesc = descMatch?.[1] ?? "";
+      // HTML 엔티티 디코딩 + 최대 길이 제한
+      const description = rawDesc
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .slice(0, AI_CONFIG.transcriptMaxChars);
+
       videos.push({
         channel: channel.name,
         channelId: channel.id,
         videoId: videoIdMatch[1],
         title: titleMatch[1],
         publishedAt: publishedMatch?.[1] ?? "",
+        description,
       });
     }
   }
@@ -151,13 +162,16 @@ async function fetchLatestVideos(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 2: youtube-transcript 로 자막 추출 (API 키 불필요)
+// Step 2: 자막 수집 시도 (실패 시 RSS description으로 fallback)
+// youtube-transcript는 Vercel 서버 IP에서 차단되는 경우가 있으므로
+// 실패 시 이미 수집된 RSS description을 그대로 사용
 // ─────────────────────────────────────────────────────────────────────────────
-async function fetchTranscript(
+async function fetchTranscriptWithFallback(
   videoId: string,
   langs: string[],
   maxChars: number,
-): Promise<string> {
+  fallbackDescription: string,
+): Promise<{ text: string; source: "transcript" | "description" }> {
   for (const lang of langs) {
     try {
       const items = await YoutubeTranscript.fetchTranscript(videoId, { lang });
@@ -165,21 +179,16 @@ async function fetchTranscript(
         .map((t) => t.text.replace(/\n/g, " "))
         .join(" ")
         .slice(0, maxChars);
-      if (text.length > 100) return text;
+      if (text.length > 100) return { text, source: "transcript" };
     } catch {
       // 다음 언어로 fallback
     }
   }
-  // 언어 무관 시도 (자동 생성 자막 포함)
-  try {
-    const items = await YoutubeTranscript.fetchTranscript(videoId);
-    return items
-      .map((t) => t.text.replace(/\n/g, " "))
-      .join(" ")
-      .slice(0, maxChars);
-  } catch {
-    return "";
-  }
+  // RSS description으로 fallback
+  return {
+    text: fallbackDescription,
+    source: "description",
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -425,7 +434,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 3. 채널별 영상 수집 + 자막 추출 (병렬 처리로 속도 개선)
+  // 3. 채널별 영상 수집 + 자막/설명 추출 (병렬 처리)
   const channelResults = await Promise.allSettled(
     activeChannels.map(async (channel) => {
       const videos = await fetchLatestVideos(channel);
@@ -433,12 +442,21 @@ export async function POST(req: NextRequest) {
 
       const results: TranscriptResult[] = [];
       for (const video of videos) {
-        const transcript = await fetchTranscript(
+        const { text, source } = await fetchTranscriptWithFallback(
           video.videoId,
           channel.langs,
           AI_CONFIG.transcriptMaxChars,
+          video.description,
         );
-        results.push({ ...video, transcript, transcriptChars: transcript.length });
+        // description도 없으면 제목만이라도 포함
+        const finalText = text.length > 0 ? text : `[제목만 수집됨] ${video.title}`;
+        results.push({
+          ...video,
+          transcript: source === "transcript"
+            ? finalText
+            : `[영상 설명]\n${finalText}`,
+          transcriptChars: finalText.length,
+        });
       }
       return results;
     }),
@@ -454,19 +472,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 자막이 하나도 없으면 중단
-  const hasTranscripts = transcriptResults.some((t) => t.transcript.length > 0);
-  if (!hasTranscripts) {
+  // 영상 자체가 하나도 수집 안 됐으면 중단
+  if (transcriptResults.length === 0) {
     return NextResponse.json(
-      {
-        error: "수집된 자막이 없어 분석을 중단했습니다.",
-        errorChannels,
-        transcriptResults: transcriptResults.map((t) => ({
-          channel: t.channel,
-          title: t.title,
-          chars: t.transcriptChars,
-        })),
-      },
+      { error: "수집된 영상이 없어 분석을 중단했습니다.", errorChannels },
       { status: 422 },
     );
   }
