@@ -72,6 +72,7 @@ const SYNC_KEY_STORAGE = "portfolio_sync_key_v1";
 const AUTO_SYNC_STORAGE = "portfolio_auto_sync_v1";
 const HOLDINGS_SORT_STORAGE_KEY = "portfolio_holdings_sort_v1";
 const DAILY_SNAPSHOTS_KEY = "portfolio_daily_snapshots_v1";
+const LOCAL_MODIFIED_KEY = "portfolio_local_modified_v1";
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
 
@@ -990,14 +991,35 @@ export default function Home() {
         return;
       }
       if (j.found) {
-        const valid = Array.isArray(j.positions)
-          ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
-          : [];
-        setPositions(mergeDuplicatePositions(valid));
-        setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
-        setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
-        setSyncMessage("서버에서 잔고를 불러왔습니다. (다른 PC와 같은 키면 같은 데이터입니다.)");
-        setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
+        const serverTs = typeof j.updated_at === "string" ? new Date(j.updated_at).getTime() : 0;
+        const localModifiedRaw = typeof window !== "undefined"
+          ? window.localStorage.getItem(LOCAL_MODIFIED_KEY)
+          : null;
+        const localTs = localModifiedRaw ? new Date(localModifiedRaw).getTime() : 0;
+
+        // 로컬이 더 최신이면 서버에 올리고, 서버가 더 최신이면 내려받음
+        if (localTs > serverTs && pos.length > 0) {
+          const rPush = await fetch("/api/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "push", key, positions: pos, cashByOwner: cash, holdingsSortByOwner: holdingsSort }),
+          });
+          const jPush = (await rPush.json()) as { error?: string };
+          if (!rPush.ok) setSyncMessage(jPush.error ?? "서버 업로드 실패");
+          else {
+            setSyncMessage("로컬 데이터가 최신입니다. 서버에 업로드했습니다.");
+            setLastSyncedAt(new Date().toISOString());
+          }
+        } else {
+          const valid = Array.isArray(j.positions)
+            ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
+            : [];
+          setPositions(mergeDuplicatePositions(valid));
+          setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
+          setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
+          setSyncMessage("서버에서 잔고를 불러왔습니다. (다른 PC와 같은 키면 같은 데이터입니다.)");
+          setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
+        }
       } else {
         const r2 = await fetch("/api/sync", {
           method: "POST",
@@ -1069,11 +1091,13 @@ export default function Home() {
   useEffect(() => {
     if (!isHydrated) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
+    window.localStorage.setItem(LOCAL_MODIFIED_KEY, new Date().toISOString());
   }, [positions, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
     window.localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(cashByOwner));
+    window.localStorage.setItem(LOCAL_MODIFIED_KEY, new Date().toISOString());
   }, [cashByOwner, isHydrated]);
 
   // 초기 로드 시 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
