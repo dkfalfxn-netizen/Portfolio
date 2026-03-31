@@ -1810,7 +1810,7 @@ export default function Home() {
                             <TableRow className="border-y border-border hover:bg-transparent">
                               <TableCell colSpan={9} className="px-0 py-0">
                                 <div className="flex flex-wrap items-center justify-between gap-2 border-l-4 border-primary/70 bg-primary/[0.07] px-3 py-2">
-                                  <span className="text-[13px] font-bold tracking-wide text-foreground">
+                                  <span className="text-base font-bold tracking-wide text-foreground">
                                     {block.label}
                                   </span>
                                   <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums font-medium text-muted-foreground">
@@ -1850,10 +1850,10 @@ export default function Home() {
                               </div>
                             ) : (
                               <>
-                                <p className="!text-base font-semibold !leading-snug text-foreground sm:!text-lg">
+                                <p className="text-sm font-semibold leading-snug text-foreground">
                                   {position.name}
                                 </p>
-                                <p className="text-xs text-muted-foreground">{position.symbol}</p>
+                                <p className="text-[11px] text-muted-foreground">{position.symbol}</p>
                               </>
                             )}
                           </TableCell>

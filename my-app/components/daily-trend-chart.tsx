@@ -152,7 +152,18 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
               <tr className="border-b text-muted-foreground">
                 <th className="py-1.5 pr-3 text-left font-medium">날짜</th>
                 {visibleOwners.map((o) => (
-                  <th key={o} className="py-1.5 px-2 text-right font-medium">{o}</th>
+                  <th key={o} className="py-1.5 px-2 text-right font-medium" colSpan={2}>
+                    {o}
+                  </th>
+                ))}
+              </tr>
+              <tr className="border-b text-[10px] text-muted-foreground/60">
+                <th className="pb-1 pr-3" />
+                {visibleOwners.map((o) => (
+                  <>
+                    <th key={`${o}-val`} className="pb-1 px-2 text-right font-normal">평가액</th>
+                    <th key={`${o}-chg`} className="pb-1 px-1 text-right font-normal">전일비</th>
+                  </>
                 ))}
               </tr>
             </thead>
@@ -166,23 +177,39 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
                     {visibleOwners.map((o) => {
                       const val = o === "전체" ? s.totalValue : (s.ownerValues[o] ?? 0);
                       const prevVal = prev
-                        ? o === "전체"
-                          ? prev.totalValue
-                          : (prev.ownerValues[o] ?? 0)
+                        ? o === "전체" ? prev.totalValue : (prev.ownerValues[o] ?? 0)
                         : null;
                       const diff = prevVal !== null ? val - prevVal : null;
+                      const diffPct = prevVal && prevVal > 0 ? (diff! / prevVal) * 100 : null;
                       return (
-                        <td key={o} className="py-1.5 px-2 text-right tabular-nums">
-                          <div>{fmtFull(Math.round(val))}</div>
-                          {diff !== null && diff !== 0 && (
-                            <div
-                              className={`text-[10px] ${diff > 0 ? "text-red-400" : "text-blue-400"}`}
-                            >
-                              {diff > 0 ? "+" : ""}
-                              {fmtFull(Math.round(diff))}
-                            </div>
-                          )}
-                        </td>
+                        <>
+                          <td key={`${o}-val`} className="py-1.5 px-2 text-right tabular-nums font-medium">
+                            {fmtFull(Math.round(val))}
+                          </td>
+                          <td
+                            key={`${o}-chg`}
+                            className={`py-1.5 px-1 text-right tabular-nums text-[11px] ${
+                              diff === null
+                                ? "text-muted-foreground/40"
+                                : diff > 0
+                                ? "text-red-400"
+                                : diff < 0
+                                ? "text-blue-400"
+                                : "text-muted-foreground/40"
+                            }`}
+                          >
+                            {diff === null ? "—" : diff === 0 ? "±0" : (
+                              <div className="flex flex-col items-end gap-0">
+                                <span>{diff > 0 ? "+" : ""}{fmtFull(Math.round(diff))}</span>
+                                {diffPct !== null && (
+                                  <span className="text-[10px] opacity-75">
+                                    {diff > 0 ? "+" : ""}{diffPct.toFixed(1)}%
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </>
                       );
                     })}
                   </tr>
