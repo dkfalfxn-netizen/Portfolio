@@ -1518,29 +1518,59 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-7xl gap-6 px-4 py-6 md:px-6">
-        <aside className="hidden w-52 shrink-0 md:block">
-          <div className="sticky top-6 rounded-2xl border bg-card p-4 shadow-sm">
-            <h2 className="mb-4 text-base font-semibold">포트폴리오</h2>
-            <nav className="space-y-1 text-sm">
+      <div className="flex w-full gap-4 px-2 py-6 md:px-4">
+        <aside className="hidden w-48 shrink-0 md:block">
+          <div className="sticky top-6 rounded-2xl border bg-card p-3 shadow-sm">
+            <h2 className="mb-3 px-1 text-sm font-semibold">포트폴리오</h2>
+            <nav className="space-y-0.5 text-sm">
               {([
-                { id: "section-sync",      icon: "🔑", label: "동기화 키" },
                 { id: "section-trend",     icon: "📈", label: "일별 자산 추이" },
                 { id: "section-rebalance", icon: "⚖️", label: "리밸런싱 계산기" },
-                { id: "section-holdings",  icon: "📋", label: "보유 종목" },
-                { id: "section-add",       icon: "➕", label: "종목 추가" },
-                { id: "section-alert",     icon: "🔔", label: "이메일 알림" },
-                { id: "section-simulator", icon: "🧮", label: "가상 매수" },
               ] as const).map(({ id, icon, label }) => (
                 <button
                   key={id}
                   type="button"
-                  onClick={() => {
-                    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-muted active:scale-95"
+                  onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
                 >
-                  <span className="text-base leading-none">{icon}</span>
+                  <span className="leading-none">{icon}</span>
+                  <span>{label}</span>
+                </button>
+              ))}
+              {/* 보유 종목 + 하위 메뉴 */}
+              <button
+                type="button"
+                onClick={() => document.getElementById("section-holdings")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted"
+              >
+                <span>📋</span>
+                <span>보유 종목</span>
+              </button>
+              <div className="ml-4 space-y-0.5 border-l border-border/50 pl-2">
+                {OWNER_NAMES.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => document.getElementById(`owner-${name}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    className="flex w-full items-center rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+              {([
+                { id: "section-add",       icon: "➕", label: "종목 추가" },
+                { id: "section-alert",     icon: "🔔", label: "이메일 알림" },
+                { id: "section-simulator", icon: "🧮", label: "가상 매수" },
+                { id: "section-sync",      icon: "🔑", label: "동기화 키" },
+              ] as const).map(({ id, icon, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
+                >
+                  <span className="leading-none">{icon}</span>
                   <span>{label}</span>
                 </button>
               ))}
@@ -1561,97 +1591,6 @@ export default function Home() {
                 : "대기 중"}
             </p>
           </header>
-
-          <Card id="section-sync" className="border-dashed">
-            <CardHeader className="pb-2">
-              <CardDescription>클라우드 동기화 (폰·PC 같은 데이터)</CardDescription>
-              <CardTitle className="text-lg">동기화 키</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                다른 PC·폰에서는 브라우저마다 저장소가 달라서, 집에서 쓰는 동기화 키를 그대로 입력한 뒤
-                「키 저장」만 하면 서버에서 자동으로 불러옵니다. 키는 비밀번호처럼 길게 정하세요.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                서버(Supabase) 연결:{" "}
-                {serverHealth === "loading" ? (
-                  <span>확인 중…</span>
-                ) : serverHealth === "ok" ? (
-                  <span className="text-emerald-600 dark:text-emerald-400">정상</span>
-                ) : (
-                  <span className="text-amber-600 dark:text-amber-400">
-                    문제 있음 — Vercel 환경 변수{" "}
-                    <code className="rounded bg-muted px-1">NEXT_PUBLIC_SUPABASE_URL</code>,{" "}
-                    <code className="rounded bg-muted px-1">SUPABASE_SERVICE_ROLE_KEY</code> 확인 후
-                    재배포
-                  </span>
-                )}
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                <div className="min-w-0 flex-1">
-                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="sync-key">
-                    동기화 키 (8자 이상)
-                  </label>
-                  <input
-                    id="sync-key"
-                    type="password"
-                    autoComplete="off"
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                    placeholder="예: 우리가족포트폴리오2026"
-                    value={syncKeyDraft}
-                    onChange={(e) => setSyncKeyDraft(e.target.value)}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
-                  onClick={handleSaveSyncKey}
-                >
-                  키 저장
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={syncBusy}
-                  onClick={handlePullCloud}
-                >
-                  서버에서 불러오기
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={syncBusy}
-                  onClick={handlePushCloud}
-                >
-                  서버로 올리기
-                </button>
-                <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
-                  <input
-                    type="checkbox"
-                    className="cursor-pointer accent-primary"
-                    checked={autoSync}
-                    onChange={(e) => {
-                      const v = e.target.checked;
-                      setAutoSync(v);
-                      window.localStorage.setItem(AUTO_SYNC_STORAGE, v ? "1" : "0");
-                    }}
-                  />
-                  변경 시 자동으로 서버에 저장 (2초 후)
-                </label>
-              </div>
-              {syncMessage ? (
-                <p className="text-xs text-muted-foreground">{syncMessage}</p>
-              ) : null}
-              {syncBusy ? <p className="text-xs text-amber-600">동기화 중…</p> : null}
-              {lastSyncedAt ? (
-                <p className="text-xs text-muted-foreground">
-                  마지막 동기 시각: {new Date(lastSyncedAt).toLocaleString()}
-                </p>
-              ) : null}
-            </CardContent>
-          </Card>
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {summaryCards.map((card) => (
@@ -1751,7 +1690,7 @@ export default function Home() {
                   </button>
                 );
                 return (
-                <div key={group.ownerName} className="rounded-xl border-2 border-border/70 shadow-sm">
+                <div key={group.ownerName} id={`owner-${group.ownerName}`} className="rounded-xl border-2 border-border/70 shadow-sm">
                   <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 space-y-2">
                       <p className="font-semibold">보유 종목({group.ownerName})</p>
@@ -2703,6 +2642,97 @@ export default function Home() {
               <p className="mt-3 text-xs text-muted-foreground">수량과 매수 단가를 입력하면 결과가 표시됩니다.</p>
             )}
           </section>
+
+          <Card id="section-sync" className="border-dashed">
+            <CardHeader className="pb-2">
+              <CardDescription>클라우드 동기화 (폰·PC 같은 데이터)</CardDescription>
+              <CardTitle className="text-lg">동기화 키</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                다른 PC·폰에서는 브라우저마다 저장소가 달라서, 집에서 쓰는 동기화 키를 그대로 입력한 뒤
+                「키 저장」만 하면 서버에서 자동으로 불러옵니다. 키는 비밀번호처럼 길게 정하세요.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                서버(Supabase) 연결:{" "}
+                {serverHealth === "loading" ? (
+                  <span>확인 중…</span>
+                ) : serverHealth === "ok" ? (
+                  <span className="text-emerald-600 dark:text-emerald-400">정상</span>
+                ) : (
+                  <span className="text-amber-600 dark:text-amber-400">
+                    문제 있음 — Vercel 환경 변수{" "}
+                    <code className="rounded bg-muted px-1">NEXT_PUBLIC_SUPABASE_URL</code>,{" "}
+                    <code className="rounded bg-muted px-1">SUPABASE_SERVICE_ROLE_KEY</code> 확인 후
+                    재배포
+                  </span>
+                )}
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1">
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="sync-key">
+                    동기화 키 (8자 이상)
+                  </label>
+                  <input
+                    id="sync-key"
+                    type="password"
+                    autoComplete="off"
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    placeholder="예: 우리가족포트폴리오2026"
+                    value={syncKeyDraft}
+                    onChange={(e) => setSyncKeyDraft(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
+                  onClick={handleSaveSyncKey}
+                >
+                  키 저장
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  disabled={syncBusy}
+                  onClick={handlePullCloud}
+                >
+                  서버에서 불러오기
+                </button>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  disabled={syncBusy}
+                  onClick={handlePushCloud}
+                >
+                  서버로 올리기
+                </button>
+                <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
+                  <input
+                    type="checkbox"
+                    className="cursor-pointer accent-primary"
+                    checked={autoSync}
+                    onChange={(e) => {
+                      const v = e.target.checked;
+                      setAutoSync(v);
+                      window.localStorage.setItem(AUTO_SYNC_STORAGE, v ? "1" : "0");
+                    }}
+                  />
+                  변경 시 자동으로 서버에 저장 (2초 후)
+                </label>
+              </div>
+              {syncMessage ? (
+                <p className="text-xs text-muted-foreground">{syncMessage}</p>
+              ) : null}
+              {syncBusy ? <p className="text-xs text-amber-600">동기화 중…</p> : null}
+              {lastSyncedAt ? (
+                <p className="text-xs text-muted-foreground">
+                  마지막 동기 시각: {new Date(lastSyncedAt).toLocaleString()}
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
 
         </main>
       </div>
