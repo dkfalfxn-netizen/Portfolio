@@ -3,6 +3,7 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build",
   "crons": [
-    { "path": "/api/alert/check", "schedule": "0 0 * * *" }
+    { "path": "/api/alert/check",          "schedule": "0 0 * * *" },
+    { "path": "/api/cron/analyze-market",  "schedule": "0 21 * * *" }
   ]
 }
