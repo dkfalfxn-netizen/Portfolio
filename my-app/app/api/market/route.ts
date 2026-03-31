@@ -265,6 +265,45 @@ export async function GET(req: NextRequest) {
       if (quote.sparkline.length >= 2) intraday[symbol] = quote.sparkline;
     }
 
+    // .KS로 가격을 못 가져온 6자리 한국 코드를 .KQ(KOSDAQ)로 재시도
+    const kqRetry = yahooInputSymbols.filter(
+      (s) =>
+        /^[0-9][0-9A-Z]{5}$/.test(s.trim().toUpperCase()) &&
+        (quotes[s]?.price ?? null) === null,
+    );
+    if (kqRetry.length > 0) {
+      const kqResults = await Promise.all(
+        kqRetry.map(async (s) => {
+          const kqSym = `${s.trim().toUpperCase()}.KQ`;
+          try {
+            const r = await fetch(
+              `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(kqSym)}?interval=1m&range=1d`,
+              { method: "GET", cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" } },
+            );
+            if (!r.ok) return null;
+            const data = await r.json();
+            const meta = data?.chart?.result?.[0]?.meta;
+            const price = readChartHeadlinePrice(meta);
+            if (!price) return null;
+            return [s, {
+              price,
+              currency: typeof meta?.currency === "string" ? meta.currency : null,
+              previousClose: readPreviousClose(meta),
+              sparkline: extractSparklinePoints(data),
+            } satisfies ChartQuote] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      for (const res of kqResults) {
+        if (!res) continue;
+        const [sym, q] = res;
+        quotes[sym] = { price: q.price, currency: q.currency, previousClose: q.previousClose };
+        if (q.sparkline.length >= 2) intraday[sym] = q.sparkline;
+      }
+    }
+
     const fxQuote = byYahooSymbol.get("KRW=X");
     const usdKrw = typeof fxQuote?.price === "number" ? fxQuote.price : null;
     const eurFx = byYahooSymbol.get("EURKRW=X");
