@@ -22,15 +22,7 @@ export type YoutubeChannel = {
 export const YOUTUBE_CHANNELS: YoutubeChannel[] = [
   // ─────────────── 국내 경제·시황 ───────────────
   {
-    id: "UCdxSMU1HEqMx0_-JYlAJThA",
-    name: "삼프로TV",
-    category: "kr-economy",
-    langs: ["ko"],
-    maxVideos: 1,
-    enabled: true,
-  },
-  {
-    id: "UCuCDNIJFZRCbKCdn3oUFmfA",
+    id: "UCsJ6RuBiTVWRX156FVbeaGg",
     name: "슈카월드",
     category: "kr-economy",
     langs: ["ko"],
@@ -38,40 +30,46 @@ export const YOUTUBE_CHANNELS: YoutubeChannel[] = [
     enabled: true,
   },
   {
-    id: "UCup9Hf5CZMLNAJRXiHbSqtg",
-    name: "신사임당",
+    id: "UChY8VUjXv0aA7RF9hDQOISg",
+    name: "교양이를 부탁해",
     category: "kr-economy",
     langs: ["ko"],
-    maxVideos: 1,
-    enabled: false,
-  },
-
-  // ─────────────── 미국 경제·투자 ───────────────
-  {
-    id: "UCa-ckhlsFzc55eNt-Xd7rjg",
-    name: "Graham Stephan",
-    category: "us-economy",
-    langs: ["en"],
     maxVideos: 1,
     enabled: true,
   },
   {
-    id: "UCvJJ_dzjViJCoLf5uKUTwoA",
-    name: "CNBC",
-    category: "us-economy",
-    langs: ["en"],
+    id: "UCOB62fKRT7b73X7tRxMuN2g",
+    name: "박종훈의 지식한방",
+    category: "kr-economy",
+    langs: ["ko"],
     maxVideos: 1,
-    enabled: false,   // 영상이 많아 토큰 낭비 가능 — 필요 시 true로 전환
+    enabled: true,
   },
 
-  // ─────────────── 기술·테크 ───────────────
+  // ─────────────── 미국 주식·투자 ───────────────
   {
-    id: "UCnUYZLuoy1rq1aVMwx4aTzw",
-    name: "MKBHD",
-    category: "tech",
-    langs: ["en"],
+    id: "UCC3yfxS5qC6PCwDzetUuEWg",
+    name: "소수몽키",
+    category: "us-economy",
+    langs: ["ko"],
     maxVideos: 1,
-    enabled: false,
+    enabled: true,
+  },
+  {
+    id: "UCczff_dQVVb9sSEULFUJ-sw",
+    name: "반교수(ProfHalf)",
+    category: "us-economy",
+    langs: ["ko"],
+    maxVideos: 1,
+    enabled: true,
+  },
+  {
+    id: "UCIipmgxpUxDmPP-ma3Ahvbw",
+    name: "매경 월가월부",
+    category: "market-analysis",
+    langs: ["ko"],
+    maxVideos: 1,
+    enabled: true,
   },
 ];
 
