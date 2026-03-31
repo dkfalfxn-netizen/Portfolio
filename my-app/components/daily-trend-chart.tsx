@@ -1,0 +1,197 @@
+"use client";
+
+import { useState } from "react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
+import type { DailySnapshot } from "@/app/page";
+
+const OWNER_COLORS: Record<string, string> = {
+  김승주: "#22d3ee",
+  강희진: "#a78bfa",
+  김도율: "#34d399",
+  김찬율: "#fb923c",
+  퇴직연금: "#f472b6",
+  전체: "#e2e8f0",
+};
+
+function fmt(n: number) {
+  if (n >= 1_0000_0000) return `${(n / 1_0000_0000).toFixed(1)}억`;
+  if (n >= 1_0000) return `${(n / 1_0000).toFixed(0)}만`;
+  return `₩${Math.round(n).toLocaleString()}`;
+}
+function fmtFull(n: number) {
+  return `₩${Math.round(n).toLocaleString()}`;
+}
+
+type Props = {
+  snapshots: DailySnapshot[];
+  ownerNames: readonly string[];
+};
+
+export function DailyTrendChart({ snapshots, ownerNames }: Props) {
+  const [mode, setMode] = useState<"chart" | "table">("chart");
+  const [range, setRange] = useState<30 | 90 | 180>(90);
+
+  const filtered = snapshots.slice(-range);
+
+  if (filtered.length === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-muted-foreground">
+        데이터가 아직 없습니다. 매일 앱을 방문하면 자동으로 기록됩니다.
+      </p>
+    );
+  }
+
+  // recharts용 데이터
+  const chartData = filtered.map((s) => {
+    const row: Record<string, string | number> = { date: s.date.slice(5) }; // MM-DD
+    for (const o of ownerNames) {
+      row[o] = Math.round(s.ownerValues[o] ?? 0);
+    }
+    row["전체"] = Math.round(s.totalValue ?? 0);
+    return row;
+  });
+
+  const visibleOwners = [...ownerNames, "전체"];
+
+  return (
+    <div className="space-y-3">
+      {/* 컨트롤 */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1">
+          {([30, 90, 180] as const).map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setRange(r)}
+              className={`cursor-pointer rounded px-2.5 py-1 text-xs transition-all ${
+                range === r
+                  ? "bg-primary text-primary-foreground"
+                  : "border hover:bg-muted"
+              }`}
+            >
+              {r}일
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1">
+          {(["chart", "table"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`cursor-pointer rounded px-2.5 py-1 text-xs transition-all ${
+                mode === m
+                  ? "bg-primary text-primary-foreground"
+                  : "border hover:bg-muted"
+              }`}
+            >
+              {m === "chart" ? "차트" : "표"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {mode === "chart" ? (
+        <div className="h-[300px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 4, right: 12, bottom: 4, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10, fill: "#71717a" }}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "#71717a" }}
+                tickFormatter={(v: number) => fmt(v)}
+                width={56}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "rgba(9,9,11,0.95)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+                formatter={(v, name) => [fmtFull(Number(v ?? 0)), String(name)]}
+                labelStyle={{ color: "#a1a1aa", marginBottom: 4 }}
+              />
+              <Legend
+                wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                iconType="circle"
+                iconSize={8}
+              />
+              {visibleOwners.map((o) => (
+                <Line
+                  key={o}
+                  type="monotone"
+                  dataKey={o}
+                  stroke={OWNER_COLORS[o] ?? "#94a3b8"}
+                  strokeWidth={o === "전체" ? 2 : 1.5}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  strokeDasharray={o === "전체" ? "6 3" : undefined}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b text-muted-foreground">
+                <th className="py-1.5 pr-3 text-left font-medium">날짜</th>
+                {visibleOwners.map((o) => (
+                  <th key={o} className="py-1.5 px-2 text-right font-medium">{o}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[...filtered].reverse().map((s) => {
+                const prevIdx = filtered.findIndex((x) => x.date === s.date) - 1;
+                const prev = prevIdx >= 0 ? filtered[prevIdx] : null;
+                return (
+                  <tr key={s.date} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="py-1.5 pr-3 font-medium tabular-nums">{s.date}</td>
+                    {visibleOwners.map((o) => {
+                      const val = o === "전체" ? s.totalValue : (s.ownerValues[o] ?? 0);
+                      const prevVal = prev
+                        ? o === "전체"
+                          ? prev.totalValue
+                          : (prev.ownerValues[o] ?? 0)
+                        : null;
+                      const diff = prevVal !== null ? val - prevVal : null;
+                      return (
+                        <td key={o} className="py-1.5 px-2 text-right tabular-nums">
+                          <div>{fmtFull(Math.round(val))}</div>
+                          {diff !== null && diff !== 0 && (
+                            <div
+                              className={`text-[10px] ${diff > 0 ? "text-red-400" : "text-blue-400"}`}
+                            >
+                              {diff > 0 ? "+" : ""}
+                              {fmtFull(Math.round(diff))}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

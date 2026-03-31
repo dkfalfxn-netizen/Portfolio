@@ -13,6 +13,8 @@ import {
 import { FamilyAllocationDonut } from "@/components/family-allocation-chart";
 import { IntradaySparkline } from "@/components/intraday-sparkline";
 import { LivePriceCell } from "@/components/live-price-cell";
+import { DailyTrendChart } from "@/components/daily-trend-chart";
+import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import {
   Card,
   CardContent,
@@ -69,6 +71,53 @@ const CASH_STORAGE_KEY = "portfolio_cash_v1";
 const SYNC_KEY_STORAGE = "portfolio_sync_key_v1";
 const AUTO_SYNC_STORAGE = "portfolio_auto_sync_v1";
 const HOLDINGS_SORT_STORAGE_KEY = "portfolio_holdings_sort_v1";
+const DAILY_SNAPSHOTS_KEY = "portfolio_daily_snapshots_v1";
+/** 일별 스냅샷 최대 보관 일수 */
+const SNAPSHOT_MAX_DAYS = 180;
+
+export type DailySnapshot = {
+  date: string; // YYYY-MM-DD
+  ownerValues: Record<string, number>; // ownerName → 총 평가액(KRW)
+  totalValue: number;
+};
+
+function loadDailySnapshots(): DailySnapshot[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(DAILY_SNAPSHOTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (s): s is DailySnapshot =>
+        typeof s === "object" &&
+        s !== null &&
+        typeof (s as DailySnapshot).date === "string" &&
+        typeof (s as DailySnapshot).ownerValues === "object",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveDailySnapshot(snap: DailySnapshot) {
+  if (typeof window === "undefined") return;
+  try {
+    const existing = loadDailySnapshots();
+    const filtered = existing.filter((s) => s.date !== snap.date);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - SNAPSHOT_MAX_DAYS);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const updated = [...filtered, snap]
+      .filter((s) => s.date >= cutoffStr)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    window.localStorage.setItem(DAILY_SNAPSHOTS_KEY, JSON.stringify(updated));
+  } catch {}
+}
+
+function todayKST(): string {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 /** 보유 종목 표시 순: 입력 순(저장된 배열 순) / 평가금액 / 차트 그룹 */
 type HoldingsSortMode = "manual" | "valueAsc" | "valueDesc" | "group";
@@ -608,6 +657,7 @@ export default function Home() {
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [editSymbol, setEditSymbol] = useState("");
   const [editName, setEditName] = useState("");
@@ -864,6 +914,24 @@ export default function Home() {
     });
   }, [enrichedPositions, cashByOwner, usdKrw]);
 
+  // 시세 로드 완료 후 오늘 스냅샷 자동 저장 (하루 1회)
+  useEffect(() => {
+    if (!isHydrated) return;
+    const hasRealPrices = positionsByOwner.some((g) => g.sectionTotal > 0);
+    if (!hasRealPrices) return;
+    const today = todayKST();
+    const ownerValues: Record<string, number> = {};
+    let totalValue = 0;
+    for (const g of positionsByOwner) {
+      ownerValues[g.ownerName] = g.sectionTotal;
+      totalValue += g.sectionTotal;
+    }
+    const snap: DailySnapshot = { date: today, ownerValues, totalValue };
+    saveDailySnapshot(snap);
+    setDailySnapshots(loadDailySnapshots());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positionsByOwner, isHydrated]);
+
   /** pull → 있으면 반영, 없으면 이 기기(pos/cash/정렬)를 push (최초 기기·키 저장 직후 공통) */
   const syncWithServerForKey = useCallback(
     async (
@@ -975,6 +1043,12 @@ export default function Home() {
     if (!isHydrated) return;
     window.localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(cashByOwner));
   }, [cashByOwner, isHydrated]);
+
+  // 초기 로드 시 스냅샷 읽기
+  useEffect(() => {
+    if (!isHydrated) return;
+    setDailySnapshots(loadDailySnapshots());
+  }, [isHydrated]);
 
   useEffect(() => {
     if (!isHydrated || !syncReady || !autoSync || cloudSyncKey.length < 8) return;
@@ -1530,6 +1604,28 @@ export default function Home() {
             </div>
           </section>
 
+          {/* 일별 자산 추이 */}
+          <section className="rounded-2xl border bg-card p-4 shadow-sm">
+            <h2 className="mb-1 font-semibold">일별 자산 추이</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              앱을 방문할 때마다 오늘 날짜의 평가액을 자동 기록합니다 (최대 180일).
+            </p>
+            <DailyTrendChart snapshots={dailySnapshots} ownerNames={OWNER_NAMES} />
+          </section>
+
+          {/* 리밸런싱 계산기 */}
+          <section className="rounded-2xl border bg-card p-4 shadow-sm">
+            <h2 className="mb-1 font-semibold">리밸런싱 계산기</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              그룹별 목표 비중(%)을 입력하면 필요한 매수/매도 금액과 주수를 자동으로 계산합니다.
+            </p>
+            <RebalancingCalculator
+              allocationByOwner={allocationByOwner}
+              enrichedPositions={enrichedPositions}
+              usdKrw={usdKrw}
+            />
+          </section>
+
           <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
             <div className="border-b px-4 py-3">
               <h2 className="font-semibold">보유 종목 (가족·퇴직연금)</h2>
@@ -1691,14 +1787,14 @@ export default function Home() {
                       ) : (
                         holdingsGroupBlocks.map((block) => (
                           <Fragment key={`${group.ownerName}-${block.label}`}>
-                            <TableRow className="border-b border-border/60 bg-muted/25 hover:bg-muted/25">
-                              <TableCell colSpan={9} className="px-3 py-2">
-                                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                                  <span className="text-sm font-semibold tracking-tight">
+                            <TableRow className="border-y border-border hover:bg-transparent">
+                              <TableCell colSpan={9} className="px-0 py-0">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-l-4 border-primary/70 bg-primary/[0.07] px-3 py-2">
+                                  <span className="text-[13px] font-bold tracking-wide text-foreground">
                                     {block.label}
                                   </span>
-                                  <span className="text-xs tabular-nums text-muted-foreground">
-                                    그룹 합계 ₩{Math.round(block.sumKrw).toLocaleString()}
+                                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums font-medium text-muted-foreground">
+                                    합계 ₩{Math.round(block.sumKrw).toLocaleString()}
                                   </span>
                                 </div>
                               </TableCell>
