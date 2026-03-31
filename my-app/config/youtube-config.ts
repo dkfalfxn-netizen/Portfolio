@@ -20,15 +20,7 @@ export type YoutubeChannel = {
 };
 
 export const YOUTUBE_CHANNELS: YoutubeChannel[] = [
-  // ─────────────── 국내 경제·시황 ───────────────
-  {
-    id: "UCsJ6RuBiTVWRX156FVbeaGg",
-    name: "슈카월드",
-    category: "kr-economy",
-    langs: ["ko"],
-    maxVideos: 1,
-    enabled: true,
-  },
+  // ─────────────── 요청 반영: 채널 2개만 사용 ───────────────
   {
     id: "UChY8VUjXv0aA7RF9hDQOISg",
     name: "교양이를 부탁해",
@@ -38,35 +30,9 @@ export const YOUTUBE_CHANNELS: YoutubeChannel[] = [
     enabled: true,
   },
   {
-    id: "UCOB62fKRT7b73X7tRxMuN2g",
-    name: "박종훈의 지식한방",
-    category: "kr-economy",
-    langs: ["ko"],
-    maxVideos: 1,
-    enabled: true,
-  },
-
-  // ─────────────── 미국 주식·투자 ───────────────
-  {
-    id: "UCC3yfxS5qC6PCwDzetUuEWg",
-    name: "소수몽키",
-    category: "us-economy",
-    langs: ["ko"],
-    maxVideos: 1,
-    enabled: true,
-  },
-  {
     id: "UCczff_dQVVb9sSEULFUJ-sw",
     name: "반교수(ProfHalf)",
     category: "us-economy",
-    langs: ["ko"],
-    maxVideos: 1,
-    enabled: true,
-  },
-  {
-    id: "UCIipmgxpUxDmPP-ma3Ahvbw",
-    name: "매경 월가월부",
-    category: "market-analysis",
     langs: ["ko"],
     maxVideos: 1,
     enabled: true,
