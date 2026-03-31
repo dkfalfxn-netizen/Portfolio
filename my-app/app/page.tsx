@@ -1737,7 +1737,7 @@ export default function Home() {
                   </button>
                 );
                 return (
-                <div key={group.ownerName} className="rounded-xl border">
+                <div key={group.ownerName} className="rounded-xl border-2 border-border/70 shadow-sm">
                   <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 space-y-2">
                       <p className="font-semibold">보유 종목({group.ownerName})</p>
