@@ -914,6 +914,36 @@ export default function Home() {
     });
   }, [enrichedPositions, cashByOwner, usdKrw]);
 
+  /** 보유자별 그룹 오늘 등락 요약 (내림차순 정렬) */
+  const ownerGroupDailySummary = useMemo(() => {
+    return positionsByOwner.map((group) => {
+      const blocks = buildHoldingsGroupBlocks(group.items);
+      const groups = blocks.map((block) => {
+        const dailyChangeKrw = block.items.reduce((sum, p) => {
+          if (p.previousClose === null) return sum;
+          const diff = p.currentPrice - p.previousClose;
+          const krw =
+            p.currency === "USD" ? diff * p.quantity * usdKrw
+            : p.currency === "EUR" ? diff * p.quantity * eurKrw
+            : diff * p.quantity;
+          return sum + krw;
+        }, 0);
+        const prevSumKrw = block.items.reduce((sum, p) => {
+          if (p.previousClose === null) return sum;
+          const v =
+            p.currency === "USD" ? p.previousClose * p.quantity * usdKrw
+            : p.currency === "EUR" ? p.previousClose * p.quantity * eurKrw
+            : p.previousClose * p.quantity;
+          return sum + v;
+        }, 0);
+        const dailyChangePct = prevSumKrw > 0 ? (dailyChangeKrw / prevSumKrw) * 100 : null;
+        return { label: block.label, dailyChangeKrw, dailyChangePct };
+      }).sort((a, b) => b.dailyChangeKrw - a.dailyChangeKrw);
+      const totalDailyKrw = groups.reduce((s, g) => s + g.dailyChangeKrw, 0);
+      return { ownerName: group.ownerName, groups, totalDailyKrw };
+    });
+  }, [positionsByOwner, usdKrw, eurKrw]);
+
   // 시세 로드 완료 후 오늘 스냅샷 자동 저장 (하루 1회)
   useEffect(() => {
     if (!isHydrated) return;
@@ -1651,7 +1681,8 @@ export default function Home() {
             />
           </section>
 
-          <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+          <section className="min-w-0 flex-1 overflow-hidden rounded-2xl border bg-card shadow-sm">
             <div className="border-b px-4 py-3">
               <h2 className="font-semibold">보유 종목 (가족·퇴직연금)</h2>
             </div>
@@ -2172,6 +2203,44 @@ export default function Home() {
               })}
             </div>
           </section>
+
+          {/* 오늘 수익 요약 패널 */}
+          <div className="shrink-0 overflow-hidden rounded-2xl border bg-card shadow-sm xl:w-56">
+            <div className="border-b px-4 py-3">
+              <h2 className="text-sm font-semibold">오늘 수익 요약</h2>
+            </div>
+            <div className="divide-y">
+              {ownerGroupDailySummary.map((owner) => (
+                <div key={owner.ownerName} className="px-3 py-2.5">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-[11px] font-semibold text-muted-foreground">{owner.ownerName}</p>
+                    <p className={`text-[11px] font-bold tabular-nums ${owner.totalDailyKrw > 0 ? "text-red-400" : owner.totalDailyKrw < 0 ? "text-blue-400" : "text-muted-foreground"}`}>
+                      {owner.totalDailyKrw > 0 ? "+" : ""}{Math.round(owner.totalDailyKrw).toLocaleString()}
+                    </p>
+                  </div>
+                  <table className="w-full text-[11px]">
+                    <tbody>
+                      {owner.groups.map((g) => (
+                        <tr key={g.label} className="border-t border-border/40 first:border-0">
+                          <td className="py-0.5 pr-1 text-muted-foreground truncate max-w-[80px]">{g.label}</td>
+                          <td className={`py-0.5 text-right tabular-nums font-medium ${g.dailyChangeKrw > 0 ? "text-red-400" : g.dailyChangeKrw < 0 ? "text-blue-400" : "text-muted-foreground/50"}`}>
+                            {g.dailyChangeKrw !== 0 ? `${g.dailyChangeKrw > 0 ? "+" : ""}${Math.round(g.dailyChangeKrw).toLocaleString()}` : "—"}
+                          </td>
+                          <td className={`py-0.5 pl-1 text-right tabular-nums ${g.dailyChangePct !== null && g.dailyChangeKrw !== 0 ? (g.dailyChangeKrw > 0 ? "text-red-400" : "text-blue-400") : "text-muted-foreground/40"}`}>
+                            {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
+                              ? `${g.dailyChangePct > 0 ? "+" : ""}${g.dailyChangePct.toFixed(1)}%`
+                              : ""}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          </div>{/* flex wrapper end */}
 
           <section className="rounded-2xl border bg-card p-4 shadow-sm">
             <h2 className="mb-3 font-semibold">종목 추가</h2>
