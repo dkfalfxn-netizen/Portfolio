@@ -1810,7 +1810,27 @@ export default function Home() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        holdingsGroupBlocks.map((block) => (
+                        holdingsGroupBlocks.map((block) => {
+                          const groupDailyChangeKrw = block.items.reduce((sum, p) => {
+                            if (p.previousClose === null) return sum;
+                            const diff = p.currentPrice - p.previousClose;
+                            const krw =
+                              p.currency === "USD" ? diff * p.quantity * usdKrw
+                              : p.currency === "EUR" ? diff * p.quantity * eurKrw
+                              : diff * p.quantity;
+                            return sum + krw;
+                          }, 0);
+                          const prevSumKrw = block.items.reduce((sum, p) => {
+                            if (p.previousClose === null) return sum;
+                            const v =
+                              p.currency === "USD" ? p.previousClose * p.quantity * usdKrw
+                              : p.currency === "EUR" ? p.previousClose * p.quantity * eurKrw
+                              : p.previousClose * p.quantity;
+                            return sum + v;
+                          }, 0);
+                          const hasChange = prevSumKrw > 0;
+                          const groupDailyChangePct = hasChange ? (groupDailyChangeKrw / prevSumKrw) * 100 : null;
+                          return (
                           <Fragment key={`${group.ownerName}-${block.label}`}>
                             <TableRow className="border-y border-border hover:bg-transparent">
                               <TableCell colSpan={9} className="px-0 py-0">
@@ -1818,9 +1838,22 @@ export default function Home() {
                                   <span className="text-base font-bold tracking-wide text-foreground">
                                     {block.label}
                                   </span>
-                                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums font-medium text-muted-foreground">
-                                    합계 ₩{Math.round(block.sumKrw).toLocaleString()}
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    {hasChange && (
+                                      <span className={`text-xs tabular-nums font-semibold ${groupDailyChangeKrw > 0 ? "text-red-400" : groupDailyChangeKrw < 0 ? "text-blue-400" : "text-muted-foreground"}`}>
+                                        {groupDailyChangeKrw > 0 ? "+" : ""}
+                                        {Math.round(groupDailyChangeKrw).toLocaleString()}원
+                                        {groupDailyChangePct !== null && (
+                                          <span className="ml-1 opacity-80">
+                                            ({groupDailyChangePct > 0 ? "+" : ""}{groupDailyChangePct.toFixed(2)}%)
+                                          </span>
+                                        )}
+                                      </span>
+                                    )}
+                                    <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums font-medium text-muted-foreground">
+                                      합계 ₩{Math.round(block.sumKrw).toLocaleString()}
+                                    </span>
+                                  </div>
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -2113,7 +2146,8 @@ export default function Home() {
                               );
                             })}
                           </Fragment>
-                        ))
+                        );
+                        })
                       )}
                     </TableBody>
                   </Table>
