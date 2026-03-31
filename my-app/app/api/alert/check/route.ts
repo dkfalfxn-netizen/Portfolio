@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { sendAlertEmail, type AlertViolation } from "@/lib/resend";
 import type { AlertRule } from "@/app/api/alert/config/route";
+import { saveAllSnapshots } from "@/app/api/snapshot/route";
 
 type Position = {
   symbol: string;
@@ -131,6 +132,9 @@ async function handleCheck(syncKey?: string | null) {
 
     results.push({ syncKey: cfg.sync_key, violations: violations.length, sent });
   }
+
+  // 알림 체크와 함께 오늘 스냅샷도 저장 (실패해도 알림 결과에 영향 없음)
+  void saveAllSnapshots().catch(() => {});
 
   return NextResponse.json({ ok: true, results });
 }

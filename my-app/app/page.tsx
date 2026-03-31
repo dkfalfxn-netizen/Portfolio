@@ -1044,10 +1044,30 @@ export default function Home() {
     window.localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(cashByOwner));
   }, [cashByOwner, isHydrated]);
 
-  // 초기 로드 시 스냅샷 읽기
+  // 초기 로드 시 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
   useEffect(() => {
     if (!isHydrated) return;
-    setDailySnapshots(loadDailySnapshots());
+    const local = loadDailySnapshots();
+    setDailySnapshots(local);
+
+    const key = (() => {
+      try { return window.localStorage.getItem(SYNC_KEY_STORAGE) ?? ""; } catch { return ""; }
+    })();
+    if (key.length < 8) return;
+
+    void fetch(`/api/snapshot?sync_key=${encodeURIComponent(key)}&days=180`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((json: { snapshots?: DailySnapshot[] } | null) => {
+        if (!json?.snapshots?.length) return;
+        // 서버 스냅샷과 로컬 스냅샷 병합: 같은 날짜면 서버 우선
+        const localMap = new Map(local.map((s) => [s.date, s]));
+        for (const s of json.snapshots) localMap.set(s.date, s);
+        const merged = [...localMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+        setDailySnapshots(merged);
+        // 서버 스냅샷도 로컬에 캐시
+        window.localStorage.setItem(DAILY_SNAPSHOTS_KEY, JSON.stringify(merged));
+      })
+      .catch(() => {});
   }, [isHydrated]);
 
   useEffect(() => {
