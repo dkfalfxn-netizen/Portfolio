@@ -1317,6 +1317,7 @@ export default function Home() {
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const savedScrollY = window.scrollY;
 
     const quantity = Number(form.quantity);
     const avgPrice = Number(form.avgPrice);
@@ -1372,6 +1373,10 @@ export default function Home() {
       accountType: form.accountType,
       accountName: form.accountName,
       selectedOwners: form.selectedOwners,
+    });
+
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: savedScrollY, behavior: "instant" });
     });
   }
 
