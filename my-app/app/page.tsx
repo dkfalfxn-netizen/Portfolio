@@ -1811,6 +1811,7 @@ export default function Home() {
                         </TableRow>
                       ) : (
                         holdingsGroupBlocks.map((block) => {
+                          // 오늘 등락
                           const groupDailyChangeKrw = block.items.reduce((sum, p) => {
                             if (p.previousClose === null) return sum;
                             const diff = p.currentPrice - p.previousClose;
@@ -1830,6 +1831,10 @@ export default function Home() {
                           }, 0);
                           const hasChange = prevSumKrw > 0;
                           const groupDailyChangePct = hasChange ? (groupDailyChangeKrw / prevSumKrw) * 100 : null;
+                          // 총 수익
+                          const groupCostKrw = block.items.reduce((sum, p) => sum + p.costKrw, 0);
+                          const groupTotalPnlKrw = block.sumKrw - groupCostKrw;
+                          const groupTotalPnlPct = groupCostKrw > 0 ? (groupTotalPnlKrw / groupCostKrw) * 100 : null;
                           return (
                           <Fragment key={`${group.ownerName}-${block.label}`}>
                             <TableRow className="border-y border-border hover:bg-transparent">
@@ -1839,15 +1844,26 @@ export default function Home() {
                                     {block.label}
                                   </span>
                                   <div className="flex items-center gap-2">
+                                    {/* 오늘 등락 */}
                                     {hasChange && (
                                       <span className={`text-xs tabular-nums font-semibold ${groupDailyChangeKrw > 0 ? "text-red-400" : groupDailyChangeKrw < 0 ? "text-blue-400" : "text-muted-foreground"}`}>
-                                        {groupDailyChangeKrw > 0 ? "+" : ""}
+                                        오늘 {groupDailyChangeKrw > 0 ? "+" : ""}
                                         {Math.round(groupDailyChangeKrw).toLocaleString()}원
                                         {groupDailyChangePct !== null && (
-                                          <span className="ml-1 opacity-80">
+                                          <span className="ml-0.5 opacity-80">
                                             ({groupDailyChangePct > 0 ? "+" : ""}{groupDailyChangePct.toFixed(2)}%)
                                           </span>
                                         )}
+                                      </span>
+                                    )}
+                                    {/* 총 수익 */}
+                                    {groupTotalPnlPct !== null && (
+                                      <span className={`text-xs tabular-nums font-semibold ${groupTotalPnlKrw > 0 ? "text-red-400" : groupTotalPnlKrw < 0 ? "text-blue-400" : "text-muted-foreground"}`}>
+                                        총 {groupTotalPnlKrw > 0 ? "+" : ""}
+                                        {Math.round(groupTotalPnlKrw).toLocaleString()}원
+                                        <span className="ml-0.5 opacity-80">
+                                          ({groupTotalPnlPct > 0 ? "+" : ""}{groupTotalPnlPct.toFixed(2)}%)
+                                        </span>
                                       </span>
                                     )}
                                     <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums font-medium text-muted-foreground">

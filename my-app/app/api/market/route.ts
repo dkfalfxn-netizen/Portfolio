@@ -84,16 +84,22 @@ async function fetchNaverGoldPrice(): Promise<ChartQuote> {
     if (!res.ok) return emptyQuote();
 
     const html = await res.text();
-    const match = html.match(
-      /<td class="date">\d{4}\.\d{2}\.\d{2}<\/td>\s*<td class="num">([\d,]+(?:\.\d+)?)<\/td>/,
-    );
-    if (!match) return emptyQuote();
+    // 테이블의 첫 두 행(오늘, 어제)을 파싱해 현재가와 전일 종가를 가져옴
+    const rows: number[] = [];
+    const rowPattern =
+      /<td class="date">\d{4}\.\d{2}\.\d{2}<\/td>\s*<td class="num">([\d,]+(?:\.\d+)?)<\/td>/g;
+    let m: RegExpExecArray | null;
+    while ((m = rowPattern.exec(html)) !== null && rows.length < 2) {
+      const p = parseFloat(m[1].replace(/,/g, ""));
+      if (Number.isFinite(p) && p > 0) rows.push(p);
+    }
 
-    const price = parseFloat(match[1].replace(/,/g, ""));
+    if (rows.length === 0) return emptyQuote();
+
     return {
-      price: Number.isFinite(price) ? price : null,
+      price: rows[0],
       currency: "KRW",
-      previousClose: null,
+      previousClose: rows.length >= 2 ? rows[1] : null,
       sparkline: [],
     };
   } catch {
