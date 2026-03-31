@@ -669,7 +669,7 @@ export default function Home() {
 
   const [cloudSyncKey, setCloudSyncKey] = useState("");
   const [syncKeyDraft, setSyncKeyDraft] = useState("");
-  const [autoSync, setAutoSync] = useState(false);
+  const [autoSync, setAutoSync] = useState(true);
   const [syncReady, setSyncReady] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
@@ -1043,7 +1043,9 @@ export default function Home() {
     const savedKey = typeof window !== "undefined" ? window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "" : "";
     setCloudSyncKey(savedKey);
     setSyncKeyDraft(savedKey);
-    const auto = typeof window !== "undefined" && window.localStorage.getItem(AUTO_SYNC_STORAGE) === "1";
+    const storedAuto = typeof window !== "undefined" ? window.localStorage.getItem(AUTO_SYNC_STORAGE) : null;
+    const auto = storedAuto !== "0"; // 명시적으로 끈 경우(0)만 false, 나머지는 기본 true
+    setAutoSync(auto);
     const holdSort = loadHoldingsSort();
     setHoldingsSortByOwner(holdSort);
     setIsHydrated(true);
