@@ -14,6 +14,9 @@
  *  6. 결과를 market_reports 테이블에 upsert (날짜 기준)
  */
 
+// Vercel 함수 최대 실행 시간 (초) — Pro 플랜: 최대 300s, Hobby: 최대 60s
+export const maxDuration = 60;
+
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { YoutubeTranscript } from "youtube-transcript";
@@ -411,6 +414,8 @@ export async function POST(req: NextRequest) {
   const errorChannels: string[] = [];
   const transcriptResults: TranscriptResult[] = [];
 
+  try {
+
   // 2. 활성화된 채널 목록
   const activeChannels = YOUTUBE_CHANNELS.filter((c) => c.enabled);
   if (activeChannels.length === 0) {
@@ -420,32 +425,32 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 3. 채널별 영상 수집 + 자막 추출 (순차 처리로 Rate Limit 방지)
-  for (const channel of activeChannels) {
-    try {
+  // 3. 채널별 영상 수집 + 자막 추출 (병렬 처리로 속도 개선)
+  const channelResults = await Promise.allSettled(
+    activeChannels.map(async (channel) => {
       const videos = await fetchLatestVideos(channel);
-      if (videos.length === 0) {
-        errorChannels.push(`${channel.name}(영상 없음)`);
-        continue;
-      }
+      if (videos.length === 0) throw new Error("영상 없음");
 
+      const results: TranscriptResult[] = [];
       for (const video of videos) {
         const transcript = await fetchTranscript(
           video.videoId,
           channel.langs,
           AI_CONFIG.transcriptMaxChars,
         );
-        transcriptResults.push({
-          ...video,
-          transcript,
-          transcriptChars: transcript.length,
-        });
-        // YouTube 요청 간 짧은 딜레이
-        await new Promise((r) => setTimeout(r, 500));
+        results.push({ ...video, transcript, transcriptChars: transcript.length });
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errorChannels.push(`${channel.name}(${msg.slice(0, 50)})`);
+      return results;
+    }),
+  );
+
+  for (let i = 0; i < channelResults.length; i++) {
+    const r = channelResults[i];
+    if (r.status === "fulfilled") {
+      transcriptResults.push(...r.value);
+    } else {
+      const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      errorChannels.push(`${activeChannels[i].name}(${msg.slice(0, 50)})`);
     }
   }
 
@@ -513,6 +518,16 @@ export async function POST(req: NextRequest) {
     },
     durationMs: report.analysisDurationMs,
   });
+
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack?.slice(0, 500) : undefined;
+    console.error("[analyze-market] 오류:", message, stack);
+    return NextResponse.json(
+      { error: message, stack, durationMs: Date.now() - startTime },
+      { status: 500 },
+    );
+  }
 }
 
 // Vercel Cron은 GET 방식도 지원 — POST와 동일 로직 위임
