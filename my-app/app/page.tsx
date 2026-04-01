@@ -19,6 +19,7 @@ import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
   calculateRSISignal,
+  calculateVolumeSignal,
   type DailyPrice as SignalDailyPrice,
   type TradeSignal,
 } from "@/lib/signals";
@@ -771,16 +772,20 @@ export default function Home() {
   });
 
   const signalBySymbol = useMemo(() => {
-    const out = new Map<string, { final: TradeSignal; ma: TradeSignal; rsi: TradeSignal; bb: TradeSignal }>();
+    const out = new Map<
+      string,
+      { final: TradeSignal; ma: TradeSignal; rsi: TradeSignal; bb: TradeSignal; vol: TradeSignal }
+    >();
     const history = historyQuery.data?.history ?? {};
     for (const [symbol, prices] of Object.entries(history)) {
       const ma = calculateMACrossoverSignal(prices);
       const rsi = calculateRSISignal(prices);
       const bb = calculateBollingerSignal(prices);
-      const buyCount = [ma, rsi, bb].filter((s) => s === "BUY").length;
-      const sellCount = [ma, rsi, bb].filter((s) => s === "SELL").length;
+      const vol = calculateVolumeSignal(prices);
+      const buyCount = [ma, rsi, bb, vol].filter((s) => s === "BUY").length;
+      const sellCount = [ma, rsi, bb, vol].filter((s) => s === "SELL").length;
       const final: TradeSignal = buyCount > sellCount ? "BUY" : sellCount > buyCount ? "SELL" : "HOLD";
-      out.set(symbol, { final, ma, rsi, bb });
+      out.set(symbol, { final, ma, rsi, bb, vol });
     }
     return out;
   }, [historyQuery.data]);
@@ -2073,7 +2078,7 @@ export default function Home() {
                                     {historyQuery.isLoading ? "..." : s?.final ?? "HOLD"}
                                     {s ? (
                                       <p className="mt-0.5 text-[10px] font-normal text-muted-foreground">
-                                        MA:{s.ma} RSI:{s.rsi} BB:{s.bb}
+                                        MA:{s.ma} RSI:{s.rsi} BB:{s.bb} VOL:{s.vol}
                                       </p>
                                     ) : null}
                                   </div>
