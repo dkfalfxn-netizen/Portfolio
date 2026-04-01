@@ -16,6 +16,13 @@ import { LivePriceCell } from "@/components/live-price-cell";
 import { DailyTrendChart } from "@/components/daily-trend-chart";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import {
+  calculateBollingerSignal,
+  calculateMACrossoverSignal,
+  calculateRSISignal,
+  type DailyPrice as SignalDailyPrice,
+  type TradeSignal,
+} from "@/lib/signals";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -62,6 +69,11 @@ type MarketResponse = {
   usdKrw: number | null;
   eurKrw: number | null;
   fetchedAt: number;
+};
+
+type HistoryResponse = {
+  history: Record<string, SignalDailyPrice[]>;
+  fetchedAt?: number;
 };
 
 /** 로컬 저장 키 — v1에서 한 번만 마이그레이션 후 v2만 사용 */
@@ -730,6 +742,48 @@ export default function Home() {
     enabled: true,
     refetchInterval: 10000,
   });
+
+  // 요청: 김승주 보유 종목에 대해 기술적 시그널 표시
+  const signalSymbols = useMemo(
+    () =>
+      [
+        ...new Set(
+          positions
+            .filter((p) => p.owner === "김승주")
+            .map((p) => p.symbol)
+            .filter(Boolean),
+        ),
+      ].join(","),
+    [positions],
+  );
+
+  const historyQuery = useQuery<HistoryResponse>({
+    queryKey: ["market-history", signalSymbols],
+    queryFn: async () => {
+      const res = await fetch(`/api/market/history?symbols=${encodeURIComponent(signalSymbols)}`);
+      if (!res.ok) throw new Error("일봉 조회 실패");
+      return res.json() as Promise<HistoryResponse>;
+    },
+    enabled: signalSymbols.length > 0,
+    // 일봉은 분봉보다 덜 자주 바뀌므로 30분 캐시
+    staleTime: 1000 * 60 * 30,
+    refetchInterval: 1000 * 60 * 30,
+  });
+
+  const signalBySymbol = useMemo(() => {
+    const out = new Map<string, { final: TradeSignal; ma: TradeSignal; rsi: TradeSignal; bb: TradeSignal }>();
+    const history = historyQuery.data?.history ?? {};
+    for (const [symbol, prices] of Object.entries(history)) {
+      const ma = calculateMACrossoverSignal(prices);
+      const rsi = calculateRSISignal(prices);
+      const bb = calculateBollingerSignal(prices);
+      const buyCount = [ma, rsi, bb].filter((s) => s === "BUY").length;
+      const sellCount = [ma, rsi, bb].filter((s) => s === "SELL").length;
+      const final: TradeSignal = buyCount > sellCount ? "BUY" : sellCount > buyCount ? "SELL" : "HOLD";
+      out.set(symbol, { final, ma, rsi, bb });
+    }
+    return out;
+  }, [historyQuery.data]);
 
   const usdKrw = marketQuery.data?.usdKrw ?? 1350;
   const eurKrw = marketQuery.data?.eurKrw ?? 1450;
@@ -1851,6 +1905,7 @@ export default function Home() {
                         <TableHead className="px-3 py-1.5 text-right">현재가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">수량</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">수익률</TableHead>
+                        <TableHead className="px-3 py-1.5 text-center">시그널</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">평단가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">매입환율</TableHead>
                         <TableHead className="px-3 py-1.5 w-[140px]">수정/삭제</TableHead>
@@ -1860,7 +1915,7 @@ export default function Home() {
                       {displayItems.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={9}
+                            colSpan={10}
                             className="px-3 py-4 text-center text-xs text-muted-foreground"
                           >
                             등록된 종목이 없습니다.
@@ -1895,7 +1950,7 @@ export default function Home() {
                           return (
                           <Fragment key={`${group.ownerName}-${block.label}`}>
                             <TableRow className="border-y border-border hover:bg-transparent">
-                              <TableCell colSpan={9} className="px-0 py-0">
+                              <TableCell colSpan={10} className="px-0 py-0">
                                 <div className="flex flex-wrap items-center justify-between gap-2 border-l-4 border-primary/70 bg-primary/[0.07] px-3 py-2">
                                   <span className="text-base font-bold tracking-wide text-foreground">
                                     {block.label}
@@ -2002,6 +2057,31 @@ export default function Home() {
                                     : undefined
                               }
                             />
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 text-center">
+                            {group.ownerName === "김승주" ? (
+                              (() => {
+                                const s = signalBySymbol.get(position.symbol);
+                                const color =
+                                  s?.final === "BUY"
+                                    ? "text-red-500"
+                                    : s?.final === "SELL"
+                                      ? "text-blue-500"
+                                      : "text-muted-foreground";
+                                return (
+                                  <div className={`text-xs font-semibold ${color}`}>
+                                    {historyQuery.isLoading ? "..." : s?.final ?? "HOLD"}
+                                    {s ? (
+                                      <p className="mt-0.5 text-[10px] font-normal text-muted-foreground">
+                                        MA:{s.ma} RSI:{s.rsi} BB:{s.bb}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                );
+                              })()
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell className="px-3 py-1.5 text-right">
                             {isEditing ? (
