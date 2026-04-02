@@ -85,7 +85,16 @@ const SYNC_KEY_STORAGE = "portfolio_sync_key_v1";
 const AUTO_SYNC_STORAGE = "portfolio_auto_sync_v1";
 const HOLDINGS_SORT_STORAGE_KEY = "portfolio_holdings_sort_v1";
 const DAILY_SNAPSHOTS_KEY = "portfolio_daily_snapshots_v1";
-const LOCAL_MODIFIED_KEY = "portfolio_local_modified_v1";
+/**
+ * 마지막으로 서버와 성공적으로 동기화했을 때의 서버 updated_at 값.
+ * 로컬 시계가 아닌 서버 시각 기준이라 기기 간 시계 차이 문제가 없다.
+ */
+const LAST_SYNC_TS_KEY = "portfolio_last_sync_ts_v1";
+/**
+ * 사용자가 마지막 동기화 이후 로컬에서 데이터를 수정했으면 "1".
+ * 페이지 로드·서버 Pull로 상태가 바뀔 때는 설정하지 않는다.
+ */
+const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
 
@@ -690,6 +699,13 @@ export default function Home() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [serverHealth, setServerHealth] = useState<"loading" | "ok" | "error">("loading");
   const pushDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * positions/cash useEffect에서 HAS_LOCAL_CHANGES_KEY 설정을 건너뛸 횟수.
+   * - 최초 하이드레이션(디스크→state 재적용)이나 서버 Pull 반영 시에는
+   *   "사용자가 수정"한 것이 아니므로 로컬 변경 플래그를 올리지 않아야 한다.
+   * - setPositions + setCashByOwner를 한 번 호출할 때마다 2를 설정.
+   */
+  const skipMarkLocalChangedRef = useRef(0);
   const [holdingsSortByOwner, setHoldingsSortByOwner] =
     useState<Record<OwnerName, HoldingsSortMode>>(defaultHoldingsSort);
 
@@ -1050,36 +1066,59 @@ export default function Home() {
         return;
       }
       if (j.found) {
-        const serverTs = typeof j.updated_at === "string" ? new Date(j.updated_at).getTime() : 0;
-        const localModifiedRaw = typeof window !== "undefined"
-          ? window.localStorage.getItem(LOCAL_MODIFIED_KEY)
-          : null;
-        const localTs = localModifiedRaw ? new Date(localModifiedRaw).getTime() : 0;
+        const serverTs = typeof j.updated_at === "string" ? j.updated_at : "";
+        const lastSyncTs = window.localStorage.getItem(LAST_SYNC_TS_KEY) ?? "";
+        const hasLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) === "1";
 
-        // 로컬이 더 최신이면 서버에 올리고, 서버가 더 최신이면 내려받음
-        if (localTs > serverTs && pos.length > 0) {
-          const rPush = await fetch("/api/sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "push", key, positions: pos, cashByOwner: cash, holdingsSortByOwner: holdingsSort }),
-          });
-          const jPush = (await rPush.json()) as { error?: string };
-          if (!rPush.ok) setSyncMessage(jPush.error ?? "서버 업로드 실패");
-          else {
-            setSyncMessage("로컬 데이터가 최신입니다. 서버에 업로드했습니다.");
-            setLastSyncedAt(new Date().toISOString());
+        if (serverTs > lastSyncTs) {
+          // ─ 서버가 마지막 동기화 이후 갱신됨 → 서버 데이터를 적용
+          if (hasLocalChanges) {
+            // 로컬에도 미저장 변경이 있는 충돌 상황 — 서버를 우선하되 사용자에게 알림
+            setSyncMessage(
+              "⚠️ 서버에 최신 데이터가 있어 불러왔습니다. " +
+              "이 기기의 미동기화 변경이 있었다면 확인 후 필요하면 '서버에 올리기'를 눌러 주세요.",
+            );
+          } else {
+            setSyncMessage("서버에서 최신 잔고를 불러왔습니다.");
           }
-        } else {
+          skipMarkLocalChangedRef.current = 2;
           const valid = Array.isArray(j.positions)
             ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
             : [];
           setPositions(mergeDuplicatePositions(valid));
           setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
           setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
-          setSyncMessage("서버에서 잔고를 불러왔습니다. (다른 PC와 같은 키면 같은 데이터입니다.)");
-          setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
+          window.localStorage.setItem(LAST_SYNC_TS_KEY, serverTs);
+          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+          setLastSyncedAt(serverTs);
+        } else if (hasLocalChanges && pos.length > 0) {
+          // ─ 서버는 변화 없음 + 로컬에 미저장 변경 → 서버에 올림
+          const rPush = await fetch("/api/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "push", key, positions: pos, cashByOwner: cash, holdingsSortByOwner: holdingsSort }),
+          });
+          const jPush = (await rPush.json()) as { ok?: boolean; updated_at?: string; error?: string };
+          if (!rPush.ok) {
+            setSyncMessage(jPush.error ?? "서버 업로드 실패");
+          } else {
+            const pushedTs = jPush.updated_at ?? new Date().toISOString();
+            window.localStorage.setItem(LAST_SYNC_TS_KEY, pushedTs);
+            window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+            setSyncMessage("이 기기의 최신 데이터를 서버에 업로드했습니다.");
+            setLastSyncedAt(pushedTs);
+          }
+        } else {
+          // ─ 이미 동기화된 상태
+          if (!lastSyncTs) {
+            // 최초 연결 시 lastSyncTs 를 서버 기준으로 초기화
+            window.localStorage.setItem(LAST_SYNC_TS_KEY, serverTs);
+          }
+          setSyncMessage("서버와 동기화 상태입니다.");
+          setLastSyncedAt(serverTs || lastSyncTs);
         }
       } else {
+        // ─ 서버에 데이터 없음 → 이 기기 내용을 처음 올림
         const r2 = await fetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1091,11 +1130,15 @@ export default function Home() {
             holdingsSortByOwner: holdingsSort,
           }),
         });
-        const j2 = (await r2.json()) as { error?: string };
-        if (!r2.ok) setSyncMessage(j2.error ?? "서버 업로드 실패");
-        else {
+        const j2 = (await r2.json()) as { ok?: boolean; updated_at?: string; error?: string };
+        if (!r2.ok) {
+          setSyncMessage(j2.error ?? "서버 업로드 실패");
+        } else {
+          const pushedTs = j2.updated_at ?? new Date().toISOString();
+          window.localStorage.setItem(LAST_SYNC_TS_KEY, pushedTs);
+          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setSyncMessage("서버에 기존 데이터가 없어 이 기기 내용을 올렸습니다.");
-          setLastSyncedAt(new Date().toISOString());
+          setLastSyncedAt(pushedTs);
         }
       }
     } catch {
@@ -1119,6 +1162,7 @@ export default function Home() {
   useEffect(() => {
     const pos = loadPositions();
     const cash = loadCashByOwner();
+    skipMarkLocalChangedRef.current = 2; // 디스크→state 재적용은 "수정"이 아님
     setPositions(pos);
     setCashByOwner(cash);
     const savedKey = typeof window !== "undefined" ? window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "" : "";
@@ -1150,13 +1194,22 @@ export default function Home() {
   useEffect(() => {
     if (!isHydrated) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
-    window.localStorage.setItem(LOCAL_MODIFIED_KEY, new Date().toISOString());
+    if (skipMarkLocalChangedRef.current > 0) {
+      skipMarkLocalChangedRef.current -= 1;
+    } else {
+      // 사용자가 직접 수정한 경우 → 다음 동기화 시 Push 유도
+      window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    }
   }, [positions, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
     window.localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(cashByOwner));
-    window.localStorage.setItem(LOCAL_MODIFIED_KEY, new Date().toISOString());
+    if (skipMarkLocalChangedRef.current > 0) {
+      skipMarkLocalChangedRef.current -= 1;
+    } else {
+      window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    }
   }, [cashByOwner, isHydrated]);
 
   // 초기 로드 시 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
@@ -1187,8 +1240,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!isHydrated || !syncReady || !autoSync || cloudSyncKey.length < 8) return;
+    // 로컬 변경이 없으면 불필요한 push를 생략 — Pull 직후 state가 바뀌어도 push 안 함
+    if (window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1") return;
     if (pushDebounceRef.current) clearTimeout(pushDebounceRef.current);
     pushDebounceRef.current = setTimeout(() => {
+      // debounce 후 다시 확인 (그 사이 pull이 들어왔을 수 있음)
+      if (window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1") return;
       void fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1201,7 +1258,11 @@ export default function Home() {
         }),
       }).then(async (r) => {
         if (r.ok) {
-          setLastSyncedAt(new Date().toISOString());
+          const j = (await r.json().catch(() => ({}))) as { updated_at?: string };
+          const pushedTs = j.updated_at ?? new Date().toISOString();
+          window.localStorage.setItem(LAST_SYNC_TS_KEY, pushedTs);
+          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+          setLastSyncedAt(pushedTs);
           setSyncMessage("서버에 자동 저장했습니다.");
         } else {
           const j = (await r.json().catch(() => ({}))) as { error?: string };
@@ -1240,12 +1301,17 @@ export default function Home() {
         return;
       }
       if (j.found) {
+        skipMarkLocalChangedRef.current = 2;
         const valid = Array.isArray(j.positions)
           ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
           : [];
         setPositions(mergeDuplicatePositions(valid));
         setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
         setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
+        if (typeof j.updated_at === "string") {
+          window.localStorage.setItem(LAST_SYNC_TS_KEY, j.updated_at);
+          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+        }
         setSyncMessage("서버에서 불러왔습니다.");
         setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
       } else {
@@ -1278,10 +1344,14 @@ export default function Home() {
         }),
       });
       const j = (await r.json()) as { error?: string };
-      if (!r.ok) setSyncMessage(j.error ?? "업로드 실패");
-      else {
+      if (!r.ok) {
+        setSyncMessage(j.error ?? "업로드 실패");
+      } else {
+        const pushedTs = (j as { updated_at?: string }).updated_at ?? new Date().toISOString();
+        window.localStorage.setItem(LAST_SYNC_TS_KEY, pushedTs);
+        window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
         setSyncMessage("서버에 올렸습니다.");
-        setLastSyncedAt(new Date().toISOString());
+        setLastSyncedAt(pushedTs);
       }
     } catch {
       setSyncMessage("네트워크 오류입니다.");

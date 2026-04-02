@@ -153,13 +153,14 @@ export async function POST(req: NextRequest) {
       holdingsSort = parseHoldingsSortFromJson(existing?.holdings_sort_by_owner ?? {});
     }
 
+    const updatedAt = new Date().toISOString();
     const { error } = await admin.from("portfolio_snapshots").upsert(
       {
         sync_key: key,
         positions: b.positions,
         cash_by_owner: b.cashByOwner,
         holdings_sort_by_owner: holdingsSort,
-        updated_at: new Date().toISOString(),
+        updated_at: updatedAt,
       },
       { onConflict: "sync_key" },
     );
@@ -167,7 +168,7 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, updated_at: updatedAt });
   }
 
   return NextResponse.json({ error: "action은 pull 또는 push 여야 합니다." }, { status: 400 });
