@@ -87,54 +87,23 @@ async function fetchQuoteForSymbol(input: string): Promise<Quote> {
   return fetchYahooQuote(toYahooSymbol(s));
 }
 
-async function getKakaoAccessToken(): Promise<string | null> {
-  const clientId = process.env.KAKAO_REST_API_KEY;
-  const refreshToken = process.env.KAKAO_REFRESH_TOKEN;
-  if (!clientId || !refreshToken) return null;
+async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?: string }> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!botToken || !chatId) {
+    return { ok: false, error: "TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수 미설정" };
+  }
 
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    client_id: clientId,
-    refresh_token: refreshToken,
-  });
-
-  const res = await fetch("https://kauth.kakao.com/oauth/token", {
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
-    body: body.toString(),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
     cache: "no-store",
   });
-  if (!res.ok) return null;
-  const j = await res.json() as { access_token?: string };
-  return j.access_token ?? null;
-}
 
-async function sendKakaoMemo(text: string): Promise<{ ok: boolean; error?: string }> {
-  const token = await getKakaoAccessToken();
-  if (!token) return { ok: false, error: "Kakao access_token 발급 실패 (KAKAO_REST_API_KEY/KAKAO_REFRESH_TOKEN 확인)" };
-
-  const template = {
-    object_type: "text",
-    text,
-    link: {
-      web_url: "https://portfolio-one-xi-86.vercel.app/",
-      mobile_web_url: "https://portfolio-one-xi-86.vercel.app/",
-    },
-    button_title: "대시보드 열기",
-  };
-
-  const res = await fetch("https://kapi.kakao.com/v2/api/talk/memo/default/send", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
-    },
-    body: new URLSearchParams({ template_object: JSON.stringify(template) }).toString(),
-    cache: "no-store",
-  });
   if (!res.ok) {
     const t = await res.text();
-    return { ok: false, error: `카카오 전송 실패: ${t.slice(0, 200)}` };
+    return { ok: false, error: `텔레그램 전송 실패: ${t.slice(0, 200)}` };
   }
   return { ok: true };
 }
@@ -197,9 +166,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, message: "3% 이상 변동 종목 없음", count: 0 });
   }
 
-  const text = `[포트폴리오 가격 변동 알림]\n${dateKst}\n\n${messages.slice(0, 30).join("\n")}\n\n자세히: https://portfolio-one-xi-86.vercel.app/`;
-  const send = await sendKakaoMemo(text);
-  if (!send.ok) return NextResponse.json({ error: send.error ?? "카카오 전송 실패" }, { status: 500 });
+  const text = `<b>[포트폴리오 가격 변동 알림]</b>\n${dateKst}\n\n${messages.slice(0, 30).join("\n")}\n\n🔗 <a href="https://portfolio-one-xi-86.vercel.app/">대시보드 열기</a>`;
+  const send = await sendTelegramMessage(text);
+  if (!send.ok) return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
 
   if (logRows.length > 0) {
     await admin.from("price_move_alert_logs").upsert(logRows, { onConflict: "sync_key,symbol,date" });
