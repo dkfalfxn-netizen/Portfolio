@@ -170,7 +170,14 @@ async function handleCheck(syncKey?: string | null) {
     });
   }
 
-  const results: { syncKey: string; violations: number; sent: boolean; summarySent: boolean }[] = [];
+  const results: {
+    syncKey: string;
+    violations: number;
+    sent: boolean;
+    summarySent: boolean;
+    alertError?: string;
+    summaryError?: string;
+  }[] = [];
 
   for (const cfg of configs) {
     const { data: snap } = await admin
@@ -194,12 +201,15 @@ async function handleCheck(syncKey?: string | null) {
     );
 
     let sent = false;
+    let alertError: string | undefined;
     let summarySent = false;
     if (violations.length > 0 && cfg.email) {
-      const { ok } = await sendAlertEmail(cfg.email, violations);
+      const { ok, error } = await sendAlertEmail(cfg.email, violations);
       sent = ok;
+      alertError = ok ? undefined : error;
     }
 
+    let summaryError: string | undefined;
     if (cfg.email) {
       const summary = buildDailySummary(positions, cashByOwner, FALLBACK_USD_KRW, FALLBACK_EUR_KRW);
       const r = await sendDailySummaryEmail(cfg.email, {
@@ -210,9 +220,17 @@ async function handleCheck(syncKey?: string | null) {
         violationsCount: violations.length,
       });
       summarySent = r.ok;
+      summaryError = r.ok ? undefined : r.error;
     }
 
-    results.push({ syncKey: cfg.sync_key, violations: violations.length, sent, summarySent });
+    results.push({
+      syncKey: cfg.sync_key,
+      violations: violations.length,
+      sent,
+      summarySent,
+      alertError,
+      summaryError,
+    });
   }
 
   return NextResponse.json({ ok: true, results, snapshotsSaved: true });
