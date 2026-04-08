@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
-import { sendAlertEmail, type AlertViolation } from "@/lib/resend";
+import {
+  sendAlertEmail,
+  sendDailySummaryEmail,
+  type AlertViolation,
+  type DailyOwnerSummary,
+  type DailyRatioRow,
+} from "@/lib/resend";
 import type { AlertRule } from "@/app/api/alert/config/route";
 import { saveAllSnapshots } from "@/app/api/snapshot/route";
 
@@ -27,6 +33,58 @@ function calcValueKrw(p: Position, usdKrw: number, eurKrw: number): number {
   if (p.currency === "USD") return p.quantity * p.currentPrice * usdKrw;
   if (p.currency === "EUR") return p.quantity * p.currentPrice * eurKrw;
   return p.quantity * p.currentPrice;
+}
+
+function todayKST(): string {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function buildDailySummary(
+  positions: Position[],
+  cashByOwner: Record<string, CashEntry>,
+  usdKrw: number,
+  eurKrw: number,
+): { totalKrw: number; ownerSummaries: DailyOwnerSummary[]; topRatios: DailyRatioRow[] } {
+  const owners = [...new Set(positions.map((p) => p.owner))];
+  const ownerSummaries: DailyOwnerSummary[] = [];
+  const ratioRows: DailyRatioRow[] = [];
+  let totalKrw = 0;
+
+  for (const owner of owners) {
+    const ownerPositions = positions.filter((p) => p.owner === owner);
+    const cash = cashByOwner[owner] ?? { usd: 0, krw: 0 };
+    const cashKrw = cash.krw + (cash.usd ?? 0) * usdKrw;
+
+    // 동일 symbol 합산
+    const bySymbol = new Map<string, number>();
+    for (const p of ownerPositions) {
+      const v = calcValueKrw(p, usdKrw, eurKrw);
+      bySymbol.set(p.symbol, (bySymbol.get(p.symbol) ?? 0) + v);
+    }
+    const stockKrw = [...bySymbol.values()].reduce((s, v) => s + v, 0);
+    const ownerTotal = stockKrw + cashKrw;
+    totalKrw += ownerTotal;
+
+    ownerSummaries.push({
+      owner,
+      totalKrw: ownerTotal,
+      stockKrw,
+      cashKrw,
+    });
+
+    const symbolRatios = [...bySymbol.entries()]
+      .map(([symbol, valueKrw]) => ({
+        owner,
+        symbol,
+        valueKrw,
+        ratioPct: ownerTotal > 0 ? (valueKrw / ownerTotal) * 100 : 0,
+      }))
+      .sort((a, b) => b.ratioPct - a.ratioPct)
+      .slice(0, 5);
+    ratioRows.push(...symbolRatios);
+  }
+
+  return { totalKrw, ownerSummaries, topRatios: ratioRows };
 }
 
 function checkRules(
@@ -112,7 +170,7 @@ async function handleCheck(syncKey?: string | null) {
     });
   }
 
-  const results: { syncKey: string; violations: number; sent: boolean }[] = [];
+  const results: { syncKey: string; violations: number; sent: boolean; summarySent: boolean }[] = [];
 
   for (const cfg of configs) {
     const { data: snap } = await admin
@@ -136,12 +194,25 @@ async function handleCheck(syncKey?: string | null) {
     );
 
     let sent = false;
+    let summarySent = false;
     if (violations.length > 0 && cfg.email) {
       const { ok } = await sendAlertEmail(cfg.email, violations);
       sent = ok;
     }
 
-    results.push({ syncKey: cfg.sync_key, violations: violations.length, sent });
+    if (cfg.email) {
+      const summary = buildDailySummary(positions, cashByOwner, FALLBACK_USD_KRW, FALLBACK_EUR_KRW);
+      const r = await sendDailySummaryEmail(cfg.email, {
+        dateKst: todayKST(),
+        totalKrw: summary.totalKrw,
+        ownerSummaries: summary.ownerSummaries,
+        topRatios: summary.topRatios,
+        violationsCount: violations.length,
+      });
+      summarySent = r.ok;
+    }
+
+    results.push({ syncKey: cfg.sync_key, violations: violations.length, sent, summarySent });
   }
 
   return NextResponse.json({ ok: true, results, snapshotsSaved: true });
