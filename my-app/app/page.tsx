@@ -128,11 +128,13 @@ function saveDailySnapshot(snap: DailySnapshot) {
   if (typeof window === "undefined") return;
   try {
     const existing = loadDailySnapshots();
-    const filtered = existing.filter((s) => s.date !== snap.date);
+    // 이미 오늘 스냅샷이 있으면 저장하지 않음 (크론 데이터 우선 보호)
+    // 서버 병합 시에는 직접 localStorage에 쓰므로 크론 데이터는 항상 반영됨
+    if (existing.some((s) => s.date === snap.date)) return;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - SNAPSHOT_MAX_DAYS);
     const cutoffStr = cutoff.toISOString().slice(0, 10);
-    const updated = [...filtered, snap]
+    const updated = [...existing, snap]
       .filter((s) => s.date >= cutoffStr)
       .sort((a, b) => a.date.localeCompare(b.date));
     window.localStorage.setItem(DAILY_SNAPSHOTS_KEY, JSON.stringify(updated));
