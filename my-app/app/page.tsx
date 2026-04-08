@@ -14,6 +14,7 @@ import { FamilyAllocationDonut } from "@/components/family-allocation-chart";
 import { IntradaySparkline } from "@/components/intraday-sparkline";
 import { LivePriceCell } from "@/components/live-price-cell";
 import { DailyTrendChart } from "@/components/daily-trend-chart";
+import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import {
   calculateBollingerSignal,
@@ -1824,6 +1825,7 @@ export default function Home() {
             </p>
             <DailyTrendChart snapshots={dailySnapshots} ownerNames={OWNER_NAMES} />
           </section>
+          <DailyChangeCalendar snapshots={dailySnapshots} />
 
           {/* 리밸런싱 계산기 */}
           <section id="section-rebalance" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
