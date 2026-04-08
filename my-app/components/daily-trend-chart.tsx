@@ -41,6 +41,8 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
   const [range, setRange] = useState<30 | 90 | 180>(90);
 
   const filtered = snapshots.slice(-range);
+  const firstFull = filtered[0]?.date;
+  const lastFull = filtered[filtered.length - 1]?.date;
 
   if (filtered.length === 0) {
     return (
@@ -64,6 +66,21 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
 
   return (
     <div className="space-y-3">
+      {filtered.length > 0 && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground/80">
+            저장된 일자 {filtered.length}일
+          </span>
+          {firstFull && lastFull ? (
+            <>
+              {" "}
+              ({firstFull} ~ {lastFull})
+            </>
+          ) : null}
+          . 30·90·180일은 <span className="underline decoration-dotted">보여줄 최대 구간</span>이며,
+          그 안에서 실제로 기록된 날만 차트에 표시됩니다.
+        </p>
+      )}
       {/* 컨트롤 */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1">

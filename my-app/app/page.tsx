@@ -1818,7 +1818,9 @@ export default function Home() {
           <section id="section-trend" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">일별 자산 추이</h2>
             <p className="mb-3 text-xs text-muted-foreground">
-              앱을 방문할 때마다 오늘 날짜의 평가액을 자동 기록합니다 (최대 180일).
+              앱을 연 날·서버에 저장된 날에만 일별 평가액이 쌓입니다 (최대 180일). 과거가 비어 있으면 그
+              이전에는 기록이 없던 것입니다(미방문, 다른 브라우저, 초기화 등). 동기화 키가 있으면 서버에
+              누적된 날짜도 함께 불러옵니다.
             </p>
             <DailyTrendChart snapshots={dailySnapshots} ownerNames={OWNER_NAMES} />
           </section>
