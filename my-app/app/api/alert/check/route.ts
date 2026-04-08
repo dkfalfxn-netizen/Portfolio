@@ -89,6 +89,13 @@ async function handleCheck(syncKey?: string | null) {
     return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
   }
 
+  /**
+   * 알림 유무와 관계없이 매일 실행: Supabase `portfolio_snapshots`에 있는 모든 sync_key에 대해
+   * 오늘(KST) 일별 평가 스냅샷을 `portfolio_daily_snapshots`에 저장합니다.
+   * (이전에는 알림 규칙이 0건이면 여기까지 도달하지 못해 방문 없이 기록이 안 되는 버그가 있었음)
+   */
+  await saveAllSnapshots().catch(() => {});
+
   /** sync_key가 주어지면 해당 계정만, 없으면 전체 alert_configs 순회 */
   const query =
     syncKey && syncKey.length >= 8
@@ -98,7 +105,11 @@ async function handleCheck(syncKey?: string | null) {
   const { data: configs, error: cfgErr } = await query;
   if (cfgErr) return NextResponse.json({ error: cfgErr.message }, { status: 500 });
   if (!configs || configs.length === 0) {
-    return NextResponse.json({ ok: true, message: "설정된 알림 규칙이 없습니다." });
+    return NextResponse.json({
+      ok: true,
+      message: "설정된 알림 규칙이 없습니다. 일별 자산 스냅샷은 서버에 저장되었습니다.",
+      snapshotsSaved: true,
+    });
   }
 
   const results: { syncKey: string; violations: number; sent: boolean }[] = [];
@@ -133,10 +144,7 @@ async function handleCheck(syncKey?: string | null) {
     results.push({ syncKey: cfg.sync_key, violations: violations.length, sent });
   }
 
-  // 알림 체크와 함께 오늘 스냅샷도 저장 (실패해도 알림 결과에 영향 없음)
-  void saveAllSnapshots().catch(() => {});
-
-  return NextResponse.json({ ok: true, results });
+  return NextResponse.json({ ok: true, results, snapshotsSaved: true });
 }
 
 /** Vercel Cron은 GET으로 호출 */
