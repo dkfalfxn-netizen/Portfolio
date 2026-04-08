@@ -3,6 +3,7 @@ import { Resend } from "resend";
 const resendClient = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
+const RESEND_FROM = process.env.RESEND_FROM || "Portfolio Alert <onboarding@resend.dev>";
 
 export type AlertViolation = {
   owner: string;
@@ -70,7 +71,7 @@ export async function sendAlertEmail(
 
   try {
     const { error } = await resendClient.emails.send({
-      from: "Portfolio Alert <onboarding@resend.dev>",
+      from: RESEND_FROM,
       to,
       subject: `[포트폴리오] 비중 이탈 알림 — ${violations.length}건`,
       html,
@@ -158,7 +159,7 @@ export async function sendDailySummaryEmail(
 
   try {
     const { error } = await resendClient.emails.send({
-      from: "Portfolio Daily <onboarding@resend.dev>",
+      from: RESEND_FROM,
       to,
       subject: `[포트폴리오] 데일리 요약 ${payload.dateKst}`,
       html,
