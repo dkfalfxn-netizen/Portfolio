@@ -5,6 +5,6 @@
   "crons": [
     { "path": "/api/alert/check",             "schedule": "0 0 * * *" },
     { "path": "/api/cron/analyze-market",     "schedule": "0 21 * * *" },
-    { "path": "/api/alert/kakao-price-move",  "schedule": "*/30 * * * *" }
+    { "path": "/api/alert/kakao-price-move",  "schedule": "0 6 * * *" }
   ]
 }
