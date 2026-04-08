@@ -1,10 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { DailySnapshot } from "@/app/page";
 
 type Props = {
   snapshots: DailySnapshot[];
+};
+
+type OwnerChange = {
+  name: string;
+  changeKrw: number;
+  changePct: number;
+};
+
+type CellData = {
+  date: Date;
+  inMonth: boolean;
+  key: string;
+  changeKrw: number | null;
+  changePct: number | null;
+  ownerChanges: OwnerChange[];
 };
 
 function ymd(d: Date): string {
@@ -24,6 +39,8 @@ export function DailyChangeCalendar({ snapshots }: Props) {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
+  const [tooltip, setTooltip] = useState<{ key: string; x: number; y: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const byDate = useMemo(() => {
     const map = new Map<string, DailySnapshot>();
@@ -34,17 +51,10 @@ export function DailyChangeCalendar({ snapshots }: Props) {
   const items = useMemo(() => {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
     const last = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
-    const startWeekday = first.getDay(); // 0: 일
+    const startWeekday = first.getDay();
     const daysInMonth = last.getDate();
-    const cells: Array<{
-      date: Date;
-      inMonth: boolean;
-      key: string;
-      changeKrw: number | null;
-      changePct: number | null;
-    }> = [];
+    const cells: CellData[] = [];
 
-    // 달력 시작(일요일 기준)으로 맞춤
     const begin = new Date(first);
     begin.setDate(first.getDate() - startWeekday);
 
@@ -58,28 +68,51 @@ export function DailyChangeCalendar({ snapshots }: Props) {
         p.setDate(d.getDate() - 1);
         return byDate.get(ymd(p));
       })();
+
       let changeKrw: number | null = null;
       let changePct: number | null = null;
+      const ownerChanges: OwnerChange[] = [];
+
       if (cur && prev && prev.totalValue > 0) {
         changeKrw = cur.totalValue - prev.totalValue;
         changePct = (changeKrw / prev.totalValue) * 100;
+
+        const allOwners = new Set([
+          ...Object.keys(cur.ownerValues ?? {}),
+          ...Object.keys(prev.ownerValues ?? {}),
+        ]);
+        for (const name of allOwners) {
+          const curVal = cur.ownerValues?.[name] ?? 0;
+          const prevVal = prev.ownerValues?.[name] ?? 0;
+          if (prevVal > 0) {
+            ownerChanges.push({
+              name,
+              changeKrw: curVal - prevVal,
+              changePct: ((curVal - prevVal) / prevVal) * 100,
+            });
+          }
+        }
       }
+
       cells.push({
         date: d,
         inMonth: d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear(),
         key,
         changeKrw,
         changePct,
+        ownerChanges,
       });
     }
 
     return { first, daysInMonth, cells };
   }, [cursor, byDate]);
 
+  const tooltipCell = tooltip ? items.cells.find((c) => c.key === tooltip.key) : null;
+
   const hasAny = snapshots.length > 0;
 
   return (
-    <div className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
+    <div ref={containerRef} className="relative rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-sm font-semibold">일일 변동 달력</h3>
         <div className="flex items-center gap-1 text-xs">
@@ -122,15 +155,23 @@ export function DailyChangeCalendar({ snapshots }: Props) {
                     : c.changeKrw < 0
                       ? "border-blue-500/30 bg-blue-500/10"
                       : "border-border/50 bg-background";
+              const hasOwners = c.ownerChanges.length > 0;
               return (
                 <div
                   key={c.key}
-                  className={`min-h-[72px] rounded border p-1.5 ${tone} ${c.inMonth ? "" : "opacity-40"}`}
-                  title={
-                    c.changeKrw == null
-                      ? `${c.key} (기록 없음 또는 전일 비교 불가)`
-                      : `${c.key} ${toKrw(c.changeKrw)} (${c.changePct?.toFixed(2)}%)`
-                  }
+                  className={`min-h-[72px] rounded border p-1.5 ${tone} ${c.inMonth ? "" : "opacity-40"} ${hasOwners ? "cursor-pointer" : ""}`}
+                  onMouseEnter={(e) => {
+                    if (!hasOwners) return;
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    const containerRect = containerRef.current?.getBoundingClientRect();
+                    if (!containerRect) return;
+                    setTooltip({
+                      key: c.key,
+                      x: rect.left - containerRect.left + rect.width / 2,
+                      y: rect.top - containerRect.top,
+                    });
+                  }}
+                  onMouseLeave={() => setTooltip(null)}
                 >
                   <p className="text-[10px] font-medium">{c.date.getDate()}</p>
                   {c.changeKrw != null ? (
@@ -150,6 +191,37 @@ export function DailyChangeCalendar({ snapshots }: Props) {
             })}
           </div>
         </>
+      )}
+
+      {/* 툴팁 */}
+      {tooltip && tooltipCell && tooltipCell.ownerChanges.length > 0 && (
+        <div
+          className="pointer-events-none absolute z-50 min-w-[160px] rounded-xl border bg-popover p-3 shadow-lg text-xs"
+          style={{
+            left: tooltip.x,
+            top: tooltip.y - 8,
+            transform: "translate(-50%, -100%)",
+          }}
+        >
+          <p className="mb-2 font-semibold text-foreground">{tooltip.key} 변동 상세</p>
+          <div className="space-y-1">
+            {tooltipCell.ownerChanges.map((o) => (
+              <div key={o.name} className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">{o.name}</span>
+                <span className={`font-medium tabular-nums ${o.changeKrw > 0 ? "text-red-500" : o.changeKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                  {toKrw(o.changeKrw)}
+                  <span className="ml-1 text-[10px]">({o.changeKrw > 0 ? "+" : ""}{o.changePct.toFixed(2)}%)</span>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 border-t pt-2 flex justify-between font-semibold">
+            <span>합계</span>
+            <span className={tooltipCell.changeKrw! > 0 ? "text-red-500" : tooltipCell.changeKrw! < 0 ? "text-blue-500" : "text-muted-foreground"}>
+              {toKrw(tooltipCell.changeKrw!)}
+            </span>
+          </div>
+        </div>
       )}
     </div>
   );
