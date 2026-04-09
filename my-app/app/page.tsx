@@ -2807,8 +2807,7 @@ export default function Home() {
           <section className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">📲 텔레그램 가격 변동 알림</h2>
             <p className="mb-3 text-xs text-muted-foreground">
-              보유 종목 중 전일 대비 <b>3% 이상</b> 변동 시 텔레그램으로 알림을 보냅니다.
-              매일 오후 3시(KST) 자동 실행됩니다.
+              보유 전 종목의 당일 시세 현황을 <b>매일 오후 4시(KST)</b>에 텔레그램으로 발송합니다.
               작동하려면 Vercel 환경변수에 <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
               <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code>가 설정되어 있어야 합니다.
             </p>

@@ -124,7 +124,6 @@ export async function GET(req: NextRequest) {
   const admin = createSupabaseAdmin();
   if (!admin) return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
 
-  const thresholdPct = 3;
   const { data: snaps, error } = await admin
     .from("portfolio_snapshots")
     .select("sync_key, positions");
@@ -132,7 +131,7 @@ export async function GET(req: NextRequest) {
 
   if (!snaps || snaps.length === 0) return NextResponse.json({ ok: true, message: "portfolio_snapshots 없음" });
 
-  // 로그 테이블이 있으면 같은 날 중복 발송 방지
+  // 같은 날 중복 발송 방지
   const dateKst = todayKST();
   const sentSet = new Set<string>();
   const { data: logs } = await admin
@@ -147,26 +146,38 @@ export async function GET(req: NextRequest) {
   for (const snap of snaps) {
     const syncKey = String(snap.sync_key);
     const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
-    const unique = [...new Set(positions.map((p) => p.symbol).filter(Boolean))];
-    for (const symbol of unique) {
+
+    // 종목별 대표 이름 추출 (symbol → name 매핑)
+    const symbolNameMap = new Map<string, string>();
+    for (const p of positions) {
+      if (p.symbol && !symbolNameMap.has(p.symbol)) {
+        symbolNameMap.set(p.symbol, p.name || p.symbol);
+      }
+    }
+
+    for (const [symbol, name] of symbolNameMap) {
       const dedupeKey = `${syncKey}:${symbol}:${dateKst}`;
       if (sentSet.has(dedupeKey)) continue;
 
       const q = await fetchQuoteForSymbol(symbol);
-      if (!q.price || !q.previousClose || q.previousClose <= 0) continue;
-      const pct = ((q.price - q.previousClose) / q.previousClose) * 100;
-      if (Math.abs(pct) < thresholdPct) continue;
+      // 시세 조회 실패 종목도 포함 (변동률 없음으로 표시)
+      const pct = (q.price && q.previousClose && q.previousClose > 0)
+        ? ((q.price - q.previousClose) / q.previousClose) * 100
+        : null;
 
-      messages.push(`• ${symbol} ${pct > 0 ? "+" : ""}${pct.toFixed(2)}% (기준 3%)`);
-      logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct });
+      const pctStr = pct !== null
+        ? ` ${pct > 0 ? "▲" : pct < 0 ? "▼" : "─"} ${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`
+        : " (시세 없음)";
+      messages.push(`• ${name}${pctStr}`);
+      logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct ?? 0 });
     }
   }
 
   if (messages.length === 0) {
-    return NextResponse.json({ ok: true, message: "3% 이상 변동 종목 없음", count: 0 });
+    return NextResponse.json({ ok: true, message: "발송할 종목 없음", count: 0 });
   }
 
-  const text = `<b>[포트폴리오 가격 변동 알림]</b>\n${dateKst}\n\n${messages.slice(0, 30).join("\n")}\n\n🔗 <a href="https://portfolio-one-xi-86.vercel.app/">대시보드 열기</a>`;
+  const text = `<b>[포트폴리오 일일 시세 현황]</b>\n${dateKst} 오후 4시 기준\n\n${messages.slice(0, 40).join("\n")}\n\n🔗 <a href="https://portfolio-one-xi-86.vercel.app/">대시보드 열기</a>`;
   const send = await sendTelegramMessage(text);
   if (!send.ok) return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
 
@@ -222,11 +233,17 @@ export async function POST(req: NextRequest) {
   if (!snap) return NextResponse.json({ error: "portfolio_snapshots에 해당 sync_key가 없습니다." }, { status: 404 });
 
   const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
-  const unique = [...new Set(positions.map((p) => p.symbol).filter(Boolean))];
 
-  const thresholdPct = 3;
+  // 종목별 대표 이름 추출
+  const symbolNameMap = new Map<string, string>();
+  for (const p of positions) {
+    if (p.symbol && !symbolNameMap.has(p.symbol)) {
+      symbolNameMap.set(p.symbol, p.name || p.symbol);
+    }
+  }
+
   const dateKst = todayKST();
-  const results: Array<{ symbol: string; price: number | null; previousClose: number | null; changePct: number | null; willAlert: boolean }> = [];
+  const results: Array<{ symbol: string; name: string; price: number | null; previousClose: number | null; changePct: number | null; willAlert: boolean }> = [];
   const messages: string[] = [];
   const logRows: Array<{ sync_key: string; symbol: string; date: string; change_pct: number }> = [];
 
@@ -238,16 +255,19 @@ export async function POST(req: NextRequest) {
     .eq("date", dateKst);
   const alreadySent = new Set((logs ?? []).map((l) => l.symbol));
 
-  for (const symbol of unique) {
+  for (const [symbol, name] of symbolNameMap) {
     const q = await fetchQuoteForSymbol(symbol);
     const pct = (q.price && q.previousClose && q.previousClose > 0)
       ? ((q.price - q.previousClose) / q.previousClose) * 100
       : null;
-    const willAlert = pct !== null && Math.abs(pct) >= thresholdPct && !alreadySent.has(symbol);
-    results.push({ symbol, price: q.price, previousClose: q.previousClose, changePct: pct, willAlert });
+    const willAlert = !alreadySent.has(symbol); // 모든 종목 발송 (중복 방지만)
+    results.push({ symbol, name, price: q.price, previousClose: q.previousClose, changePct: pct, willAlert });
     if (willAlert) {
-      messages.push(`• ${symbol} ${pct! > 0 ? "+" : ""}${pct!.toFixed(2)}% (기준 3%)`);
-      logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct! });
+      const pctStr = pct !== null
+        ? ` ${pct > 0 ? "▲" : pct < 0 ? "▼" : "─"} ${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`
+        : " (시세 없음)";
+      messages.push(`• ${name}${pctStr}`);
+      logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct ?? 0 });
     }
   }
 
@@ -260,16 +280,16 @@ export async function POST(req: NextRequest) {
       symbols: results,
       alertCount: messages.length,
       alreadySentToday: [...alreadySent],
-      message: messages.length > 0 ? `${messages.length}개 종목이 알림 조건 충족` : "3% 이상 변동 종목 없음",
+      message: messages.length > 0 ? `${messages.length}개 종목 발송 예정` : "오늘 이미 모두 발송됨",
     });
   }
 
   // dry_run: false → 실제 전송
   if (messages.length === 0) {
-    return NextResponse.json({ ok: true, dry_run: false, message: "3% 이상 변동 종목 없음", count: 0 });
+    return NextResponse.json({ ok: true, dry_run: false, message: "오늘 이미 모두 발송됨", count: 0 });
   }
 
-  const text = `<b>[포트폴리오 가격 변동 알림]</b>\n${dateKst}\n\n${messages.join("\n")}\n\n🔗 <a href="https://portfolio-one-xi-86.vercel.app/">대시보드 열기</a>`;
+  const text = `<b>[포트폴리오 일일 시세 현황]</b>\n${dateKst} 오후 4시 기준\n\n${messages.join("\n")}\n\n🔗 <a href="https://portfolio-one-xi-86.vercel.app/">대시보드 열기</a>`;
   const send = await sendTelegramMessage(text);
   if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
 
