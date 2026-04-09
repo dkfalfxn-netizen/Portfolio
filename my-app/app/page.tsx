@@ -725,6 +725,19 @@ export default function Home() {
   const [alertMessage, setAlertMessage] = useState("");
   const [alertLoaded, setAlertLoaded] = useState(false);
 
+  // 텔레그램 가격 변동 알림 테스트 상태
+  const [telegramTestBusy, setTelegramTestBusy] = useState(false);
+  const [telegramTestResult, setTelegramTestResult] = useState<{
+    ok: boolean;
+    env?: Record<string, string>;
+    symbols?: Array<{ symbol: string; changePct: number | null; willAlert: boolean }>;
+    alertCount?: number;
+    alreadySentToday?: string[];
+    message?: string;
+    error?: string;
+    detail?: Record<string, string>;
+  } | null>(null);
+
   // 가상 매수 시뮬레이터 상태
   const [simForm, setSimForm] = useState({
     symbol: "",
@@ -1508,6 +1521,28 @@ export default function Home() {
       setAlertMessage("네트워크 오류입니다.");
     } finally {
       setAlertBusy(false);
+    }
+  }
+
+  async function handleTelegramTest(dryRun: boolean) {
+    if (!cloudSyncKey || cloudSyncKey.length < 8) {
+      setTelegramTestResult({ ok: false, error: "먼저 동기화 키를 저장해 주세요." });
+      return;
+    }
+    setTelegramTestBusy(true);
+    setTelegramTestResult(null);
+    try {
+      const res = await fetch("/api/alert/kakao-price-move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_key: cloudSyncKey, dry_run: dryRun }),
+      });
+      const j = await res.json() as typeof telegramTestResult;
+      setTelegramTestResult(j);
+    } catch {
+      setTelegramTestResult({ ok: false, error: "네트워크 오류입니다." });
+    } finally {
+      setTelegramTestBusy(false);
     }
   }
 
@@ -2766,6 +2801,74 @@ export default function Home() {
               )}
               {alertBusy && <p className="text-xs text-amber-600">처리 중…</p>}
             </div>
+          </section>
+
+          {/* 텔레그램 가격 변동 알림 섹션 */}
+          <section className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
+            <h2 className="mb-1 font-semibold">📲 텔레그램 가격 변동 알림</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              보유 종목 중 전일 대비 <b>3% 이상</b> 변동 시 텔레그램으로 알림을 보냅니다.
+              매일 오후 3시(KST) 자동 실행됩니다.
+              작동하려면 Vercel 환경변수에 <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
+              <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code>가 설정되어 있어야 합니다.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="cursor-pointer rounded-md border px-4 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                disabled={telegramTestBusy}
+                onClick={() => handleTelegramTest(true)}
+              >
+                {telegramTestBusy ? "점검 중…" : "🔍 진단 (전송 없음)"}
+              </button>
+              <button
+                type="button"
+                className="cursor-pointer rounded-md border border-blue-500/40 bg-blue-500/10 px-4 py-2 text-sm text-blue-600 transition-all duration-100 hover:bg-blue-500/20 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                disabled={telegramTestBusy}
+                onClick={() => handleTelegramTest(false)}
+              >
+                {telegramTestBusy ? "전송 중…" : "📨 테스트 전송 (실제 발송)"}
+              </button>
+            </div>
+            {telegramTestResult && (
+              <div className={`mt-3 rounded-lg border p-3 text-xs ${telegramTestResult.ok ? "border-green-500/30 bg-green-500/5" : "border-red-500/30 bg-red-500/5"}`}>
+                {!telegramTestResult.ok ? (
+                  <div className="space-y-1">
+                    <p className="font-semibold text-red-500">❌ {telegramTestResult.error}</p>
+                    {telegramTestResult.detail && Object.entries(telegramTestResult.detail).map(([k, v]) => (
+                      <p key={k}><span className="text-muted-foreground">{k}:</span> {v}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="font-semibold text-green-600">✅ {telegramTestResult.message}</p>
+                    {telegramTestResult.env && (
+                      <div className="flex gap-4">
+                        {Object.entries(telegramTestResult.env).map(([k, v]) => (
+                          <p key={k}><span className="text-muted-foreground">{k}:</span> {v}</p>
+                        ))}
+                      </div>
+                    )}
+                    {telegramTestResult.alreadySentToday && telegramTestResult.alreadySentToday.length > 0 && (
+                      <p className="text-muted-foreground">오늘 이미 발송됨: {telegramTestResult.alreadySentToday.join(", ")}</p>
+                    )}
+                    {telegramTestResult.symbols && telegramTestResult.symbols.length > 0 && (
+                      <div>
+                        <p className="mb-1 font-medium text-muted-foreground">종목별 현재 변동률:</p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 sm:grid-cols-3">
+                          {telegramTestResult.symbols.map((s) => (
+                            <p key={s.symbol} className={s.willAlert ? "font-semibold text-red-500" : ""}>
+                              {s.symbol}: {s.changePct != null ? `${s.changePct > 0 ? "+" : ""}${s.changePct.toFixed(2)}%` : "시세 없음"}
+                              {s.willAlert ? " ⚠️" : ""}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           {/* 가상 매수 시뮬레이터 섹션 */}

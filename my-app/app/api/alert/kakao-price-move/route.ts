@@ -177,3 +177,103 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ ok: true, sent: messages.length });
 }
 
+/**
+ * POST /api/alert/kakao-price-move  { sync_key: string, dry_run?: boolean }
+ *
+ * 수동 테스트용. sync_key 소유자의 종목만 체크합니다.
+ * dry_run: true → 실제 전송 없이 점검 결과만 반환 (기본값 true)
+ * dry_run: false → 실제로 텔레그램 전송 (오늘 이미 보낸 종목은 건너뜀)
+ */
+export async function POST(req: NextRequest) {
+  let body: unknown;
+  try { body = await req.json(); } catch {
+    return NextResponse.json({ error: "JSON 파싱 실패" }, { status: 400 });
+  }
+  const b = body as { sync_key?: unknown; dry_run?: unknown };
+  const syncKey = typeof b.sync_key === "string" ? b.sync_key : null;
+  if (!syncKey || syncKey.length < 8) {
+    return NextResponse.json({ error: "sync_key가 필요합니다." }, { status: 400 });
+  }
+  const dryRun = b.dry_run !== false; // 기본값 true (실전 전송 안 함)
+
+  // 환경변수 점검
+  const hasBotToken = !!process.env.TELEGRAM_BOT_TOKEN;
+  const hasChatId = !!process.env.TELEGRAM_CHAT_ID;
+  if (!hasBotToken || !hasChatId) {
+    return NextResponse.json({
+      ok: false,
+      error: "Vercel 환경변수 미설정",
+      detail: {
+        TELEGRAM_BOT_TOKEN: hasBotToken ? "✅ 설정됨" : "❌ 미설정",
+        TELEGRAM_CHAT_ID: hasChatId ? "✅ 설정됨" : "❌ 미설정",
+      },
+    }, { status: 500 });
+  }
+
+  const admin = createSupabaseAdmin();
+  if (!admin) return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
+
+  const { data: snap } = await admin
+    .from("portfolio_snapshots")
+    .select("positions")
+    .eq("sync_key", syncKey)
+    .maybeSingle();
+
+  if (!snap) return NextResponse.json({ error: "portfolio_snapshots에 해당 sync_key가 없습니다." }, { status: 404 });
+
+  const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
+  const unique = [...new Set(positions.map((p) => p.symbol).filter(Boolean))];
+
+  const thresholdPct = 3;
+  const dateKst = todayKST();
+  const results: Array<{ symbol: string; price: number | null; previousClose: number | null; changePct: number | null; willAlert: boolean }> = [];
+  const messages: string[] = [];
+  const logRows: Array<{ sync_key: string; symbol: string; date: string; change_pct: number }> = [];
+
+  // 오늘 이미 발송된 종목 확인
+  const { data: logs } = await admin
+    .from("price_move_alert_logs")
+    .select("symbol")
+    .eq("sync_key", syncKey)
+    .eq("date", dateKst);
+  const alreadySent = new Set((logs ?? []).map((l) => l.symbol));
+
+  for (const symbol of unique) {
+    const q = await fetchQuoteForSymbol(symbol);
+    const pct = (q.price && q.previousClose && q.previousClose > 0)
+      ? ((q.price - q.previousClose) / q.previousClose) * 100
+      : null;
+    const willAlert = pct !== null && Math.abs(pct) >= thresholdPct && !alreadySent.has(symbol);
+    results.push({ symbol, price: q.price, previousClose: q.previousClose, changePct: pct, willAlert });
+    if (willAlert) {
+      messages.push(`• ${symbol} ${pct! > 0 ? "+" : ""}${pct!.toFixed(2)}% (기준 3%)`);
+      logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct! });
+    }
+  }
+
+  if (dryRun) {
+    return NextResponse.json({
+      ok: true,
+      dry_run: true,
+      date: dateKst,
+      env: { TELEGRAM_BOT_TOKEN: "✅", TELEGRAM_CHAT_ID: "✅" },
+      symbols: results,
+      alertCount: messages.length,
+      alreadySentToday: [...alreadySent],
+      message: messages.length > 0 ? `${messages.length}개 종목이 알림 조건 충족` : "3% 이상 변동 종목 없음",
+    });
+  }
+
+  // dry_run: false → 실제 전송
+  if (messages.length === 0) {
+    return NextResponse.json({ ok: true, dry_run: false, message: "3% 이상 변동 종목 없음", count: 0 });
+  }
+
+  const text = `<b>[포트폴리오 가격 변동 알림]</b>\n${dateKst}\n\n${messages.join("\n")}\n\n🔗 <a href="https://portfolio-one-xi-86.vercel.app/">대시보드 열기</a>`;
+  const send = await sendTelegramMessage(text);
+  if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
+
+  await admin.from("price_move_alert_logs").upsert(logRows, { onConflict: "sync_key,symbol,date" });
+  return NextResponse.json({ ok: true, dry_run: false, sent: messages.length, messages });
+}
+
