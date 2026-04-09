@@ -1109,17 +1109,9 @@ export default function Home() {
         const lastSyncTs = window.localStorage.getItem(LAST_SYNC_TS_KEY) ?? "";
         const hasLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) === "1";
 
-        if (serverTs > lastSyncTs) {
-          // ─ 서버가 마지막 동기화 이후 갱신됨 → 서버 데이터를 적용
-          if (hasLocalChanges) {
-            // 로컬에도 미저장 변경이 있는 충돌 상황 — 서버를 우선하되 사용자에게 알림
-            setSyncMessage(
-              "⚠️ 서버에 최신 데이터가 있어 불러왔습니다. " +
-              "이 기기의 미동기화 변경이 있었다면 확인 후 필요하면 '서버에 올리기'를 눌러 주세요.",
-            );
-          } else {
-            setSyncMessage("서버에서 최신 잔고를 불러왔습니다.");
-          }
+        if (serverTs > lastSyncTs && !hasLocalChanges) {
+          // ─ 서버가 더 최신이고 로컬 미반영 변경 없음 → 서버 데이터를 적용
+          setSyncMessage("서버에서 최신 잔고를 불러왔습니다.");
           skipMarkLocalChangedRef.current = 2;
           const valid = Array.isArray(j.positions)
             ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
@@ -1131,7 +1123,8 @@ export default function Home() {
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setLastSyncedAt(serverTs);
         } else if (hasLocalChanges && pos.length > 0) {
-          // ─ 서버는 변화 없음 + 로컬에 미저장 변경 → 서버에 올림
+          // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
+          // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
           const rPush = await fetch("/api/sync", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1144,7 +1137,7 @@ export default function Home() {
             const pushedTs = jPush.updated_at ?? new Date().toISOString();
             window.localStorage.setItem(LAST_SYNC_TS_KEY, pushedTs);
             window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
-            setSyncMessage("이 기기의 최신 데이터를 서버에 업로드했습니다.");
+            setSyncMessage("이 기기의 변경 데이터를 서버에 올렸습니다.");
             setLastSyncedAt(pushedTs);
           }
         } else {
