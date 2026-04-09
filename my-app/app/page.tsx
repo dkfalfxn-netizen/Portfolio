@@ -423,9 +423,9 @@ function formatPositionMarketValueForeign(
   });
 }
 
-/** 같은 담당자·같은 티커·같은 계좌·같은 통화면 한 줄로 합칩니다(가중 평단). */
-function makePositionKey(p: Pick<Position, "owner" | "symbol" | "accountType" | "accountName" | "currency">) {
-  return `${p.owner}|${p.symbol}|${p.accountType}|${p.accountName}|${p.currency}`;
+/** 같은 담당자·같은 티커·같은 통화면 한 줄로 합칩니다(계좌 구분 무시, 가중 평단). */
+function makePositionKey(p: Pick<Position, "owner" | "symbol" | "currency">) {
+  return `${p.owner}|${p.symbol}|${p.currency}`;
 }
 
 /** USD 종목 합산 시 매입 환율(원화 매입액/달러 매입액) 가중평균 */
@@ -1527,6 +1527,8 @@ export default function Home() {
     if (ownersOrdered.length === 0) return;
 
     const symbol = form.symbol.trim().toUpperCase();
+    const accountType: "해외주식" | "국내주식" =
+      form.currency === "KRW" ? "국내주식" : "해외주식";
     const accountName = form.accountName.trim() || "기본계좌";
     const base: Omit<Position, "owner"> = {
       symbol,
@@ -1535,7 +1537,7 @@ export default function Home() {
       avgPrice,
       currentPrice: avgPrice,
       currency: form.currency,
-      accountType: form.accountType,
+      accountType,
       accountName,
       ...(form.currency === "USD" ? { purchaseUsdKrw: purchaseUsdKrwNum } : {}),
       ...(form.currency === "EUR" ? { purchaseEurKrw: purchaseEurKrwNum } : {}),
@@ -1558,7 +1560,7 @@ export default function Home() {
       purchaseUsdKrw: "",
       purchaseEurKrw: "",
       currency: form.currency,
-      accountType: form.accountType,
+      accountType,
       accountName: form.accountName,
       selectedOwners: form.selectedOwners,
     });
@@ -2561,19 +2563,9 @@ export default function Home() {
                 </div>
               </div>
               <div className="col-span-2 flex flex-wrap items-center gap-2 sm:col-span-3 md:col-span-6">
-                <select
-                  className="min-w-[110px] rounded-md border bg-background px-3 py-2 text-sm"
-                  value={form.accountType}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      accountType: e.target.value as "해외주식" | "국내주식",
-                    }))
-                  }
-                >
-                  <option value="해외주식">해외주식</option>
-                  <option value="국내주식">국내주식</option>
-                </select>
+                <span className="rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                  {form.currency === "KRW" ? "국내주식" : "해외주식"}
+                </span>
                 <input
                   className="min-w-[120px] flex-1 rounded-md border bg-background px-3 py-2 text-sm"
                   placeholder="계좌명 (예: 연금계좌)"
