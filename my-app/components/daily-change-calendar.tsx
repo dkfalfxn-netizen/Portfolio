@@ -20,6 +20,7 @@ type CellData = {
   changeKrw: number | null;
   changePct: number | null;
   ownerChanges: OwnerChange[];
+  totalValue: number | null;
 };
 
 function ymd(d: Date): string {
@@ -108,11 +109,13 @@ export function DailyChangeCalendar({ snapshots }: Props) {
         changeKrw,
         changePct,
         ownerChanges,
+        // prev 없이도 스냅샷이 있으면 총액을 노출
+        totalValue: cur ? cur.totalValue : null,
       });
     }
 
     return { first, daysInMonth, cells };
-  }, [cursor, byDate]);
+  }, [cursor, byDate, prevSnapshotByDate]);
 
   const tooltipCell = tooltip ? items.cells.find((c) => c.key === tooltip.key) : null;
 
@@ -121,7 +124,14 @@ export function DailyChangeCalendar({ snapshots }: Props) {
   return (
     <div ref={containerRef} className="relative rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">일일 변동 달력</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">일일 변동 달력</h3>
+          {snapshots.length > 0 && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              {snapshots.length}일치 기록
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1 text-xs">
           <button
             type="button"
@@ -190,6 +200,11 @@ export function DailyChangeCalendar({ snapshots }: Props) {
                         {c.changeKrw > 0 ? "+" : ""}{c.changePct?.toFixed(2)}%
                       </p>
                     </>
+                  ) : c.totalValue != null && c.totalValue > 0 ? (
+                    // 스냅샷은 있으나 비교할 전날 데이터가 없는 경우 → 총액 표시
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      ₩{Math.round(c.totalValue / 10000).toLocaleString()}만
+                    </p>
                   ) : (
                     <p className="mt-2 text-[10px] text-muted-foreground/70">—</p>
                   )}

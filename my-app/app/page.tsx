@@ -1231,13 +1231,14 @@ export default function Home() {
       .then((json: { snapshots?: DailySnapshot[] } | null) => {
         if (!json?.snapshots?.length) return;
         // 서버 스냅샷과 로컬 스냅샷 병합
-        // 같은 날짜 충돌 시:
-        // - 서버 값이 비정상적으로 비어있을 수 있으므로(totalValue<=0),
-        //   로컬에 유효 값(>0)이 있으면 로컬을 유지합니다.
-        // - 그 외에는 서버 값을 사용합니다.
-        const localMap = new Map(local.map((s) => [s.date, s]));
+        // ★ 경쟁 조건 방지: 서버 응답이 올 때 최신 localStorage를 다시 읽어서 병합합니다.
+        //   (effect 시작 이후 saveDailySnapshot으로 새로 저장된 데이터를 포함시키기 위함)
+        const freshLocal = loadDailySnapshots();
+        const localMap = new Map(freshLocal.map((s) => [s.date, s]));
         for (const s of json.snapshots) {
           const existing = localMap.get(s.date);
+          // 서버 값이 비정상적으로 비어있을 때(totalValue<=0)는
+          // 로컬에 유효 값이 있으면 로컬을 우선합니다.
           const serverLooksEmpty =
             !Number.isFinite(s.totalValue) ||
             s.totalValue <= 0 ||
