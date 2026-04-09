@@ -1057,25 +1057,30 @@ export default function Home() {
     saveDailySnapshot(snap);
     setDailySnapshots(loadDailySnapshots());
 
-    // 서버 저장: 동기화 키가 있고, 오늘 아직 push 안 했거나 totalValue가 이전보다 크게 달라진 경우
+    // 서버 저장: KST 16시(오후 4시) 이후에만 push
+    // → 한국 장 마감(15:30) 후 종가 기준으로 저장해 일별 비교가 정확해짐
+    // → 미국 장 시작(22:30 KST) 전이라 전일 미국 종가 기준도 충족
     try {
       const key = window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "";
-      const pushedDate = window.localStorage.getItem(SNAPSHOT_PUSHED_DATE_KEY) ?? "";
-      const pushedTotal = Number(window.localStorage.getItem(SNAPSHOT_PUSHED_TOTAL_KEY) ?? "0");
-      // 이전 push 대비 1% 이상 차이 나면 재전송 (현금 추가/삭제 등 반영)
-      const valueDiff = pushedTotal > 0 ? Math.abs(totalValue - pushedTotal) / pushedTotal : 1;
-      const shouldPush = key.length >= 8 && (pushedDate !== today || valueDiff >= 0.01);
-      if (shouldPush) {
-        void fetch("/api/snapshot", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sync_key: key, date: today, ownerValues, totalValue }),
-        }).then((r) => {
-          if (r.ok) {
-            window.localStorage.setItem(SNAPSHOT_PUSHED_DATE_KEY, today);
-            window.localStorage.setItem(SNAPSHOT_PUSHED_TOTAL_KEY, String(totalValue));
-          }
-        }).catch(() => {});
+      const nowKstHour = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCHours();
+      const isAfterKoreanClose = nowKstHour >= 16; // KST 16:00 이후
+      if (key.length >= 8 && isAfterKoreanClose) {
+        const pushedDate = window.localStorage.getItem(SNAPSHOT_PUSHED_DATE_KEY) ?? "";
+        const pushedTotal = Number(window.localStorage.getItem(SNAPSHOT_PUSHED_TOTAL_KEY) ?? "0");
+        // 오늘 이미 push했더라도 1% 이상 차이 나면 재전송 (현금 추가/삭제 반영)
+        const valueDiff = pushedTotal > 0 ? Math.abs(totalValue - pushedTotal) / pushedTotal : 1;
+        if (pushedDate !== today || valueDiff >= 0.01) {
+          void fetch("/api/snapshot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sync_key: key, date: today, ownerValues, totalValue }),
+          }).then((r) => {
+            if (r.ok) {
+              window.localStorage.setItem(SNAPSHOT_PUSHED_DATE_KEY, today);
+              window.localStorage.setItem(SNAPSHOT_PUSHED_TOTAL_KEY, String(totalValue));
+            }
+          }).catch(() => {});
+        }
       }
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
