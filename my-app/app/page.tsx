@@ -96,6 +96,11 @@ const LAST_SYNC_TS_KEY = "portfolio_last_sync_ts_v1";
  * 페이지 로드·서버 Pull로 상태가 바뀔 때는 설정하지 않는다.
  */
 const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
+/**
+ * 오늘 스냅샷을 서버에 push했는지 여부 ("YYYY-MM-DD" 형태로 저장).
+ * 같은 날 중복 push를 막기 위해 사용.
+ */
+const SNAPSHOT_PUSHED_DATE_KEY = "portfolio_snapshot_pushed_date_v1";
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
 
@@ -1023,7 +1028,7 @@ export default function Home() {
     });
   }, [positionsByOwner, usdKrw, eurKrw]);
 
-  // 시세 로드 완료 후 오늘 스냅샷 자동 저장 (하루 1회)
+  // 시세 로드 완료 후 오늘 스냅샷 자동 저장 (하루 1회 로컬 + 서버)
   useEffect(() => {
     if (!isHydrated) return;
     const hasRealPrices = positionsByOwner.some((g) => g.sectionTotal > 0);
@@ -1036,8 +1041,26 @@ export default function Home() {
       totalValue += g.sectionTotal;
     }
     const snap: DailySnapshot = { date: today, ownerValues, totalValue };
+    // 로컬 저장 (이미 오늘 것이 있으면 건너뜀)
     saveDailySnapshot(snap);
     setDailySnapshots(loadDailySnapshots());
+
+    // 서버 저장: 동기화 키가 있고 오늘 아직 push하지 않은 경우에만
+    try {
+      const key = window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "";
+      const pushedDate = window.localStorage.getItem(SNAPSHOT_PUSHED_DATE_KEY) ?? "";
+      if (key.length >= 8 && pushedDate !== today) {
+        void fetch("/api/snapshot", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sync_key: key, date: today, ownerValues, totalValue }),
+        }).then((r) => {
+          if (r.ok) {
+            window.localStorage.setItem(SNAPSHOT_PUSHED_DATE_KEY, today);
+          }
+        }).catch(() => {});
+      }
+    } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positionsByOwner, isHydrated]);
 

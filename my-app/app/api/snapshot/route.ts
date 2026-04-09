@@ -96,19 +96,33 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/snapshot  { sync_key: string }
- * 지정 sync_key의 오늘 스냅샷을 강제 생성합니다 (수동 실행용).
- * 크론에서도 내부적으로 이 로직을 호출합니다.
+ * POST /api/snapshot
+ *
+ * 두 가지 모드를 지원합니다.
+ *
+ * 1) 클라이언트 직접 저장 (권장):
+ *    { sync_key, date, ownerValues, totalValue }
+ *    → 클라이언트가 계산한 값을 그대로 저장합니다 (시세 재조회 없음, 빠름).
+ *    → 이미 해당 날짜 데이터가 있으면 upsert(덮어쓰기)합니다.
+ *
+ * 2) 서버 재계산 저장 (기존 방식):
+ *    { sync_key }
+ *    → 서버에 저장된 포지션·현금 데이터로 오늘 시세를 재조회해서 저장합니다.
  */
 export async function POST(req: NextRequest) {
   let body: unknown;
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "JSON 파싱 실패" }, { status: 400 });
   }
-  const syncKey = typeof (body as { sync_key?: unknown }).sync_key === "string"
-    ? (body as { sync_key: string }).sync_key
-    : null;
 
+  const b = body as {
+    sync_key?: unknown;
+    date?: unknown;
+    ownerValues?: unknown;
+    totalValue?: unknown;
+  };
+
+  const syncKey = typeof b.sync_key === "string" ? b.sync_key : null;
   if (!syncKey || syncKey.length < 8) {
     return NextResponse.json({ error: "sync_key가 필요합니다." }, { status: 400 });
   }
@@ -118,6 +132,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
   }
 
+  // ── 모드 1: 클라이언트가 값을 직접 제공 ──────────────────────────────────
+  const clientDate =
+    typeof b.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? b.date : null;
+  const clientOwnerValues =
+    b.ownerValues && typeof b.ownerValues === "object" && !Array.isArray(b.ownerValues)
+      ? (b.ownerValues as Record<string, number>)
+      : null;
+  const clientTotalValue =
+    typeof b.totalValue === "number" && Number.isFinite(b.totalValue) ? b.totalValue : null;
+
+  if (clientDate && clientOwnerValues && clientTotalValue !== null) {
+    const { error: upsertError } = await admin
+      .from("portfolio_daily_snapshots")
+      .upsert({
+        sync_key: syncKey,
+        date: clientDate,
+        owner_values: clientOwnerValues,
+        total_value: clientTotalValue,
+      });
+
+    if (upsertError) {
+      return NextResponse.json({ error: upsertError.message }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, date: clientDate, ownerValues: clientOwnerValues, totalValue: clientTotalValue });
+  }
+
+  // ── 모드 2: 서버에서 포지션 조회 후 시세 재계산 ─────────────────────────
   const { data: snap } = await admin
     .from("portfolio_snapshots")
     .select("positions, cash_by_owner")
