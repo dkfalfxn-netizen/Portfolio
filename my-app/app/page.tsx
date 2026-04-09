@@ -97,10 +97,11 @@ const LAST_SYNC_TS_KEY = "portfolio_last_sync_ts_v1";
  */
 const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
 /**
- * 오늘 스냅샷을 서버에 push했는지 여부 ("YYYY-MM-DD" 형태로 저장).
- * 같은 날 중복 push를 막기 위해 사용.
+ * 오늘 서버에 push한 날짜 ("YYYY-MM-DD") 와 그때의 totalValue.
+ * 날짜가 같아도 totalValue가 1% 이상 달라지면 재push해 현금 변경을 반영한다.
  */
 const SNAPSHOT_PUSHED_DATE_KEY = "portfolio_snapshot_pushed_date_v1";
+const SNAPSHOT_PUSHED_TOTAL_KEY = "portfolio_snapshot_pushed_total_v1";
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
 
@@ -133,13 +134,11 @@ function saveDailySnapshot(snap: DailySnapshot) {
   if (typeof window === "undefined") return;
   try {
     const existing = loadDailySnapshots();
-    // 이미 오늘 스냅샷이 있으면 저장하지 않음 (크론 데이터 우선 보호)
-    // 서버 병합 시에는 직접 localStorage에 쓰므로 크론 데이터는 항상 반영됨
-    if (existing.some((s) => s.date === snap.date)) return;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - SNAPSHOT_MAX_DAYS);
     const cutoffStr = cutoff.toISOString().slice(0, 10);
-    const updated = [...existing, snap]
+    // 같은 날짜 스냅샷은 항상 최신값으로 교체 (현금·종목 변경이 반영되도록)
+    const updated = [...existing.filter((s) => s.date !== snap.date), snap]
       .filter((s) => s.date >= cutoffStr)
       .sort((a, b) => a.date.localeCompare(b.date));
     window.localStorage.setItem(DAILY_SNAPSHOTS_KEY, JSON.stringify(updated));
@@ -1054,15 +1053,19 @@ export default function Home() {
       totalValue += g.sectionTotal;
     }
     const snap: DailySnapshot = { date: today, ownerValues, totalValue };
-    // 로컬 저장 (이미 오늘 것이 있으면 건너뜀)
+    // 로컬 저장 (항상 오늘 최신값으로 갱신)
     saveDailySnapshot(snap);
     setDailySnapshots(loadDailySnapshots());
 
-    // 서버 저장: 동기화 키가 있고 오늘 아직 push하지 않은 경우에만
+    // 서버 저장: 동기화 키가 있고, 오늘 아직 push 안 했거나 totalValue가 이전보다 크게 달라진 경우
     try {
       const key = window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "";
       const pushedDate = window.localStorage.getItem(SNAPSHOT_PUSHED_DATE_KEY) ?? "";
-      if (key.length >= 8 && pushedDate !== today) {
+      const pushedTotal = Number(window.localStorage.getItem(SNAPSHOT_PUSHED_TOTAL_KEY) ?? "0");
+      // 이전 push 대비 1% 이상 차이 나면 재전송 (현금 추가/삭제 등 반영)
+      const valueDiff = pushedTotal > 0 ? Math.abs(totalValue - pushedTotal) / pushedTotal : 1;
+      const shouldPush = key.length >= 8 && (pushedDate !== today || valueDiff >= 0.01);
+      if (shouldPush) {
         void fetch("/api/snapshot", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1070,6 +1073,7 @@ export default function Home() {
         }).then((r) => {
           if (r.ok) {
             window.localStorage.setItem(SNAPSHOT_PUSHED_DATE_KEY, today);
+            window.localStorage.setItem(SNAPSHOT_PUSHED_TOTAL_KEY, String(totalValue));
           }
         }).catch(() => {});
       }
