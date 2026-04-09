@@ -1230,9 +1230,28 @@ export default function Home() {
       .then((r) => r.ok ? r.json() : null)
       .then((json: { snapshots?: DailySnapshot[] } | null) => {
         if (!json?.snapshots?.length) return;
-        // 서버 스냅샷과 로컬 스냅샷 병합: 같은 날짜면 서버 우선
+        // 서버 스냅샷과 로컬 스냅샷 병합
+        // 같은 날짜 충돌 시:
+        // - 서버 값이 비정상적으로 비어있을 수 있으므로(totalValue<=0),
+        //   로컬에 유효 값(>0)이 있으면 로컬을 유지합니다.
+        // - 그 외에는 서버 값을 사용합니다.
         const localMap = new Map(local.map((s) => [s.date, s]));
-        for (const s of json.snapshots) localMap.set(s.date, s);
+        for (const s of json.snapshots) {
+          const existing = localMap.get(s.date);
+          const serverLooksEmpty =
+            !Number.isFinite(s.totalValue) ||
+            s.totalValue <= 0 ||
+            !s.ownerValues ||
+            Object.keys(s.ownerValues).length === 0;
+          const localLooksValid =
+            !!existing &&
+            Number.isFinite(existing.totalValue) &&
+            existing.totalValue > 0 &&
+            !!existing.ownerValues &&
+            Object.keys(existing.ownerValues).length > 0;
+          if (serverLooksEmpty && localLooksValid) continue;
+          localMap.set(s.date, s);
+        }
         const merged = [...localMap.values()].sort((a, b) => a.date.localeCompare(b.date));
         setDailySnapshots(merged);
         // 서버 스냅샷도 로컬에 캐시
