@@ -47,6 +47,16 @@ export function DailyChangeCalendar({ snapshots }: Props) {
     for (const s of snapshots) map.set(s.date, s);
     return map;
   }, [snapshots]);
+  const prevSnapshotByDate = useMemo(() => {
+    const sorted = [...snapshots].sort((a, b) => a.date.localeCompare(b.date));
+    const map = new Map<string, DailySnapshot | null>();
+    let prev: DailySnapshot | null = null;
+    for (const s of sorted) {
+      map.set(s.date, prev);
+      prev = s;
+    }
+    return map;
+  }, [snapshots]);
 
   const items = useMemo(() => {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
@@ -63,11 +73,8 @@ export function DailyChangeCalendar({ snapshots }: Props) {
       d.setDate(begin.getDate() + i);
       const key = ymd(d);
       const cur = byDate.get(key);
-      const prev = (() => {
-        const p = new Date(d);
-        p.setDate(d.getDate() - 1);
-        return byDate.get(ymd(p));
-      })();
+      // 기록이 연속되지 않아도 직전 기록일과 비교해 달력에 변화량을 채웁니다.
+      const prev = cur ? (prevSnapshotByDate.get(key) ?? null) : null;
 
       let changeKrw: number | null = null;
       let changePct: number | null = null;
