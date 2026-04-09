@@ -8,10 +8,11 @@
 
 1. **Git** 으로 이 저장소를 받고 (`git clone` … `cd Portfolio`) **의존성 설치** (`npm install --prefix my-app`).
 2. **`my-app/.env.local`** 생성 — 아래 [환경 변수](#4-환경-변수-필수) 참고. 예전 PC의 `.env.local` 복사 또는 Vercel 환경 변수 복사.
-3. **에디터**에서 워크스페이스 루트는 **`Portfolio`** (클론한 폴더). **`my-app/my-app/`** 은 본 앱이 아닌 예전 템플릿 조각이 남아 있을 수 있으니 **수정 대상이 아닙니다.**
-4. **`npm run dev`** → 로컬에서 화면 확인.
-5. **포트폴리오 데이터**: 브라우저마다 `localStorage` 에 저장됩니다. 새 PC·새 브라우저에서는 비어 있음이 정상입니다. 예전에 쓰던 **동기화 키**가 있으면 앱의 **서버 동기화(Pull)** 로 같은 데이터를 불러오거나, 예전 PC에서 키를 확인해 입력하세요.
-6. 최신 코드는 **`git pull origin main`** 으로 맞춥니다.
+3. **Supabase** 를 새로 쓰는 경우(또는 테이블이 없을 때) [Supabase SQL 한 번 실행](#9-supabase-테이블-신규-프로젝트) 순서를 따릅니다.
+4. **에디터**에서 워크스페이스 루트는 **`Portfolio`** (클론한 폴더). **`my-app/my-app/`** 은 본 앱이 아닌 예전 템플릿 조각이 남아 있을 수 있으니 **수정 대상이 아닙니다.**
+5. **`npm run dev`** → 로컬에서 화면 확인.
+6. **포트폴리오 데이터**: 브라우저마다 `localStorage` 에 저장됩니다. 새 PC·새 브라우저에서는 비어 있음이 정상입니다. 예전에 쓰던 **동기화 키**가 있으면 앱의 **서버 동기화(Pull)** 로 같은 데이터를 불러오거나, 예전 PC에서 키를 확인해 입력하세요.
+7. 최신 코드는 **`git pull origin main`** 으로 맞춥니다.
 
 **코드 최신본**은 GitHub `main` 기준이며, 배포는 보통 `my-app`에서 `npm run deploy`(빌드·푸시) 또는 Vercel Git 연동으로 반영됩니다.
 
@@ -67,12 +68,16 @@ npm install --prefix my-app
    - 예전 PC의 `my-app/.env.local` 파일을 복사 (USB·클라우드 등)
    - **Vercel** → 프로젝트 → **Settings → Environment Variables** 에서 동일 이름 확인 후 로컬에 붙여넣기
 
-4. **선택 변수** (기능 켤 때만)
+4. **선택 변수** (기능 켤 때만 — **프로덕션(Vercel)에도 동일 이름으로 등록**)
 
    | 변수 | 용도 |
    |------|------|
-   | `RESEND_API_KEY` | 이메일 알림 (Resend) |
-   | `CRON_SECRET` | Vercel Cron이 `/api/alert/check` 호출 시 `Authorization: Bearer …` 검증용. 비우면 GET 검증 생략(개발 편의) |
+   | `RESEND_API_KEY` | 이메일 알림 (Resend) — 비중 이탈 알림 |
+   | `RESEND_FROM` | (선택) 발신자 표시명 |
+   | `TELEGRAM_BOT_TOKEN` | 텔레그램 일일 시세 알림 (`/api/alert/kakao-price-move`) |
+   | `TELEGRAM_CHAT_ID` | 수신 채팅 ID |
+   | `CRON_SECRET` | Vercel Cron GET 호출 시 `Authorization: Bearer …` 검증. **프로덕션에서는 설정 권장** |
+   | `OPENAI_API_KEY` | AI 데일리 마켓 인사이트 (`/api/cron/analyze-market`) |
    | `DATABASE_URL` | Prisma CLI (`prisma migrate` 등) 사용 시에만 |
 
 ### 5. 로컬 실행
@@ -106,7 +111,40 @@ npm run build
 - 프로젝트 **Root Directory** 가 `my-app` 이면 `my-app/vercel.json` 의 Cron·빌드 설정이 적용됩니다.
 - 프로덕션에도 **환경 변수**를 Vercel에 등록해야 동기화·알림이 동작합니다 (로컬 `.env.local` 은 Git에 없음).
 
-### 8. 자주 쓰는 명령 (루트 기준)
+### 8. Vercel Cron (스케줄 요약)
+
+`my-app/vercel.json` 기준 (UTC → 한국은 **KST = UTC+9**):
+
+| 경로 | UTC | 대략 KST | 역할 |
+|------|-----|----------|------|
+| `/api/alert/check` | `0 7 * * *` | 매일 **16:00** | 일별 스냅샷 저장(`saveAllSnapshots`), 이메일 알림 처리 |
+| `/api/alert/kakao-price-move` | `0 7 * * *` | 매일 **16:00** | 텔레그램 전 종목 시세 요약 |
+| `/api/cron/analyze-market` | `0 21 * * *` | 매일 **06:00** | AI 마켓 인사이트 |
+
+**일별 자산 스냅샷**은 한국 장 마감(15:30) 직후에 가깝게 맞추기 위해 **오후 4시 KST**에 기록합니다. 앱에서 서버로 보내는 클라이언트 스냅샷도 같은 날 **KST 16시 이후**에만 전송되도록 되어 있습니다.
+
+### 9. Supabase 테이블 (신규 프로젝트·빈 DB)
+
+Supabase SQL 편집기에서 **아래 순서**로 실행합니다 (파일은 `my-app/supabase/*.sql`).
+
+1. `portfolio_snapshots.sql` — 동기화 본문(종목·현금)
+2. `portfolio_snapshots_holdings_sort.sql` — 정렬 컬럼 추가(기존 DB 업그레이드용)
+3. `portfolio_daily_snapshots.sql` — 일별 자산 (1번의 `sync_key` 참조)
+4. `alert_configs.sql` — 이메일 알림 규칙
+5. `price_move_alert_logs.sql` — 텔레그램 중복 발송 방지 로그
+6. `market_reports.sql` — (해당 기능 사용 시)
+
+### 10. 브라우저 localStorage 키 (디버깅·이전 시 참고)
+
+| 키 | 의미 |
+|----|------|
+| `portfolio_sync_key_v1` | 동기화 키 |
+| `portfolio_last_sync_ts_v1` | 마지막으로 맞춘 서버 `updated_at` |
+| `portfolio_has_local_changes_v1` | `"1"` 이면 로컬 수정 후 서버 미반영 |
+| `portfolio_daily_snapshots_v1` | 일별 스냅샷 JSON (달력·추이) |
+| `portfolio_snapshot_pushed_date_v1` / `portfolio_snapshot_pushed_total_v1` | 당일 서버 스냅샷 push 여부·총액 |
+
+### 11. 자주 쓰는 명령 (루트 기준)
 
 | 명령 | 설명 |
 |------|------|
@@ -122,6 +160,7 @@ npm run build
 | 경로 | 내용 |
 |------|------|
 | `my-app/` | Next.js 앱 (`app/`, `lib/`, `vercel.json` 등) |
+| `my-app/supabase/*.sql` | Supabase 테이블 생성·마이그레이션 (신규 프로젝트 시 순서대로 실행) |
 | `my-app/.env.example` | 환경 변수 템플릿 (커밋됨) |
 | `scripts/deploy.cjs` | 배포용: 빌드 → 커밋(변경 시) → 푸시 |
 
@@ -137,11 +176,15 @@ npm run build
 
 **동기화(클라이언트)**: 브라우저마다 `localStorage`에 **마지막으로 맞춘 서버 시각**(`portfolio_last_sync_ts_v1`)과 **로컬 수정 여부**(`portfolio_has_local_changes_v1`)가 저장됩니다. 새 브라우저에서는 비어 있으므로, 같은 동기화 키로 **서버에서 불러오기**를 한 번 하면 서버 기준으로 맞춰집니다. **동시에 두 기기에서 편집**하면 마지막 저장이 덮어쓸 수 있으니, 한쪽에서 저장이 끝난 뒤 다른 쪽을 여는 것이 안전합니다.
 
+**충돌 시 동작**: 서버가 더 최신이어도 **로컬에 미반영 변경**(`portfolio_has_local_changes_v1 === "1"`)이 있으면 서버 데이터로 덮어쓰지 않고 **먼저 로컬을 서버에 올립니다.** (입력 직후 현금·종목이 사라지는 문제 방지)
+
 ---
 
 ## UI·로직 참고 (최근 기능)
 
 - **총 평가 옆 달러**: 해당 구간 **총 평가 원화 ÷ USD/KRW** (시세 API 환율, 없으면 기본값).
 - **종목별 평가금액**: USD·EUR 종목은 원화 아래에 **수량×현재가** 기준 달러/유로 표시.
-- **서버 동기화**: Pull 시 서버 `updated_at`과 로컬에 저장한 마지막 동기 시각을 비교하고, 실제 사용자 수정이 있을 때만 Push·자동저장이 서버로 올라가도록 동작합니다.
+- **서버 동기화**: 위 충돌 규칙 + 자동 저장은 로컬 수정이 있을 때만 서버로 전송.
+- **일별 자산 스냅샷**: Vercel Cron **오후 4시 KST** + 앱은 **같은 날 KST 16시 이후**에만 서버로 일별 스냅샷 전송(장 마감 후 종가에 가깝게 비교).
+- **텔레그램**: `/api/alert/kakao-price-move` — 보유 전 종목, 종목명 표시, 매일 16:00 KST(크론). 앱에서 **진단(전송 없음)** 버튼으로 환경변수·시세 점검 가능.
 - **배포**: `my-app` 에서 `npm run deploy` → 빌드 후 변경 시 커밋·`git push` → Vercel 자동 배포.
