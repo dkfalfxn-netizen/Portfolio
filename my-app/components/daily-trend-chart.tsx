@@ -132,8 +132,11 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
                 interval="preserveStartEnd"
               />
               <YAxis
-                domain={[0, Y_AXIS_MAX_KRW]}
                 type="number"
+                domain={[0, Y_AXIS_MAX_KRW]}
+                allowDataOverflow
+                niceTicks="none"
+                ticks={[0, 75_000_000, 150_000_000, 225_000_000, Y_AXIS_MAX_KRW]}
                 tick={{ fontSize: 10, fill: "#71717a" }}
                 tickFormatter={(v: number) => fmt(v)}
                 width={56}
