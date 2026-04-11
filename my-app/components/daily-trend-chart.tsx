@@ -13,6 +13,9 @@ import {
 } from "recharts";
 import type { DailySnapshot } from "@/app/page";
 
+/** 일별 자산 추이 차트 Y축 상한 (개인 라인 가독성용, 단위: 원) */
+const Y_AXIS_MAX_KRW = 300_000_000; // 3억
+
 const OWNER_COLORS: Record<string, string> = {
   김승주: "#22d3ee",
   강희진: "#a78bfa",
@@ -79,6 +82,7 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
           ) : null}
           . 30·90·180일은 <span className="underline decoration-dotted">보여줄 최대 구간</span>이며,
           그 안에서 실제로 기록된 날만 차트에 표시됩니다.
+          <span className="block mt-1">차트 세로축은 0~3억으로 고정되어 있습니다. 전체 자산이 3억을 넘으면 선이 위로 잘릴 수 있습니다.</span>
         </p>
       )}
       {/* 컨트롤 */}
@@ -128,6 +132,8 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
                 interval="preserveStartEnd"
               />
               <YAxis
+                domain={[0, Y_AXIS_MAX_KRW]}
+                type="number"
                 tick={{ fontSize: 10, fill: "#71717a" }}
                 tickFormatter={(v: number) => fmt(v)}
                 width={56}
