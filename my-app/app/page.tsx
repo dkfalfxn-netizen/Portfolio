@@ -1968,7 +1968,7 @@ export default function Home() {
               이전에는 기록이 없던 것입니다(미방문, 다른 브라우저, 초기화 등). 동기화 키가 있으면 서버에
               누적된 날짜도 함께 불러옵니다.
             </p>
-            <DailyTrendChart snapshots={dailySnapshots} ownerNames={OWNER_NAMES} />
+            <DailyTrendChart snapshots={dailySnapshots} ownerNames={OWNER_NAMES} liveChangeByDate={dailyLiveChangeByDate} />
           </section>
           <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
 

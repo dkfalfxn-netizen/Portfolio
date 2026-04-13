@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -34,13 +34,37 @@ function fmtFull(n: number) {
   return `₩${Math.round(n).toLocaleString()}`;
 }
 
-function buildDiffTooltipText(current: DailySnapshot, prev: DailySnapshot, owner: string): string | null {
+type DiffTooltipData = {
+  title: string;
+  lines: string[];
+  moreCount: number;
+};
+
+type LiveChange = {
+  date: string;
+  changeKrw: number;
+  changePct: number | null;
+  ownerChanges: Array<{ name: string; changeKrw: number; changePct: number | null }>;
+  compareNote?: string;
+};
+
+type HoverTooltip = {
+  x: number;
+  y: number;
+  data: DiffTooltipData;
+};
+
+function buildDiffTooltipData(current: DailySnapshot, prev: DailySnapshot, owner: string): DiffTooltipData | null {
   const currentBreakdown = current.breakdownValues;
   const prevBreakdown = prev.breakdownValues;
   const hasBreakdown = Boolean(currentBreakdown && prevBreakdown);
 
   if (!hasBreakdown) {
-    return "이 날짜는 자산별 상세 내역이 아직 저장되지 않았습니다.";
+    return {
+      title: `${owner} 자산별 전일비`,
+      lines: ["이 날짜는 자산별 상세 내역이 아직 저장되지 않았습니다."],
+      moreCount: 0,
+    };
   }
 
   const rows: Array<{ label: string; diff: number }> = [];
@@ -63,18 +87,43 @@ function buildDiffTooltipText(current: DailySnapshot, prev: DailySnapshot, owner
   rows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
   const top = rows.slice(0, 8);
   const lines = top.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
-  const more = rows.length > top.length ? `\n외 ${rows.length - top.length}개` : "";
-  return `${owner} 자산별 전일비\n${lines.join("\n")}${more}`;
+  return {
+    title: `${owner} 자산별 전일비`,
+    lines,
+    moreCount: rows.length - top.length,
+  };
+}
+
+function buildLiveTooltipData(owner: string, live: LiveChange): DiffTooltipData | null {
+  const rows = live.ownerChanges
+    .filter((row) => owner === "전체" || row.name.startsWith(`${owner} · `))
+    .map((row) => ({
+      label: owner === "전체" ? row.name : row.name.replace(`${owner} · `, ""),
+      diff: row.changeKrw,
+    }))
+    .filter((row) => row.diff !== 0)
+    .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+  if (rows.length === 0) return null;
+  const top = rows.slice(0, 8);
+  const lines = top.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
+  return {
+    title: `${owner} 자산별 전일비`,
+    lines,
+    moreCount: rows.length - top.length,
+  };
 }
 
 type Props = {
   snapshots: DailySnapshot[];
   ownerNames: readonly string[];
+  liveChangeByDate?: Record<string, LiveChange>;
 };
 
-export function DailyTrendChart({ snapshots, ownerNames }: Props) {
+export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate }: Props) {
   const [mode, setMode] = useState<"chart" | "table">("chart");
   const [range, setRange] = useState<30 | 90 | 180>(90);
+  const [hoverTooltip, setHoverTooltip] = useState<HoverTooltip | null>(null);
+  const tableWrapRef = useRef<HTMLDivElement>(null);
 
   const filtered = snapshots.slice(-range);
   const firstFull = filtered[0]?.date;
@@ -205,7 +254,7 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
           </ResponsiveContainer>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div ref={tableWrapRef} className="relative overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
@@ -238,11 +287,26 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
                       const prevVal = prev
                         ? o === "전체" ? prev.totalValue : (prev.ownerValues[o] ?? 0)
                         : null;
-                      const diff = prevVal !== null ? val - prevVal : null;
-                      const diffPct = prevVal && prevVal > 0 ? (diff! / prevVal) * 100 : null;
-                      const diffTooltip = prev && diff !== null && diff !== 0
-                        ? buildDiffTooltipText(s, prev, o)
+                      const live = liveChangeByDate?.[s.date];
+                      const liveDiff = live
+                        ? o === "전체"
+                          ? live.changeKrw
+                          : live.ownerChanges
+                              .filter((row) => row.name.startsWith(`${o} · `))
+                              .reduce((sum, row) => sum + row.changeKrw, 0)
                         : null;
+                      const livePct = live
+                        ? o === "전체"
+                          ? live.changePct
+                          : null
+                        : null;
+                      const diff = liveDiff !== null ? liveDiff : (prevVal !== null ? val - prevVal : null);
+                      const diffPct = livePct !== null ? livePct : (prevVal && prevVal > 0 && diff !== null ? (diff / prevVal) * 100 : null);
+                      const diffTooltip = live
+                        ? buildLiveTooltipData(o, live)
+                        : prev && diff !== null && diff !== 0
+                          ? buildDiffTooltipData(s, prev, o)
+                          : null;
                       return (
                         <>
                           <td key={`${o}-val`} className="py-1.5 px-2 text-right tabular-nums font-medium">
@@ -263,7 +327,18 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
                             {diff === null ? "—" : diff === 0 ? "±0" : (
                               <div
                                 className={`flex flex-col items-end gap-0 ${diffTooltip ? "cursor-help" : ""}`}
-                                title={diffTooltip ?? undefined}
+                                onMouseEnter={(e) => {
+                                  if (!diffTooltip) return;
+                                  const containerRect = tableWrapRef.current?.getBoundingClientRect();
+                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  if (!containerRect) return;
+                                  setHoverTooltip({
+                                    x: rect.left - containerRect.left + rect.width / 2,
+                                    y: rect.top - containerRect.top,
+                                    data: diffTooltip,
+                                  });
+                                }}
+                                onMouseLeave={() => setHoverTooltip(null)}
                               >
                                 <span>{diff > 0 ? "+" : ""}{fmtFull(Math.round(diff))}</span>
                                 {diffPct !== null && (
@@ -282,6 +357,28 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
               })}
             </tbody>
           </table>
+          {hoverTooltip && (
+            <div
+              className="pointer-events-none absolute z-50 min-w-[200px] rounded-xl border bg-popover p-3 text-xs shadow-lg"
+              style={{
+                left: hoverTooltip.x,
+                top: hoverTooltip.y - 8,
+                transform: "translate(-50%, -100%)",
+              }}
+            >
+              <p className="mb-2 font-semibold text-foreground">{hoverTooltip.data.title}</p>
+              <div className="space-y-1">
+                {hoverTooltip.data.lines.map((line) => (
+                  <p key={line} className="text-muted-foreground">{line}</p>
+                ))}
+              </div>
+              {hoverTooltip.data.moreCount > 0 && (
+                <p className="mt-2 border-t pt-2 text-muted-foreground">
+                  외 {hoverTooltip.data.moreCount}개
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
