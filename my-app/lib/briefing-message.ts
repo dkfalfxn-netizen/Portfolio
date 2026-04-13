@@ -59,6 +59,18 @@ function fmtKrw(n: number): string {
   return `₩${Math.round(n).toLocaleString("ko-KR")}`;
 }
 
+/** 전일 대비 % 높은 순(내림차순). 등락 없음/null 은 뒤로 */
+function sortByChangePctDesc(a: BriefingItem, b: BriefingItem): number {
+  const va = a.changePct;
+  const vb = b.changePct;
+  const fa = va !== null && Number.isFinite(va);
+  const fb = vb !== null && Number.isFinite(vb);
+  if (!fa && !fb) return 0;
+  if (!fa) return 1;
+  if (!fb) return -1;
+  return vb - va;
+}
+
 /** 터미널/고정폭 정렬용: 한글·전각 등은 폭 2, 영문·숫자·기호는 폭 1로 계산 */
 function codePointDisplayWidth(cp: number): number {
   if (cp >= 0x1100 && cp <= 0x115f) return 2;
@@ -209,9 +221,9 @@ export function buildTelegramBriefingHtml(opts: {
 
   const movers = items
     .filter((i) => i.changePct !== null && Math.abs(i.changePct) >= 2)
-    .sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0));
+    .sort(sortByChangePctDesc);
   const rest = items.filter((i) => i.changePct === null || Math.abs(i.changePct) < 2);
-  const restSorted = [...rest].sort((a, b) => (a.name || a.symbol).localeCompare(b.name || b.symbol, "ko"));
+  const restSorted = [...rest].sort(sortByChangePctDesc);
 
   const tableParts: string[] = [];
   if (movers.length > 0) {
