@@ -59,16 +59,6 @@ function fmtKrw(n: number): string {
   return `₩${Math.round(n).toLocaleString("ko-KR")}`;
 }
 
-function fmtPriceCell(item: BriefingItem): string {
-  if (item.price === null || !Number.isFinite(item.price)) return "—";
-  const sym = item.symbol.trim();
-  const isSixKr = /^[0-9][0-9A-Z]{5}$/i.test(sym);
-  if (isSixKr || sym.startsWith("KRX:") || sym.startsWith("KQ:") || /^M\d{8}$/i.test(sym)) {
-    return fmtKrw(item.price);
-  }
-  return `$${item.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 /** 터미널/고정폭 정렬용: 한글·전각 등은 폭 2, 영문·숫자·기호는 폭 1로 계산 */
 function codePointDisplayWidth(cp: number): number {
   if (cp >= 0x1100 && cp <= 0x115f) return 2;
@@ -108,13 +98,6 @@ function truncateDisplay(str: string, maxW: number): string {
   return ell;
 }
 
-function padDisplayEnd(str: string, target: number): string {
-  if (stringDisplayWidth(str) > target) return truncateDisplay(str, target);
-  let out = str;
-  while (stringDisplayWidth(out) < target) out += " ";
-  return out;
-}
-
 function padDisplayStart(str: string, target: number): string {
   if (stringDisplayWidth(str) > target) return truncateDisplay(str, target);
   let out = str;
@@ -127,7 +110,7 @@ function fmtPctPlain(p: number | null): string {
   return `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
 }
 
-/** +3%↑ 🚀, +2%↑ 📈, 음봉 📉 (2~3% 구간은 📈) */
+/** +3%↑ 🚀, +2%↑ 📈, 음봉 📉 (2~3% 구간은 📈). 등락 문자열에 붙여 한 줄 폭을 줄임 */
 function rowTrendEmoji(changePct: number | null): string {
   if (changePct === null || !Number.isFinite(changePct)) return "";
   if (changePct >= 3) return "🚀";
@@ -136,33 +119,64 @@ function rowTrendEmoji(changePct: number | null): string {
   return "";
 }
 
-const COL_NAME_W = 22;
-const COL_PRICE_W = 18;
-const COL_PCT_W = 10;
+/** 좁은 화면: 한 줄(가격+등락)이 대략 이 폭을 넘지 않도록 (한글 폭 2 기준) */
+const MOBILE_BLOCK_W = 26;
 
-/** 단일 고정폭 표(텔레그램 `<pre>`용). 본문은 이스케이프 전 순수 텍스트. */
-function buildAlignedTablePlain(rows: BriefingItem[]): string {
-  const hdr =
-    `${padDisplayEnd("종목명", COL_NAME_W)}  ` +
-    `${padDisplayStart("가격", COL_PRICE_W)}  ` +
-    `${padDisplayStart("전일대비", COL_PCT_W)}  `;
-  const sep = "─".repeat(Math.max(stringDisplayWidth(hdr), 28));
-  const lines: string[] = [hdr, sep];
+/** 가격 문자열 짧게 (모바일 2번째 줄 합산 폭용) */
+function fmtPriceCompactForMobile(item: BriefingItem): string {
+  if (item.price === null || !Number.isFinite(item.price)) return "—";
+  const sym = item.symbol.trim();
+  const isSixKr = /^[0-9][0-9A-Z]{5}$/i.test(sym);
+  const isKrw =
+    isSixKr || sym.startsWith("KRX:") || sym.startsWith("KQ:") || /^M\d{8}$/i.test(sym);
+  if (isKrw) {
+    const n = Math.round(item.price);
+    if (n >= 100_000_000) return `${(n / 1e8).toFixed(1)}억`;
+    if (n >= 10_000) return `${(n / 10_000).toFixed(1)}만`;
+    return `₩${n.toLocaleString("ko-KR")}`;
+  }
+  const p = item.price;
+  if (p >= 1000) return `$${(p / 1000).toFixed(2)}k`;
+  return `$${p.toFixed(2)}`;
+}
+
+/** 가격·등락·이모지 한 줄을 블록 폭에 맞춤 (가격부터 짧게) */
+function buildRightColumnLine(item: BriefingItem): string {
+  const pc = fmtPctPlain(item.changePct);
+  const em = rowTrendEmoji(item.changePct);
+  let px = fmtPriceCompactForMobile(item);
+  for (let n = 0; n < 8; n++) {
+    const right = em ? `${px} ${pc}${em}` : `${px} ${pc}`;
+    if (stringDisplayWidth(right) <= MOBILE_BLOCK_W) return right;
+    const nextW = Math.max(3, stringDisplayWidth(px) - 1);
+    const shortened = truncateDisplay(px, nextW);
+    if (shortened === px) break;
+    px = shortened;
+  }
+  const right = em ? `${px} ${pc}${em}` : `${px} ${pc}`;
+  return truncateDisplay(right, MOBILE_BLOCK_W);
+}
+
+/** 종목당 2줄: 1줄 종목명, 2줄 가격·등락(우측 정렬) — 모바일에서 한 줄이 너무 길어 꺾이지 않게 함 */
+function buildMobileStackedBlock(rows: BriefingItem[]): string {
+  const lines: string[] = [];
   for (const r of rows) {
     const rawName = (r.name || r.symbol).trim() || r.symbol;
-    const nm = padDisplayEnd(rawName, COL_NAME_W);
-    const px = padDisplayStart(fmtPriceCell(r), COL_PRICE_W);
-    const pc = padDisplayStart(fmtPctPlain(r.changePct), COL_PCT_W);
-    const em = rowTrendEmoji(r.changePct);
-    const tail = em === "" ? "" : ` ${em}`;
-    lines.push(`${nm}  ${px}  ${pc}${tail}`);
+    const nameLine = truncateDisplay(rawName, MOBILE_BLOCK_W);
+    const line2 = padDisplayStart(buildRightColumnLine(r), MOBILE_BLOCK_W);
+    lines.push(nameLine);
+    lines.push(line2);
+    lines.push("");
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === "") {
+    lines.pop();
   }
   return lines.join("\n");
 }
 
 /**
  * 텔레그램 HTML 브리핑 (parse_mode: HTML).
- * 총액 미표시·전일 대비 포트폴리오 %만, 종목 표는 한글 폭 반영 정렬 + 구분선 + 행 이모지, 단일 `<pre>` 블록.
+ * 총액 미표시·전일 대비 포트폴리오 %만. 종목 목록은 모바일 줄바꿈을 피하기 위해 종목당 2줄·폭 제한 `<pre>`.
  */
 export function buildTelegramBriefingHtml(opts: {
   slotLabel?: string;
@@ -202,7 +216,7 @@ export function buildTelegramBriefingHtml(opts: {
   const tableParts: string[] = [];
   if (movers.length > 0) {
     tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
-    tableParts.push(buildAlignedTablePlain(movers));
+    tableParts.push(buildMobileStackedBlock(movers));
   } else {
     tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
     tableParts.push("(해당 없음)");
@@ -211,7 +225,7 @@ export function buildTelegramBriefingHtml(opts: {
   if (restSorted.length > 0) {
     tableParts.push("");
     tableParts.push(`📋 기타 (${restSorted.length}종, ±2% 미만)`);
-    tableParts.push(buildAlignedTablePlain(restSorted));
+    tableParts.push(buildMobileStackedBlock(restSorted));
   }
 
   const tablePlain = tableParts.join("\n");
