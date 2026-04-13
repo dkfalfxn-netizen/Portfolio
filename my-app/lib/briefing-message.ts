@@ -134,7 +134,7 @@ function rowTrendEmoji(changePct: number | null): string {
 /** 좁은 화면: 한 줄(가격+등락)이 대략 이 폭을 넘지 않도록 (한글 폭 2 기준) */
 const MOBILE_BLOCK_W = 26;
 
-/** 가격 문자열 짧게 (모바일 2번째 줄 합산 폭용) */
+/** 가격 표기 (원화는 전액·쉼표, 모바일 폭은 buildRightColumnLine에서 잘림) */
 function fmtPriceCompactForMobile(item: BriefingItem): string {
   if (item.price === null || !Number.isFinite(item.price)) return "—";
   const sym = item.symbol.trim();
@@ -142,10 +142,7 @@ function fmtPriceCompactForMobile(item: BriefingItem): string {
   const isKrw =
     isSixKr || sym.startsWith("KRX:") || sym.startsWith("KQ:") || /^M\d{8}$/i.test(sym);
   if (isKrw) {
-    const n = Math.round(item.price);
-    if (n >= 100_000_000) return `${(n / 1e8).toFixed(1)}억`;
-    if (n >= 10_000) return `${(n / 10_000).toFixed(1)}만`;
-    return `₩${n.toLocaleString("ko-KR")}`;
+    return fmtKrw(Math.round(item.price));
   }
   const p = item.price;
   if (p >= 1000) return `$${(p / 1000).toFixed(2)}k`;
