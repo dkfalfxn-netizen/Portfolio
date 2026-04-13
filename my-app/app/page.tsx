@@ -2893,8 +2893,12 @@ export default function Home() {
           <section className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">📲 텔레그램 가격 변동 알림</h2>
             <p className="mb-3 text-xs text-muted-foreground">
-              보유 전 종목의 전일 대비 등락률(%) 브리핑을 <b>한국시간 매일 01:00, 09:30, 12:00, 15:40, 23:00</b>에
-              Vercel Cron으로 자동 발송합니다. (배포 후 Supabase에{" "}
+              Supabase에 저장된 포트폴리오와 시세를 바탕으로 <b>총 평가금액·전일 대비 포트폴리오 수익률</b>, 보유 종목{" "}
+              <b>전일 대비 등락률(%)</b> 등 HTML 브리핑을{" "}
+              <b>한국시간(KST) 매일 01:00, 09:30, 12:00, 15:40, 23:00</b>에 Vercel Cron으로 자동 발송합니다. (
+              배포 설정 <code className="rounded bg-muted px-1">vercel.json</code>의{" "}
+              <code className="rounded bg-muted px-1">slot=0100·0930·1200·1540·2300</code> 다섯 구간과 대응){" "} 아래 「테스트 전송」은 수동 발송이며, 같은 날에도 여러 번 보낼 수 있습니다. (배포 후
+              Supabase에{" "}
               <code className="rounded bg-muted px-1">price_move_alert_logs_briefing_slot.sql</code>{" "}
               마이그레이션 필요) 작동하려면 Vercel 환경변수에{" "}
               <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
