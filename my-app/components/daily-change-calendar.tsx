@@ -10,7 +10,7 @@ type Props = {
 type OwnerChange = {
   name: string;
   changeKrw: number;
-  changePct: number;
+  changePct: number | null;
 };
 
 type CellData = {
@@ -33,6 +33,34 @@ function ymd(d: Date): string {
 function toKrw(n: number): string {
   const sign = n > 0 ? "+" : n < 0 ? "" : "±";
   return `${sign}${Math.round(n).toLocaleString()}원`;
+}
+
+function buildChangeRows(cur: DailySnapshot, prev: DailySnapshot): OwnerChange[] {
+  const currentBreakdown = cur.breakdownValues;
+  const previousBreakdown = prev.breakdownValues;
+
+  // 신규 상세 필드가 있으면 자산(그룹) 단위로, 없으면 기존 owner 단위로 fallback
+  const curMap = currentBreakdown && previousBreakdown ? currentBreakdown : (cur.ownerValues ?? {});
+  const prevMap = currentBreakdown && previousBreakdown ? previousBreakdown : (prev.ownerValues ?? {});
+
+  const allKeys = new Set([...Object.keys(curMap), ...Object.keys(prevMap)]);
+  const rows: OwnerChange[] = [];
+
+  for (const name of allKeys) {
+    const curVal = curMap[name] ?? 0;
+    const prevVal = prevMap[name] ?? 0;
+    const changeKrw = curVal - prevVal;
+    if (changeKrw === 0) continue;
+
+    rows.push({
+      name,
+      changeKrw,
+      changePct: prevVal > 0 ? (changeKrw / prevVal) * 100 : null,
+    });
+  }
+
+  rows.sort((a, b) => Math.abs(b.changeKrw) - Math.abs(a.changeKrw));
+  return rows;
 }
 
 export function DailyChangeCalendar({ snapshots }: Props) {
@@ -85,21 +113,7 @@ export function DailyChangeCalendar({ snapshots }: Props) {
         changeKrw = cur.totalValue - prev.totalValue;
         changePct = (changeKrw / prev.totalValue) * 100;
 
-        const allOwners = new Set([
-          ...Object.keys(cur.ownerValues ?? {}),
-          ...Object.keys(prev.ownerValues ?? {}),
-        ]);
-        for (const name of allOwners) {
-          const curVal = cur.ownerValues?.[name] ?? 0;
-          const prevVal = prev.ownerValues?.[name] ?? 0;
-          if (prevVal > 0) {
-            ownerChanges.push({
-              name,
-              changeKrw: curVal - prevVal,
-              changePct: ((curVal - prevVal) / prevVal) * 100,
-            });
-          }
-        }
+        ownerChanges.push(...buildChangeRows(cur, prev));
       }
 
       cells.push({
@@ -232,7 +246,11 @@ export function DailyChangeCalendar({ snapshots }: Props) {
                 <span className="text-muted-foreground">{o.name}</span>
                 <span className={`font-medium tabular-nums ${o.changeKrw > 0 ? "text-red-500" : o.changeKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
                   {toKrw(o.changeKrw)}
-                  <span className="ml-1 text-[10px]">({o.changeKrw > 0 ? "+" : ""}{o.changePct.toFixed(2)}%)</span>
+                  <span className="ml-1 text-[10px]">
+                    {o.changePct !== null
+                      ? `(${o.changeKrw > 0 ? "+" : ""}${o.changePct.toFixed(2)}%)`
+                      : "(신규/기준없음)"}
+                  </span>
                 </span>
               </div>
             ))}

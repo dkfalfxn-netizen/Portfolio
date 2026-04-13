@@ -108,6 +108,7 @@ const SNAPSHOT_MAX_DAYS = 180;
 export type DailySnapshot = {
   date: string; // YYYY-MM-DD
   ownerValues: Record<string, number>; // ownerName → 총 평가액(KRW)
+  breakdownValues?: Record<string, number>; // "owner · group" 또는 "owner · 현금" → 평가액(KRW)
   totalValue: number;
 };
 
@@ -1047,12 +1048,22 @@ export default function Home() {
     if (!hasRealPrices) return;
     const today = todayKST();
     const ownerValues: Record<string, number> = {};
+    const breakdownValues: Record<string, number> = {};
     let totalValue = 0;
     for (const g of positionsByOwner) {
       ownerValues[g.ownerName] = g.sectionTotal;
       totalValue += g.sectionTotal;
+
+      // 달력 툴팁에서 "어떤 자산(그룹)이 변동했는지" 보여주기 위한 상세 스냅샷
+      const blocks = buildHoldingsGroupBlocks(g.items);
+      for (const block of blocks) {
+        breakdownValues[`${g.ownerName} · ${block.label}`] = block.sumKrw;
+      }
+      if (g.sectionCashKrw > 0) {
+        breakdownValues[`${g.ownerName} · 현금`] = g.sectionCashKrw;
+      }
     }
-    const snap: DailySnapshot = { date: today, ownerValues, totalValue };
+    const snap: DailySnapshot = { date: today, ownerValues, breakdownValues, totalValue };
     // 로컬 저장 (항상 오늘 최신값으로 갱신)
     saveDailySnapshot(snap);
     setDailySnapshots(loadDailySnapshots());
