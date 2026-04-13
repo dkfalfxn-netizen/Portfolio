@@ -322,14 +322,35 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate }: Pro
                                 className={`flex flex-col items-end gap-0 ${diffTooltip ? "cursor-help" : ""}`}
                                 onMouseEnter={(e) => {
                                   if (!diffTooltip) return;
-                                  const containerRect = tableWrapRef.current?.getBoundingClientRect();
-                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                  if (!containerRect) return;
+                                  const viewportPadding = 16;
+                                  const x = Math.min(
+                                    Math.max(e.clientX, viewportPadding),
+                                    window.innerWidth - viewportPadding,
+                                  );
+                                  const y = Math.min(
+                                    Math.max(e.clientY, viewportPadding),
+                                    window.innerHeight - viewportPadding,
+                                  );
                                   setHoverTooltip({
-                                    x: rect.left - containerRect.left + rect.width / 2,
-                                    y: rect.top - containerRect.top,
+                                    x,
+                                    y,
                                     data: diffTooltip,
                                   });
+                                }}
+                                onMouseMove={(e) => {
+                                  if (!diffTooltip) return;
+                                  const viewportPadding = 16;
+                                  const x = Math.min(
+                                    Math.max(e.clientX, viewportPadding),
+                                    window.innerWidth - viewportPadding,
+                                  );
+                                  const y = Math.min(
+                                    Math.max(e.clientY, viewportPadding),
+                                    window.innerHeight - viewportPadding,
+                                  );
+                                  setHoverTooltip((prev) => (
+                                    prev ? { ...prev, x, y } : prev
+                                  ));
                                 }}
                                 onMouseLeave={() => setHoverTooltip(null)}
                               >
@@ -352,11 +373,11 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate }: Pro
           </table>
           {hoverTooltip && (
             <div
-              className="pointer-events-none absolute z-50 min-w-[200px] rounded-xl border bg-popover p-3 text-xs shadow-lg"
+              className="pointer-events-none fixed z-[100] min-w-[220px] max-w-[360px] rounded-xl border bg-popover p-3 text-xs shadow-lg"
               style={{
                 left: hoverTooltip.x,
-                top: hoverTooltip.y - 8,
-                transform: "translate(-50%, -100%)",
+                top: hoverTooltip.y + 12,
+                transform: "translate(-50%, 0)",
               }}
             >
               <p className="mb-2 font-semibold text-foreground">{hoverTooltip.data.title}</p>
