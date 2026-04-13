@@ -362,23 +362,25 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/alert/kakao-price-move  { sync_key: string, dry_run?: boolean }
+ * POST /api/alert/kakao-price-move  { sync_key: string, dry_run?: boolean, force_resend?: boolean }
  *
  * 수동 테스트용. sync_key 소유자의 종목만 체크합니다.
  * dry_run: true → 실제 전송 없이 점검 결과만 반환 (기본값 true)
- * dry_run: false → 실제로 텔레그램 전송 (오늘 이미 보낸 종목은 건너뜀)
+ * dry_run: false → 실제로 텔레그램 전송 (기본: 오늘 manual 슬롯으로 이미 보낸 종목은 건너뜀)
+ * force_resend: true → manual 중복 기록을 무시하고 전 종목 다시 전송 (UI 테스트 버튼에서 사용)
  */
 export async function POST(req: NextRequest) {
   let body: unknown;
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "JSON 파싱 실패" }, { status: 400 });
   }
-  const b = body as { sync_key?: unknown; dry_run?: unknown };
+  const b = body as { sync_key?: unknown; dry_run?: unknown; force_resend?: unknown };
   const syncKey = typeof b.sync_key === "string" ? b.sync_key : null;
   if (!syncKey || syncKey.length < 8) {
     return NextResponse.json({ error: "sync_key가 필요합니다." }, { status: 400 });
   }
   const dryRun = b.dry_run !== false; // 기본값 true (실전 전송 안 함)
+  const forceResend = b.force_resend === true;
 
   // 환경변수 점검
   const hasBotToken = !!process.env.TELEGRAM_BOT_TOKEN;
@@ -430,21 +432,24 @@ export async function POST(req: NextRequest) {
     briefing_slot: string;
   }> = [];
 
-  // 오늘 수동 발송으로 이미 기록된 종목 확인 (Cron 슬롯과 별개)
-  const { data: logs } = await admin
-    .from("price_move_alert_logs")
-    .select("symbol")
-    .eq("sync_key", syncKey)
-    .eq("date", dateKst)
-    .eq("briefing_slot", manualSlot);
-  const alreadySent = new Set((logs ?? []).map((l) => l.symbol));
+  // 오늘 수동 발송으로 이미 기록된 종목 확인 (Cron 슬롯과 별개). force_resend면 스킵
+  let alreadySent = new Set<string>();
+  if (!forceResend) {
+    const { data: logs } = await admin
+      .from("price_move_alert_logs")
+      .select("symbol")
+      .eq("sync_key", syncKey)
+      .eq("date", dateKst)
+      .eq("briefing_slot", manualSlot);
+    alreadySent = new Set((logs ?? []).map((l) => l.symbol));
+  }
 
   for (const [symbol, info] of symbolMap) {
     const q = await fetchQuoteForSymbol(symbol);
     const pct = (q.price && q.previousClose && q.previousClose > 0)
       ? ((q.price - q.previousClose) / q.previousClose) * 100
       : null;
-    const willAlert = !alreadySent.has(symbol); // 모든 종목 발송 (중복 방지만)
+    const willAlert = !alreadySent.has(symbol); // 모든 종목 발송 (중복 방지만, force_resend 시 무시)
     results.push({ symbol, name: info.name, price: q.price, previousClose: q.previousClose, changePct: pct, willAlert, sector: info.sector });
     if (willAlert) {
       items.push({

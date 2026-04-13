@@ -1607,7 +1607,12 @@ export default function Home() {
       const res = await fetch("/api/alert/kakao-price-move", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sync_key: cloudSyncKey, dry_run: dryRun }),
+        body: JSON.stringify({
+          sync_key: cloudSyncKey,
+          dry_run: dryRun,
+          // 실제 발송은 같은 날 여러 번 눌러도 브리핑을 다시 보낼 수 있게 함 (Cron과 별개 manual 로그 무시)
+          ...(dryRun ? {} : { force_resend: true }),
+        }),
       });
       const j = await res.json() as typeof telegramTestResult;
       setTelegramTestResult(j);
@@ -2888,7 +2893,7 @@ export default function Home() {
           <section className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">📲 텔레그램 가격 변동 알림</h2>
             <p className="mb-3 text-xs text-muted-foreground">
-              보유 전 종목의 전일 대비 등락률(%) 브리핑을 <b>한국시간 매일 09:30, 12:00, 15:40, 23:00</b>에
+              보유 전 종목의 전일 대비 등락률(%) 브리핑을 <b>한국시간 매일 01:00, 09:30, 12:00, 15:40, 23:00</b>에
               Vercel Cron으로 자동 발송합니다. (배포 후 Supabase에{" "}
               <code className="rounded bg-muted px-1">price_move_alert_logs_briefing_slot.sql</code>{" "}
               마이그레이션 필요) 작동하려면 Vercel 환경변수에{" "}
