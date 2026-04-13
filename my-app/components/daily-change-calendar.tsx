@@ -89,6 +89,24 @@ function buildChangeRows(cur: DailySnapshot, prev: DailySnapshot): OwnerChange[]
   return rows;
 }
 
+function aggregateOwnerTotals(rows: OwnerChange[]): OwnerChange[] {
+  const map = new Map<string, { changeKrw: number; changePct: number | null }>();
+  for (const row of rows) {
+    const owner = getOwnerFromBreakdownKey(row.name);
+    const existing = map.get(owner);
+    if (!existing) {
+      map.set(owner, { changeKrw: row.changeKrw, changePct: row.changePct });
+      continue;
+    }
+    existing.changeKrw += row.changeKrw;
+    existing.changePct = (existing.changePct ?? 0) + (row.changePct ?? 0);
+  }
+  return [...map.entries()]
+    .map(([name, v]) => ({ name, changeKrw: v.changeKrw, changePct: v.changePct }))
+    .filter((x) => x.changeKrw !== 0)
+    .sort((a, b) => Math.abs(b.changeKrw) - Math.abs(a.changeKrw));
+}
+
 export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
@@ -177,6 +195,10 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
   }, [cursor, byDate, prevSnapshotByDate, liveChangeByDate]);
 
   const tooltipCell = tooltip ? items.cells.find((c) => c.key === tooltip.key) : null;
+  const tooltipOwnerTotals = useMemo(
+    () => (tooltipCell ? aggregateOwnerTotals(tooltipCell.ownerChanges) : []),
+    [tooltipCell],
+  );
 
   const hasAny = snapshots.length > 0;
 
@@ -285,10 +307,10 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
           }}
         >
           <p className="mb-2 font-semibold text-foreground">{tooltip.key} 변동 상세</p>
-          {tooltipCell.ownerChanges.length > 0 ? (
+          {tooltipOwnerTotals.length > 0 ? (
             <>
               <div className="space-y-1">
-                {tooltipCell.ownerChanges.map((o) => (
+                {tooltipOwnerTotals.map((o) => (
                   <div key={o.name} className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">{o.name}</span>
                     <span className={`font-medium tabular-nums ${o.changeKrw > 0 ? "text-red-500" : o.changeKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>

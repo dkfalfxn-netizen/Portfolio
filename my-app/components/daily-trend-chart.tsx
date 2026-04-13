@@ -37,7 +37,6 @@ function fmtFull(n: number) {
 type DiffTooltipData = {
   title: string;
   lines: string[];
-  moreCount: number;
 };
 
 type LiveChange = {
@@ -63,7 +62,6 @@ function buildDiffTooltipData(current: DailySnapshot, prev: DailySnapshot, owner
     return {
       title: `${owner} 자산별 전일비`,
       lines: ["이 날짜는 자산별 상세 내역이 아직 저장되지 않았습니다."],
-      moreCount: 0,
     };
   }
 
@@ -85,12 +83,10 @@ function buildDiffTooltipData(current: DailySnapshot, prev: DailySnapshot, owner
   if (rows.length === 0) return null;
 
   rows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
-  const top = rows.slice(0, 8);
-  const lines = top.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
+  const lines = rows.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
   return {
     title: `${owner} 자산별 전일비`,
     lines,
-    moreCount: rows.length - top.length,
   };
 }
 
@@ -104,12 +100,10 @@ function buildLiveTooltipData(owner: string, live: LiveChange): DiffTooltipData 
     .filter((row) => row.diff !== 0)
     .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
   if (rows.length === 0) return null;
-  const top = rows.slice(0, 8);
-  const lines = top.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
+  const lines = rows.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
   return {
     title: `${owner} 자산별 전일비`,
     lines,
-    moreCount: rows.length - top.length,
   };
 }
 
@@ -254,7 +248,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate }: Pro
           </ResponsiveContainer>
         </div>
       ) : (
-        <div ref={tableWrapRef} className="relative overflow-x-auto">
+        <div ref={tableWrapRef} className="relative overflow-x-auto overflow-y-visible">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b text-muted-foreground">
@@ -367,16 +361,11 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate }: Pro
               }}
             >
               <p className="mb-2 font-semibold text-foreground">{hoverTooltip.data.title}</p>
-              <div className="space-y-1">
+              <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
                 {hoverTooltip.data.lines.map((line) => (
                   <p key={line} className="text-muted-foreground">{line}</p>
                 ))}
               </div>
-              {hoverTooltip.data.moreCount > 0 && (
-                <p className="mt-2 border-t pt-2 text-muted-foreground">
-                  외 {hoverTooltip.data.moreCount}개
-                </p>
-              )}
             </div>
           )}
         </div>
