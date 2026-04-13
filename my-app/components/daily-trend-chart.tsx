@@ -34,6 +34,37 @@ function fmtFull(n: number) {
   return `₩${Math.round(n).toLocaleString()}`;
 }
 
+function buildDiffTooltipText(current: DailySnapshot, prev: DailySnapshot, owner: string): string | null {
+  const currentBreakdown = current.breakdownValues;
+  const prevBreakdown = prev.breakdownValues;
+  const hasBreakdown = Boolean(currentBreakdown && prevBreakdown);
+
+  if (!hasBreakdown) return null;
+
+  const rows: Array<{ label: string; diff: number }> = [];
+  const cur = currentBreakdown ?? {};
+  const old = prevBreakdown ?? {};
+  const allKeys = new Set([...Object.keys(cur), ...Object.keys(old)]);
+
+  for (const key of allKeys) {
+    if (owner !== "전체" && !key.startsWith(`${owner} · `)) continue;
+    const diff = (cur[key] ?? 0) - (old[key] ?? 0);
+    if (diff === 0) continue;
+    rows.push({
+      label: owner === "전체" ? key : key.replace(`${owner} · `, ""),
+      diff,
+    });
+  }
+
+  if (rows.length === 0) return null;
+
+  rows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+  const top = rows.slice(0, 8);
+  const lines = top.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
+  const more = rows.length > top.length ? `\n외 ${rows.length - top.length}개` : "";
+  return `${owner} 자산별 전일비\n${lines.join("\n")}${more}`;
+}
+
 type Props = {
   snapshots: DailySnapshot[];
   ownerNames: readonly string[];
@@ -207,6 +238,9 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
                         : null;
                       const diff = prevVal !== null ? val - prevVal : null;
                       const diffPct = prevVal && prevVal > 0 ? (diff! / prevVal) * 100 : null;
+                      const diffTooltip = prev && diff !== null && diff !== 0
+                        ? buildDiffTooltipText(s, prev, o)
+                        : null;
                       return (
                         <>
                           <td key={`${o}-val`} className="py-1.5 px-2 text-right tabular-nums font-medium">
@@ -225,7 +259,10 @@ export function DailyTrendChart({ snapshots, ownerNames }: Props) {
                             }`}
                           >
                             {diff === null ? "—" : diff === 0 ? "±0" : (
-                              <div className="flex flex-col items-end gap-0">
+                              <div
+                                className={`flex flex-col items-end gap-0 ${diffTooltip ? "cursor-help" : ""}`}
+                                title={diffTooltip ?? undefined}
+                              >
                                 <span>{diff > 0 ? "+" : ""}{fmtFull(Math.round(diff))}</span>
                                 {diffPct !== null && (
                                   <span className="text-[10px] opacity-75">
