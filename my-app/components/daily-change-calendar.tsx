@@ -21,6 +21,7 @@ type CellData = {
   changePct: number | null;
   ownerChanges: OwnerChange[];
   totalValue: number | null;
+  compareNote: string | null;
 };
 
 function ymd(d: Date): string {
@@ -30,9 +31,21 @@ function ymd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+function diffDays(a: string, b: string): number | null {
+  const ad = new Date(`${a}T00:00:00`);
+  const bd = new Date(`${b}T00:00:00`);
+  if (Number.isNaN(ad.getTime()) || Number.isNaN(bd.getTime())) return null;
+  return Math.round((ad.getTime() - bd.getTime()) / (24 * 60 * 60 * 1000));
+}
+
 function toKrw(n: number): string {
   const sign = n > 0 ? "+" : n < 0 ? "" : "±";
   return `${sign}${Math.round(n).toLocaleString()}원`;
+}
+
+function getOwnerFromBreakdownKey(name: string): string {
+  const idx = name.indexOf(" · ");
+  return idx > 0 ? name.slice(0, idx) : name;
 }
 
 function buildChangeRows(cur: DailySnapshot, prev: DailySnapshot): OwnerChange[] {
@@ -51,11 +64,15 @@ function buildChangeRows(cur: DailySnapshot, prev: DailySnapshot): OwnerChange[]
     const prevVal = prevMap[name] ?? 0;
     const changeKrw = curVal - prevVal;
     if (changeKrw === 0) continue;
+    const ownerName = getOwnerFromBreakdownKey(name);
+    const ownerPrevTotal = prev.ownerValues?.[ownerName] ?? 0;
 
     rows.push({
       name,
       changeKrw,
-      changePct: prevVal > 0 ? (changeKrw / prevVal) * 100 : null,
+      // 자산군 자체 비중 변화(리밸런싱)로 퍼센트가 과장되지 않도록
+      // 소유자 전일 총액 대비 변화율로 표시합니다.
+      changePct: ownerPrevTotal > 0 ? (changeKrw / ownerPrevTotal) * 100 : null,
     });
   }
 
@@ -108,12 +125,23 @@ export function DailyChangeCalendar({ snapshots }: Props) {
       let changeKrw: number | null = null;
       let changePct: number | null = null;
       const ownerChanges: OwnerChange[] = [];
+      let compareNote: string | null = null;
 
-      if (cur && prev && prev.totalValue > 0) {
-        changeKrw = cur.totalValue - prev.totalValue;
-        changePct = (changeKrw / prev.totalValue) * 100;
-
-        ownerChanges.push(...buildChangeRows(cur, prev));
+      if (cur) {
+        if (!prev) {
+          compareNote = "전일 비교 불가(이전 기록 없음)";
+        } else {
+          const dayDiff = diffDays(cur.date, prev.date);
+          if (dayDiff !== 1) {
+            compareNote = "전일 비교 불가(기록 간격)";
+          } else if (!(prev.totalValue > 0)) {
+            compareNote = "전일 비교 불가(기준값 없음)";
+          } else {
+            changeKrw = cur.totalValue - prev.totalValue;
+            changePct = (changeKrw / prev.totalValue) * 100;
+            ownerChanges.push(...buildChangeRows(cur, prev));
+          }
+        }
       }
 
       cells.push({
@@ -125,6 +153,7 @@ export function DailyChangeCalendar({ snapshots }: Props) {
         ownerChanges,
         // prev 없이도 스냅샷이 있으면 총액을 노출
         totalValue: cur ? cur.totalValue : null,
+        compareNote,
       });
     }
 
@@ -186,13 +215,13 @@ export function DailyChangeCalendar({ snapshots }: Props) {
                     : c.changeKrw < 0
                       ? "border-blue-500/30 bg-blue-500/10"
                       : "border-border/50 bg-background";
-              const hasOwners = c.ownerChanges.length > 0;
+              const hasTooltip = c.totalValue !== null;
               return (
                 <div
                   key={c.key}
-                  className={`min-h-[72px] rounded border p-1.5 ${tone} ${c.inMonth ? "" : "opacity-40"} ${hasOwners ? "cursor-pointer" : ""}`}
+                  className={`min-h-[72px] rounded border p-1.5 ${tone} ${c.inMonth ? "" : "opacity-40"} ${hasTooltip ? "cursor-pointer" : ""}`}
                   onMouseEnter={(e) => {
-                    if (!hasOwners) return;
+                    if (!hasTooltip) return;
                     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                     const containerRect = containerRef.current?.getBoundingClientRect();
                     if (!containerRect) return;
@@ -230,7 +259,7 @@ export function DailyChangeCalendar({ snapshots }: Props) {
       )}
 
       {/* 툴팁 */}
-      {tooltip && tooltipCell && tooltipCell.ownerChanges.length > 0 && (
+      {tooltip && tooltipCell && (
         <div
           className="pointer-events-none absolute z-50 min-w-[160px] rounded-xl border bg-popover p-3 shadow-lg text-xs"
           style={{
@@ -240,27 +269,35 @@ export function DailyChangeCalendar({ snapshots }: Props) {
           }}
         >
           <p className="mb-2 font-semibold text-foreground">{tooltip.key} 변동 상세</p>
-          <div className="space-y-1">
-            {tooltipCell.ownerChanges.map((o) => (
-              <div key={o.name} className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">{o.name}</span>
-                <span className={`font-medium tabular-nums ${o.changeKrw > 0 ? "text-red-500" : o.changeKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                  {toKrw(o.changeKrw)}
-                  <span className="ml-1 text-[10px]">
-                    {o.changePct !== null
-                      ? `(${o.changeKrw > 0 ? "+" : ""}${o.changePct.toFixed(2)}%)`
-                      : "(신규/기준없음)"}
-                  </span>
+          {tooltipCell.ownerChanges.length > 0 ? (
+            <>
+              <div className="space-y-1">
+                {tooltipCell.ownerChanges.map((o) => (
+                  <div key={o.name} className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">{o.name}</span>
+                    <span className={`font-medium tabular-nums ${o.changeKrw > 0 ? "text-red-500" : o.changeKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                      {toKrw(o.changeKrw)}
+                      <span className="ml-1 text-[10px]">
+                        {o.changePct !== null
+                          ? `(${o.changeKrw > 0 ? "+" : ""}${o.changePct.toFixed(2)}%)`
+                          : "(신규/기준없음)"}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 border-t pt-2 flex justify-between font-semibold">
+                <span>합계</span>
+                <span className={tooltipCell.changeKrw! > 0 ? "text-red-500" : tooltipCell.changeKrw! < 0 ? "text-blue-500" : "text-muted-foreground"}>
+                  {toKrw(tooltipCell.changeKrw!)}
                 </span>
               </div>
-            ))}
-          </div>
-          <div className="mt-2 border-t pt-2 flex justify-between font-semibold">
-            <span>합계</span>
-            <span className={tooltipCell.changeKrw! > 0 ? "text-red-500" : tooltipCell.changeKrw! < 0 ? "text-blue-500" : "text-muted-foreground"}>
-              {toKrw(tooltipCell.changeKrw!)}
-            </span>
-          </div>
+            </>
+          ) : (
+            <p className="text-muted-foreground">
+              {tooltipCell.compareNote ?? "전일 비교 불가"}
+            </p>
+          )}
         </div>
       )}
     </div>
