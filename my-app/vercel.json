@@ -3,8 +3,11 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build",
   "crons": [
-    { "path": "/api/alert/check",             "schedule": "0 7 * * *" },
-    { "path": "/api/cron/analyze-market",     "schedule": "0 21 * * *" },
-    { "path": "/api/alert/kakao-price-move",  "schedule": "0 7 * * *" }
+    { "path": "/api/alert/check", "schedule": "0 7 * * *" },
+    { "path": "/api/cron/analyze-market", "schedule": "0 21 * * *" },
+    { "path": "/api/alert/kakao-price-move?slot=0930", "schedule": "30 0 * * *" },
+    { "path": "/api/alert/kakao-price-move?slot=1200", "schedule": "0 3 * * *" },
+    { "path": "/api/alert/kakao-price-move?slot=1540", "schedule": "40 6 * * *" },
+    { "path": "/api/alert/kakao-price-move?slot=2300", "schedule": "0 14 * * *" }
   ]
 }

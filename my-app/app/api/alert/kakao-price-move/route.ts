@@ -138,8 +138,23 @@ function formatTotalValue(value: number | null): string {
   return `$${Math.round(value).toLocaleString("en-US")}`;
 }
 
-function buildTelegramBriefing(items: AlertItem[], totalValue: number | null): string {
+/** Cron 쿼리 ?slot= 과 DB briefing_slot 값 (한국 시간 발송 시각) */
+const BRIEFING_SLOT_LABELS: Record<string, string> = {
+  "0930": "09:30 KST",
+  "1200": "12:00 KST",
+  "1540": "15:40 KST",
+  "2300": "23:00 KST",
+  legacy: "일일(레거시)",
+  manual: "수동 테스트",
+};
+
+function buildTelegramBriefing(
+  items: AlertItem[],
+  totalValue: number | null,
+  opts?: { slotLabel?: string },
+): string {
   const now = mmddKST();
+  const timePrefix = opts?.slotLabel ? `⏰ ${opts.slotLabel}\n` : "";
   const validPcts = items
     .map((i) => i.changePct)
     .filter((v): v is number => v !== null && Number.isFinite(v));
@@ -147,7 +162,8 @@ function buildTelegramBriefing(items: AlertItem[], totalValue: number | null): s
   const arrow = avgPct > 0 ? "🔺" : "📉";
 
   const summary =
-    `📊 일일 포트폴리오 브리핑 (${now})\n` +
+    timePrefix +
+    `📊 포트폴리오 브리핑 (${now})\n` +
     `💰 총 평가금액: ${formatTotalValue(totalValue)} (${avgPct >= 0 ? "+" : ""}${avgPct.toFixed(1)}% ${arrow})\n\n`;
 
   const movers = items
@@ -195,6 +211,9 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const briefingSlot = req.nextUrl.searchParams.get("slot") ?? "legacy";
+  const slotLabel = BRIEFING_SLOT_LABELS[briefingSlot] ?? briefingSlot;
+
   const admin = createSupabaseAdmin();
   if (!admin) return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
 
@@ -210,12 +229,21 @@ export async function GET(req: NextRequest) {
   const sentSet = new Set<string>();
   const { data: logs } = await admin
     .from("price_move_alert_logs")
-    .select("sync_key,symbol,date")
-    .eq("date", dateKst);
-  for (const l of logs ?? []) sentSet.add(`${l.sync_key}:${l.symbol}:${l.date}`);
+    .select("sync_key,symbol,date,briefing_slot")
+    .eq("date", dateKst)
+    .eq("briefing_slot", briefingSlot);
+  for (const l of logs ?? []) {
+    sentSet.add(`${l.sync_key}:${l.symbol}:${l.date}:${l.briefing_slot}`);
+  }
 
   const items: AlertItem[] = [];
-  const logRows: Array<{ sync_key: string; symbol: string; date: string; change_pct: number }> = [];
+  const logRows: Array<{
+    sync_key: string;
+    symbol: string;
+    date: string;
+    change_pct: number;
+    briefing_slot: string;
+  }> = [];
   let totalValue = 0;
   let hasTotalValue = false;
 
@@ -248,7 +276,7 @@ export async function GET(req: NextRequest) {
     }
 
     for (const [symbol, info] of symbolMap) {
-      const dedupeKey = `${syncKey}:${symbol}:${dateKst}`;
+      const dedupeKey = `${syncKey}:${symbol}:${dateKst}:${briefingSlot}`;
       if (sentSet.has(dedupeKey)) continue;
 
       const q = await fetchQuoteForSymbol(symbol);
@@ -265,23 +293,36 @@ export async function GET(req: NextRequest) {
         price: q.price,
         changePct: pct,
       });
-      logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct ?? 0 });
+      logRows.push({
+        sync_key: syncKey,
+        symbol,
+        date: dateKst,
+        change_pct: pct ?? 0,
+        briefing_slot: briefingSlot,
+      });
     }
   }
 
   if (items.length === 0) {
-    return NextResponse.json({ ok: true, message: "발송할 종목 없음", count: 0 });
+    return NextResponse.json({
+      ok: true,
+      message: "발송할 종목 없음",
+      count: 0,
+      briefing_slot: briefingSlot,
+    });
   }
 
-  const text = buildTelegramBriefing(items, hasTotalValue ? totalValue : null);
+  const text = buildTelegramBriefing(items, hasTotalValue ? totalValue : null, { slotLabel });
   const send = await sendTelegramMessage(text);
   if (!send.ok) return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
 
   if (logRows.length > 0) {
-    await admin.from("price_move_alert_logs").upsert(logRows, { onConflict: "sync_key,symbol,date" });
+    await admin.from("price_move_alert_logs").upsert(logRows, {
+      onConflict: "sync_key,symbol,date,briefing_slot",
+    });
   }
 
-  return NextResponse.json({ ok: true, sent: items.length });
+  return NextResponse.json({ ok: true, sent: items.length, briefing_slot: briefingSlot });
 }
 
 /**
@@ -342,16 +383,24 @@ export async function POST(req: NextRequest) {
   }
 
   const dateKst = todayKST();
+  const manualSlot = "manual";
   const results: Array<{ symbol: string; name: string; price: number | null; previousClose: number | null; changePct: number | null; willAlert: boolean; sector: string }> = [];
   const items: AlertItem[] = [];
-  const logRows: Array<{ sync_key: string; symbol: string; date: string; change_pct: number }> = [];
+  const logRows: Array<{
+    sync_key: string;
+    symbol: string;
+    date: string;
+    change_pct: number;
+    briefing_slot: string;
+  }> = [];
 
-  // 오늘 이미 발송된 종목 확인
+  // 오늘 수동 발송으로 이미 기록된 종목 확인 (Cron 슬롯과 별개)
   const { data: logs } = await admin
     .from("price_move_alert_logs")
     .select("symbol")
     .eq("sync_key", syncKey)
-    .eq("date", dateKst);
+    .eq("date", dateKst)
+    .eq("briefing_slot", manualSlot);
   const alreadySent = new Set((logs ?? []).map((l) => l.symbol));
 
   for (const [symbol, info] of symbolMap) {
@@ -370,7 +419,13 @@ export async function POST(req: NextRequest) {
         price: q.price,
         changePct: pct,
       });
-      logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct ?? 0 });
+      logRows.push({
+        sync_key: syncKey,
+        symbol,
+        date: dateKst,
+        change_pct: pct ?? 0,
+        briefing_slot: manualSlot,
+      });
     }
   }
 
@@ -404,11 +459,13 @@ export async function POST(req: NextRequest) {
     totalValue = Number.isFinite(n) ? n : null;
   }
 
-  const text = buildTelegramBriefing(items, totalValue);
+  const text = buildTelegramBriefing(items, totalValue, { slotLabel: BRIEFING_SLOT_LABELS.manual });
   const send = await sendTelegramMessage(text);
   if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
 
-  await admin.from("price_move_alert_logs").upsert(logRows, { onConflict: "sync_key,symbol,date" });
+  await admin.from("price_move_alert_logs").upsert(logRows, {
+    onConflict: "sync_key,symbol,date,briefing_slot",
+  });
   return NextResponse.json({ ok: true, dry_run: false, sent: items.length, items });
 }
 

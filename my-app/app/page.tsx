@@ -2888,9 +2888,13 @@ export default function Home() {
           <section className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">📲 텔레그램 가격 변동 알림</h2>
             <p className="mb-3 text-xs text-muted-foreground">
-              보유 전 종목의 당일 시세 현황을 <b>매일 오후 4시(KST)</b>에 텔레그램으로 발송합니다.
-              작동하려면 Vercel 환경변수에 <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
-              <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code>가 설정되어 있어야 합니다.
+              보유 전 종목의 전일 대비 등락률(%) 브리핑을 <b>한국시간 매일 09:30, 12:00, 15:40, 23:00</b>에
+              Vercel Cron으로 자동 발송합니다. (배포 후 Supabase에{" "}
+              <code className="rounded bg-muted px-1">price_move_alert_logs_briefing_slot.sql</code>{" "}
+              마이그레이션 필요) 작동하려면 Vercel 환경변수에{" "}
+              <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
+              <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code>,{" "}
+              <code className="rounded bg-muted px-1">CRON_SECRET</code>(Cron 인증)이 설정되어 있어야 합니다.
             </p>
             <div className="flex flex-wrap gap-2">
               <button
