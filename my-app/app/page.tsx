@@ -1084,7 +1084,13 @@ export default function Home() {
           void fetch("/api/snapshot", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sync_key: key, date: today, ownerValues, totalValue }),
+            body: JSON.stringify({
+              sync_key: key,
+              date: today,
+              ownerValues,
+              breakdownValues,
+              totalValue,
+            }),
           }).then((r) => {
             if (r.ok) {
               window.localStorage.setItem(SNAPSHOT_PUSHED_DATE_KEY, today);

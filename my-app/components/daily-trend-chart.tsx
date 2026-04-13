@@ -39,7 +39,9 @@ function buildDiffTooltipText(current: DailySnapshot, prev: DailySnapshot, owner
   const prevBreakdown = prev.breakdownValues;
   const hasBreakdown = Boolean(currentBreakdown && prevBreakdown);
 
-  if (!hasBreakdown) return null;
+  if (!hasBreakdown) {
+    return "이 날짜는 자산별 상세 내역이 아직 저장되지 않았습니다.";
+  }
 
   const rows: Array<{ label: string; diff: number }> = [];
   const cur = currentBreakdown ?? {};

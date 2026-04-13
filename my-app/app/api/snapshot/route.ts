@@ -4,12 +4,14 @@ import { fetchPrices } from "@/lib/market-prices";
 
 type Position = {
   symbol: string;
+  chartGroup?: string;
   quantity: number;
   currentPrice: number;
   currency: "USD" | "EUR" | "KRW";
   owner: string;
 };
 type CashEntry = { usd: number; krw: number };
+type BreakdownValues = Record<string, number>;
 
 const FALLBACK_USD_KRW = 1400;
 const FALLBACK_EUR_KRW = 1500;
@@ -18,7 +20,7 @@ const FALLBACK_EUR_KRW = 1500;
 async function calcOwnerValues(
   positions: Position[],
   cashByOwner: Record<string, CashEntry>,
-): Promise<{ ownerValues: Record<string, number>; totalValue: number; usdKrw: number }> {
+): Promise<{ ownerValues: Record<string, number>; breakdownValues: BreakdownValues; totalValue: number; usdKrw: number }> {
   const symbols = [...new Set(positions.map((p) => p.symbol))];
   const { quotes, usdKrw: fetchedUsd, eurKrw: fetchedEur } = await fetchPrices(symbols);
 
@@ -26,6 +28,7 @@ async function calcOwnerValues(
   const eurKrw = fetchedEur ?? FALLBACK_EUR_KRW;
 
   const ownerValues: Record<string, number> = {};
+  const breakdownValues: BreakdownValues = {};
   const owners = [...new Set(positions.map((p) => p.owner))];
 
   for (const owner of owners) {
@@ -40,13 +43,32 @@ async function calcOwnerValues(
       if (p.currency === "EUR") return sum + p.quantity * price * eurKrw;
       return sum + p.quantity * price;
     }, 0);
+    const grouped = new Map<string, number>();
+    for (const p of ownerPos) {
+      const quote = quotes[p.symbol];
+      const price = quote?.price ?? p.currentPrice;
+      const krw =
+        p.currency === "USD"
+          ? p.quantity * price * usdKrw
+          : p.currency === "EUR"
+            ? p.quantity * price * eurKrw
+            : p.quantity * price;
+      const label = p.chartGroup?.trim() || p.symbol;
+      grouped.set(label, (grouped.get(label) ?? 0) + krw);
+    }
+    for (const [label, value] of grouped) {
+      breakdownValues[`${owner} · ${label}`] = value;
+    }
 
     const cashKrw = cash.krw + (cash.usd ?? 0) * usdKrw;
+    if (cashKrw > 0) {
+      breakdownValues[`${owner} · 현금`] = cashKrw;
+    }
     ownerValues[owner] = stockValue + cashKrw;
   }
 
   const totalValue = Object.values(ownerValues).reduce((s, v) => s + v, 0);
-  return { ownerValues, totalValue, usdKrw };
+  return { ownerValues, breakdownValues, totalValue, usdKrw };
 }
 
 function todayKST(): string {
@@ -74,12 +96,30 @@ export async function GET(req: NextRequest) {
   cutoff.setDate(cutoff.getDate() - days);
   const cutoffDate = cutoff.toISOString().slice(0, 10);
 
-  const { data, error } = await admin
+  // breakdown_values 컬럼이 없는 구버전 DB를 위해 1차/2차 조회를 분리합니다.
+  let data: Array<Record<string, unknown>> | null = null;
+  let error: { message: string } | null = null;
+
+  const withBreakdown = await admin
     .from("portfolio_daily_snapshots")
-    .select("date, owner_values, total_value, usd_krw")
+    .select("date, owner_values, breakdown_values, total_value, usd_krw")
     .eq("sync_key", syncKey)
     .gte("date", cutoffDate)
     .order("date", { ascending: true });
+
+  if (withBreakdown.error) {
+    const fallback = await admin
+      .from("portfolio_daily_snapshots")
+      .select("date, owner_values, total_value, usd_krw")
+      .eq("sync_key", syncKey)
+      .gte("date", cutoffDate)
+      .order("date", { ascending: true });
+    data = (fallback.data as Array<Record<string, unknown>> | null) ?? null;
+    error = fallback.error ? { message: fallback.error.message } : null;
+  } else {
+    data = (withBreakdown.data as Array<Record<string, unknown>> | null) ?? null;
+    error = null;
+  }
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -88,6 +128,7 @@ export async function GET(req: NextRequest) {
   const snapshots = (data ?? []).map((row) => ({
     date: String(row.date),
     ownerValues: (row.owner_values as Record<string, number>) ?? {},
+    breakdownValues: (row.breakdown_values as BreakdownValues | undefined) ?? undefined,
     totalValue: Number(row.total_value ?? 0),
     usdKrw: Number(row.usd_krw ?? 0),
   }));
@@ -119,6 +160,7 @@ export async function POST(req: NextRequest) {
     sync_key?: unknown;
     date?: unknown;
     ownerValues?: unknown;
+    breakdownValues?: unknown;
     totalValue?: unknown;
   };
 
@@ -139,23 +181,49 @@ export async function POST(req: NextRequest) {
     b.ownerValues && typeof b.ownerValues === "object" && !Array.isArray(b.ownerValues)
       ? (b.ownerValues as Record<string, number>)
       : null;
+  const clientBreakdownValues =
+    b.breakdownValues && typeof b.breakdownValues === "object" && !Array.isArray(b.breakdownValues)
+      ? (b.breakdownValues as BreakdownValues)
+      : null;
   const clientTotalValue =
     typeof b.totalValue === "number" && Number.isFinite(b.totalValue) ? b.totalValue : null;
 
   if (clientDate && clientOwnerValues && clientTotalValue !== null) {
-    const { error: upsertError } = await admin
+    const upsertPayload: Record<string, unknown> = {
+      sync_key: syncKey,
+      date: clientDate,
+      owner_values: clientOwnerValues,
+      total_value: clientTotalValue,
+    };
+    if (clientBreakdownValues) {
+      upsertPayload.breakdown_values = clientBreakdownValues;
+    }
+
+    let upsertError: { message: string } | null = null;
+    const upsertWithBreakdown = await admin
       .from("portfolio_daily_snapshots")
-      .upsert({
-        sync_key: syncKey,
-        date: clientDate,
-        owner_values: clientOwnerValues,
-        total_value: clientTotalValue,
-      });
+      .upsert(upsertPayload);
+
+    if (upsertWithBreakdown.error && clientBreakdownValues) {
+      const { breakdown_values: _ignored, ...fallbackPayload } = upsertPayload;
+      const fallbackUpsert = await admin.from("portfolio_daily_snapshots").upsert(fallbackPayload);
+      upsertError = fallbackUpsert.error ? { message: fallbackUpsert.error.message } : null;
+    } else {
+      upsertError = upsertWithBreakdown.error
+        ? { message: upsertWithBreakdown.error.message }
+        : null;
+    }
 
     if (upsertError) {
       return NextResponse.json({ error: upsertError.message }, { status: 500 });
     }
-    return NextResponse.json({ ok: true, date: clientDate, ownerValues: clientOwnerValues, totalValue: clientTotalValue });
+    return NextResponse.json({
+      ok: true,
+      date: clientDate,
+      ownerValues: clientOwnerValues,
+      breakdownValues: clientBreakdownValues ?? undefined,
+      totalValue: clientTotalValue,
+    });
   }
 
   // ── 모드 2: 서버에서 포지션 조회 후 시세 재계산 ─────────────────────────
@@ -171,18 +239,37 @@ export async function POST(req: NextRequest) {
 
   const positions = Array.isArray(snap.positions) ? (snap.positions as Position[]) : [];
   const cashByOwner = ((snap.cash_by_owner as Record<string, CashEntry>) ?? {});
-  const { ownerValues, totalValue, usdKrw } = await calcOwnerValues(positions, cashByOwner);
+  const { ownerValues, breakdownValues, totalValue, usdKrw } = await calcOwnerValues(positions, cashByOwner);
 
   const today = todayKST();
-  const { error: upsertError } = await admin
-    .from("portfolio_daily_snapshots")
-    .upsert({ sync_key: syncKey, date: today, owner_values: ownerValues, total_value: totalValue, usd_krw: usdKrw });
+  const upsertPayload: Record<string, unknown> = {
+    sync_key: syncKey,
+    date: today,
+    owner_values: ownerValues,
+    breakdown_values: breakdownValues,
+    total_value: totalValue,
+    usd_krw: usdKrw,
+  };
+  const withBreakdown = await admin.from("portfolio_daily_snapshots").upsert(upsertPayload);
+  const upsertError = withBreakdown.error
+    ? (
+      await admin
+        .from("portfolio_daily_snapshots")
+        .upsert({
+          sync_key: syncKey,
+          date: today,
+          owner_values: ownerValues,
+          total_value: totalValue,
+          usd_krw: usdKrw,
+        })
+    ).error
+    : null;
 
   if (upsertError) {
     return NextResponse.json({ error: upsertError.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, date: today, ownerValues, totalValue });
+  return NextResponse.json({ ok: true, date: today, ownerValues, breakdownValues, totalValue });
 }
 
 /**
@@ -206,15 +293,24 @@ export async function saveAllSnapshots(): Promise<void> {
       try {
         const positions = Array.isArray(snap.positions) ? (snap.positions as Position[]) : [];
         const cashByOwner = ((snap.cash_by_owner as Record<string, CashEntry>) ?? {});
-        const { ownerValues, totalValue, usdKrw } = await calcOwnerValues(positions, cashByOwner);
-
-        await admin.from("portfolio_daily_snapshots").upsert({
+        const { ownerValues, breakdownValues, totalValue, usdKrw } = await calcOwnerValues(positions, cashByOwner);
+        const withBreakdown = await admin.from("portfolio_daily_snapshots").upsert({
           sync_key: snap.sync_key,
           date: today,
           owner_values: ownerValues,
+          breakdown_values: breakdownValues,
           total_value: totalValue,
           usd_krw: usdKrw,
         });
+        if (withBreakdown.error) {
+          await admin.from("portfolio_daily_snapshots").upsert({
+            sync_key: snap.sync_key,
+            date: today,
+            owner_values: ownerValues,
+            total_value: totalValue,
+            usd_krw: usdKrw,
+          });
+        }
       } catch {
         // 개별 실패는 전체 크론을 막지 않음
       }
