@@ -1057,7 +1057,6 @@ export default function Home() {
         changeKrw: g.dailyChangeKrw,
         changePct: g.dailyChangePct,
       })))
-      .filter((x) => x.changeKrw !== 0)
       .sort((a, b) => Math.abs(b.changeKrw) - Math.abs(a.changeKrw));
 
     const totalChangeKrw = ownerGroupDailySummary.reduce((sum, owner) => sum + owner.totalDailyKrw, 0);

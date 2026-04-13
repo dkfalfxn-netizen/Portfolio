@@ -97,7 +97,6 @@ function buildLiveTooltipData(owner: string, live: LiveChange): DiffTooltipData 
       label: owner === "전체" ? row.name : row.name.replace(`${owner} · `, ""),
       diff: row.changeKrw,
     }))
-    .filter((row) => row.diff !== 0)
     .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
   if (rows.length === 0) return null;
   const lines = rows.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
