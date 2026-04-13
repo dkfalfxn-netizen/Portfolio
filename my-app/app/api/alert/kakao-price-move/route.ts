@@ -3,7 +3,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchPrices } from "@/lib/market-prices";
 import {
   buildTelegramBriefingHtml,
-  collectSignalHits,
+  collectHoldTransitions,
   computeLivePortfolioKrw,
   type BriefingItem,
 } from "@/lib/briefing-message";
@@ -340,13 +340,13 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const signalHits = await collectSignalHits(toBriefingItems(items));
+  const holdTransitions = await collectHoldTransitions(toBriefingItems(items));
   const text = buildTelegramBriefingHtml({
     slotLabel,
     dateLabel: mmddKST(),
     portfolioChangeVsYesterdayPct,
     items: toBriefingItems(items),
-    signalHits,
+    holdTransitions,
   });
   const send = await sendTelegramMessage(text);
   if (!send.ok) return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
@@ -507,13 +507,13 @@ export async function POST(req: NextRequest) {
   const portfolioChangeVsYesterdayPct =
     yVal !== null && yVal > 0 ? ((todayLiveKrw - yVal) / yVal) * 100 : null;
 
-  const signalHits = await collectSignalHits(toBriefingItems(items));
+  const holdTransitions = await collectHoldTransitions(toBriefingItems(items));
   const text = buildTelegramBriefingHtml({
     slotLabel: BRIEFING_SLOT_LABELS.manual,
     dateLabel: mmddKST(),
     portfolioChangeVsYesterdayPct,
     items: toBriefingItems(items),
-    signalHits,
+    holdTransitions,
   });
   const send = await sendTelegramMessage(text);
   if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });

@@ -1,5 +1,11 @@
-import type { DailyPrice } from "@/lib/signals";
-import { calculateMACrossoverSignal, calculateRSISignal } from "@/lib/signals";
+import type { DailyPrice, TradeSignal } from "@/lib/signals";
+import {
+  buildSignalAnalysis,
+  calculateBollingerSignal,
+  calculateMACrossoverSignal,
+  calculateRSISignal,
+  calculateVolumeSignal,
+} from "@/lib/signals";
 import type { PricesResult } from "@/lib/market-prices";
 
 export type BriefingItem = {
@@ -10,11 +16,18 @@ export type BriefingItem = {
   changePct: number | null;
 };
 
-export type SignalHit = {
+/** 지표 한 줄 (MA/RSI/BB/VOL) — HOLD→BUY|SELL 전환 시에만 */
+export type HoldTransitionRow = {
+  key: "MA" | "RSI" | "BB" | "VOL";
+  to: "BUY" | "SELL";
+  /** 앱 `buildSignalAnalysis`와 동일한 요약 근거 */
+  summary: string;
+};
+
+export type HoldTransitionSymbol = {
   symbol: string;
   name: string;
-  rsi: "BUY" | "SELL" | "HOLD";
-  ma: "BUY" | "SELL" | "HOLD";
+  rows: HoldTransitionRow[];
 };
 
 type DbPos = {
@@ -193,9 +206,10 @@ export function buildTelegramBriefingHtml(opts: {
   /** 전일 DB 스냅 합계 대비 포트폴리오 수익률(%) — 없으면 null */
   portfolioChangeVsYesterdayPct: number | null;
   items: BriefingItem[];
-  signalHits: SignalHit[];
+  /** 전일 일봉까지만 보면 HOLD였다가, 최신 일봉 반영 후 BUY/SELL로 바뀐 지표만 */
+  holdTransitions: HoldTransitionSymbol[];
 }): string {
-  const { slotLabel, dateLabel, portfolioChangeVsYesterdayPct, items, signalHits } = opts;
+  const { slotLabel, dateLabel, portfolioChangeVsYesterdayPct, items, holdTransitions } = opts;
 
   const timeLine = slotLabel ? `⏰ ${escapeHtml(slotLabel)}\n` : "";
   const cronHint =
@@ -250,24 +264,26 @@ export function buildTelegramBriefingHtml(opts: {
         : "";
   }
 
-  const activeSignals = signalHits.filter(
-    (s) => s.rsi === "BUY" || s.rsi === "SELL" || s.ma === "BUY" || s.ma === "SELL",
-  );
-  let signalBlock = "";
-  if (activeSignals.length > 0) {
-    const lines = activeSignals.map((s) => {
-      const bits: string[] = [];
-      if (s.rsi === "BUY" || s.rsi === "SELL") bits.push(`RSI:${s.rsi}`);
-      if (s.ma === "BUY" || s.ma === "SELL") bits.push(`이평20/60:${s.ma}`);
-      return `· ${escapeHtml(s.name)} (${escapeHtml(s.symbol)}): ${bits.join(" · ")}`;
-    });
-    signalBlock =
-      `\n<b>🛰️ 기술적 시그널 (포착)</b>\n` +
-      `<i>RSI·이평 교차 — 앱과 동일 규칙</i>\n` +
-      lines.join("\n");
+  let holdBlock = "";
+  if (holdTransitions.length > 0) {
+    const lines: string[] = [
+      `<b>🔄 HOLD에서 전환된 지표</b>`,
+      `<i>전일까지 일봉만 반영 시 HOLD → 최신 일봉 포함 시 BUY/SELL (앱과 동일 MA·RSI·BB·VOL)</i>`,
+    ];
+    for (const h of holdTransitions) {
+      lines.push(
+        `· <b>${escapeHtml(h.name)}</b> (<code>${escapeHtml(h.symbol)}</code>)`,
+      );
+      for (const r of h.rows) {
+        lines.push(
+          `  ${escapeHtml(r.key)}→<b>${r.to}</b>: ${escapeHtml(r.summary)}`,
+        );
+      }
+    }
+    holdBlock = `\n\n${lines.join("\n")}`;
   }
 
-  return `${header}<b>보유 종목</b>\n${preBlock}${restSummary}${signalBlock}`.trim();
+  return `${header}<b>보유 종목</b>\n${preBlock}${restSummary}${holdBlock}`.trim();
 }
 
 /** Yahoo 6개월 일봉 — 시그널용 */
@@ -323,17 +339,79 @@ function parseYahooSeries(data: unknown): DailyPrice[] {
   return out;
 }
 
-export async function collectSignalHits(items: BriefingItem[]): Promise<SignalHit[]> {
-  const hits: SignalHit[] = [];
+const MIN_BARS_FOR_TRANSITION = 63;
+
+type QuadKey = "ma" | "rsi" | "bb" | "vol";
+
+const IND_ORDER: QuadKey[] = ["ma", "rsi", "bb", "vol"];
+
+const IND_LABEL: Record<QuadKey, HoldTransitionRow["key"]> = {
+  ma: "MA",
+  rsi: "RSI",
+  bb: "BB",
+  vol: "VOL",
+};
+
+function signalsQuad(prices: DailyPrice[]): Record<QuadKey, TradeSignal> {
+  return {
+    ma: calculateMACrossoverSignal(prices),
+    rsi: calculateRSISignal(prices),
+    bb: calculateBollingerSignal(prices),
+    vol: calculateVolumeSignal(prices),
+  };
+}
+
+/**
+ * 전일 일봉까지만 쓴 시뮬레이션에서는 네 지표가 HOLD였는데,
+ * 최신 일봉을 포함하면 BUY/SELL로 바뀐 경우만 모읍니다. (앱 로직과 동일)
+ */
+export async function collectHoldTransitions(
+  items: BriefingItem[],
+): Promise<HoldTransitionSymbol[]> {
   const unique = [...new Map(items.map((i) => [i.symbol, i])).values()];
+  const out: HoldTransitionSymbol[] = [];
+
   await Promise.all(
     unique.map(async (item) => {
       const hist = await fetchDailyHistoryForSignal(item.symbol);
-      if (hist.length < 61) return;
-      const rsi = calculateRSISignal(hist);
-      const ma = calculateMACrossoverSignal(hist);
-      hits.push({ symbol: item.symbol, name: item.name, rsi, ma });
+      if (hist.length < MIN_BARS_FOR_TRANSITION) return;
+
+      const prevHist = hist.slice(0, -1);
+      const was = signalsQuad(prevHist);
+      const cur = signalsQuad(hist);
+
+      const keys: QuadKey[] = [];
+      for (const k of IND_ORDER) {
+        if (was[k] === "HOLD" && (cur[k] === "BUY" || cur[k] === "SELL")) {
+          keys.push(k);
+        }
+      }
+      if (keys.length === 0) return;
+
+      const analysis = buildSignalAnalysis(hist);
+      if (!analysis) return;
+
+      const explain = {
+        ma: analysis.maExplain,
+        rsi: analysis.rsiExplain,
+        bb: analysis.bbExplain,
+        vol: analysis.volExplain,
+      };
+
+      const rows: HoldTransitionRow[] = keys.map((k) => ({
+        key: IND_LABEL[k],
+        to: cur[k] as "BUY" | "SELL",
+        summary: explain[k].summary,
+      }));
+
+      out.push({
+        symbol: item.symbol,
+        name: item.name,
+        rows,
+      });
     }),
   );
-  return hits;
+
+  out.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  return out;
 }
