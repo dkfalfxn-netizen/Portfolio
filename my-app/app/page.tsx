@@ -112,6 +112,14 @@ export type DailySnapshot = {
   totalValue: number;
 };
 
+type DailyLiveChange = {
+  date: string;
+  changeKrw: number;
+  changePct: number | null;
+  ownerChanges: Array<{ name: string; changeKrw: number; changePct: number | null }>;
+  compareNote?: string;
+};
+
 function loadDailySnapshots(): DailySnapshot[] {
   if (typeof window === "undefined") return [];
   try {
@@ -1041,6 +1049,42 @@ export default function Home() {
     });
   }, [positionsByOwner, usdKrw, eurKrw]);
 
+  const dailyLiveChangeByDate = useMemo<Record<string, DailyLiveChange>>(() => {
+    const date = todayKST();
+    const ownerChanges = ownerGroupDailySummary
+      .flatMap((owner) => owner.groups.map((g) => ({
+        name: `${owner.ownerName} · ${g.label}`,
+        changeKrw: g.dailyChangeKrw,
+        changePct: g.dailyChangePct,
+      })))
+      .filter((x) => x.changeKrw !== 0)
+      .sort((a, b) => Math.abs(b.changeKrw) - Math.abs(a.changeKrw));
+
+    const totalChangeKrw = ownerGroupDailySummary.reduce((sum, owner) => sum + owner.totalDailyKrw, 0);
+    const prevTotalKrw = positionsByOwner.reduce((sum, group) => {
+      const prevStock = group.items.reduce((s, p) => {
+        if (p.previousClose === null) return s;
+        const v =
+          p.currency === "USD" ? p.previousClose * p.quantity * usdKrw
+          : p.currency === "EUR" ? p.previousClose * p.quantity * eurKrw
+          : p.previousClose * p.quantity;
+        return s + v;
+      }, 0);
+      return sum + prevStock + group.sectionCashKrw;
+    }, 0);
+    const totalChangePct = prevTotalKrw > 0 ? (totalChangeKrw / prevTotalKrw) * 100 : null;
+
+    return {
+      [date]: {
+        date,
+        changeKrw: totalChangeKrw,
+        changePct: totalChangePct,
+        ownerChanges,
+        compareNote: "실시간 전일종가 기준",
+      },
+    };
+  }, [ownerGroupDailySummary, positionsByOwner, usdKrw, eurKrw]);
+
   // 시세 로드 완료 후 오늘 스냅샷 자동 저장 (하루 1회 로컬 + 서버)
   useEffect(() => {
     if (!isHydrated) return;
@@ -1926,7 +1970,7 @@ export default function Home() {
             </p>
             <DailyTrendChart snapshots={dailySnapshots} ownerNames={OWNER_NAMES} />
           </section>
-          <DailyChangeCalendar snapshots={dailySnapshots} />
+          <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
 
           {/* 리밸런싱 계산기 */}
           <section id="section-rebalance" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">

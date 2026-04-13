@@ -3,8 +3,17 @@
 import { useMemo, useRef, useState } from "react";
 import type { DailySnapshot } from "@/app/page";
 
+type LiveChange = {
+  date: string;
+  changeKrw: number;
+  changePct: number | null;
+  ownerChanges: OwnerChange[];
+  compareNote?: string;
+};
+
 type Props = {
   snapshots: DailySnapshot[];
+  liveChangeByDate?: Record<string, LiveChange>;
 };
 
 type OwnerChange = {
@@ -80,7 +89,7 @@ function buildChangeRows(cur: DailySnapshot, prev: DailySnapshot): OwnerChange[]
   return rows;
 }
 
-export function DailyChangeCalendar({ snapshots }: Props) {
+export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -143,6 +152,13 @@ export function DailyChangeCalendar({ snapshots }: Props) {
           }
         }
       }
+      const live = liveChangeByDate?.[key];
+      if (live) {
+        changeKrw = live.changeKrw;
+        changePct = live.changePct;
+        ownerChanges.splice(0, ownerChanges.length, ...live.ownerChanges);
+        compareNote = live.compareNote ?? null;
+      }
 
       cells.push({
         date: d,
@@ -158,7 +174,7 @@ export function DailyChangeCalendar({ snapshots }: Props) {
     }
 
     return { first, daysInMonth, cells };
-  }, [cursor, byDate, prevSnapshotByDate]);
+  }, [cursor, byDate, prevSnapshotByDate, liveChangeByDate]);
 
   const tooltipCell = tooltip ? items.cells.find((c) => c.key === tooltip.key) : null;
 
