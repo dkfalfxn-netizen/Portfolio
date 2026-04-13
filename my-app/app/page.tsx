@@ -24,6 +24,7 @@ import {
   type DailyPrice as SignalDailyPrice,
   type TradeSignal,
 } from "@/lib/signals";
+import { shouldShowDailyChangeVsPreviousClose } from "@/lib/trading-calendar";
 import {
   Card,
   CardContent,
@@ -849,8 +850,13 @@ export default function Home() {
     return positions.map((position) => {
       const q = marketQuery.data?.quotes?.[position.symbol];
       const livePrice = q?.price;
-      const previousClose =
+      const rawPreviousClose =
         typeof q?.previousClose === "number" && q.previousClose > 0 ? q.previousClose : null;
+      /** 김승주: 미국장 영업일에만, 그 외: 한국장 영업일에만 전일 대비 등락 표시 */
+      const previousClose =
+        rawPreviousClose !== null && shouldShowDailyChangeVsPreviousClose(position.owner)
+          ? rawPreviousClose
+          : null;
       const currentPrice = livePrice ?? position.currentPrice;
       const pnl = ((currentPrice - position.avgPrice) / position.avgPrice) * 100;
       /** 매입 시 환율 없으면 현재 환율로 원가 추정(기존 데이터 호환) */
