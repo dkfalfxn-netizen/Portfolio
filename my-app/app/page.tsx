@@ -16,6 +16,7 @@ import { LivePriceCell } from "@/components/live-price-cell";
 import { DailyTrendChart } from "@/components/daily-trend-chart";
 import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
+import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
@@ -706,6 +707,9 @@ export default function Home() {
   const [editAvgPrice, setEditAvgPrice] = useState("");
   const [editPurchaseUsdKrw, setEditPurchaseUsdKrw] = useState("");
   const [editPurchaseEurKrw, setEditPurchaseEurKrw] = useState("");
+  const [signalDetailTarget, setSignalDetailTarget] = useState<{ symbol: string; name: string } | null>(
+    null,
+  );
 
   const [cloudSyncKey, setCloudSyncKey] = useState("");
   const [syncKeyDraft, setSyncKeyDraft] = useState("");
@@ -2305,6 +2309,15 @@ export default function Home() {
                                         MA:{s.ma} RSI:{s.rsi} BB:{s.bb} VOL:{s.vol}
                                       </p>
                                     ) : null}
+                                    <button
+                                      type="button"
+                                      className="mt-1 block w-full text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                                      onClick={() =>
+                                        setSignalDetailTarget({ symbol: position.symbol, name: position.name })
+                                      }
+                                    >
+                                      차트·근거 보기
+                                    </button>
                                   </div>
                                 );
                               })()
@@ -3149,6 +3162,18 @@ export default function Home() {
 
         </main>
       </div>
+
+      <TechnicalSignalDetailModal
+        open={signalDetailTarget !== null}
+        onClose={() => setSignalDetailTarget(null)}
+        symbol={signalDetailTarget?.symbol ?? ""}
+        name={signalDetailTarget?.name ?? ""}
+        prices={
+          signalDetailTarget
+            ? (historyQuery.data?.history?.[signalDetailTarget.symbol] ?? [])
+            : []
+        }
+      />
     </div>
   );
 }
