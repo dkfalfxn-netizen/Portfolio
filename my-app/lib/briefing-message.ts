@@ -61,7 +61,6 @@ function fmtKrw(n: number): string {
 
 function fmtPriceCell(item: BriefingItem): string {
   if (item.price === null || !Number.isFinite(item.price)) return "—";
-  // 해외는 USD 표기, 국내·그 외는 원화로 표시(브리핑에서 통일하기 어려워 심볼로 추정)
   const sym = item.symbol.trim();
   const isSixKr = /^[0-9][0-9A-Z]{5}$/i.test(sym);
   if (isSixKr || sym.startsWith("KRX:") || sym.startsWith("KQ:") || /^M\d{8}$/i.test(sym)) {
@@ -70,84 +69,162 @@ function fmtPriceCell(item: BriefingItem): string {
   return `$${item.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function fmtPct(p: number | null): string {
-  if (p === null || !Number.isFinite(p)) return "   —  ";
-  const s = `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
-  return s.padStart(8, " ");
+/** 터미널/고정폭 정렬용: 한글·전각 등은 폭 2, 영문·숫자·기호는 폭 1로 계산 */
+function codePointDisplayWidth(cp: number): number {
+  if (cp >= 0x1100 && cp <= 0x115f) return 2;
+  if (cp >= 0x2e80 && cp <= 0x9fff) return 2;
+  if (cp >= 0xac00 && cp <= 0xd7a3) return 2;
+  if (cp >= 0xff00 && cp <= 0xffef) return 2;
+  if (cp >= 0x3000 && cp <= 0x303f) return 2;
+  return 1;
 }
 
-/** 고정폭: 종목명(최대 w), 가격, 전일대비% */
-function buildAlignedTable(rows: BriefingItem[], nameWidth: number): string {
-  const lines: string[] = [];
-  const hdr = `${"종목명".padEnd(nameWidth, " ")}  ${"가격".padStart(14, " ")}  전일대비`;
-  lines.push(hdr);
-  lines.push("-".repeat(Math.min(48, hdr.length + 10)));
+function stringDisplayWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) {
+    const cp = ch.codePointAt(0)!;
+    if (cp >= 0x10000) {
+      w += 2;
+      continue;
+    }
+    w += codePointDisplayWidth(cp);
+  }
+  return w;
+}
+
+function truncateDisplay(str: string, maxW: number): string {
+  let out = "";
+  for (const ch of str) {
+    const next = out + ch;
+    if (stringDisplayWidth(next) > maxW) break;
+    out = next;
+  }
+  if (out === str) return out;
+  let ell = `${out}…`;
+  while (stringDisplayWidth(ell) > maxW && out.length > 0) {
+    out = out.slice(0, -1);
+    ell = `${out}…`;
+  }
+  return ell;
+}
+
+function padDisplayEnd(str: string, target: number): string {
+  if (stringDisplayWidth(str) > target) return truncateDisplay(str, target);
+  let out = str;
+  while (stringDisplayWidth(out) < target) out += " ";
+  return out;
+}
+
+function padDisplayStart(str: string, target: number): string {
+  if (stringDisplayWidth(str) > target) return truncateDisplay(str, target);
+  let out = str;
+  while (stringDisplayWidth(out) < target) out = ` ${out}`;
+  return out;
+}
+
+function fmtPctPlain(p: number | null): string {
+  if (p === null || !Number.isFinite(p)) return "—";
+  return `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
+}
+
+/** +3%↑ 🚀, +2%↑ 📈, 음봉 📉 (2~3% 구간은 📈) */
+function rowTrendEmoji(changePct: number | null): string {
+  if (changePct === null || !Number.isFinite(changePct)) return "";
+  if (changePct >= 3) return "🚀";
+  if (changePct >= 2) return "📈";
+  if (changePct < 0) return "📉";
+  return "";
+}
+
+const COL_NAME_W = 22;
+const COL_PRICE_W = 18;
+const COL_PCT_W = 10;
+
+/** 단일 고정폭 표(텔레그램 `<pre>`용). 본문은 이스케이프 전 순수 텍스트. */
+function buildAlignedTablePlain(rows: BriefingItem[]): string {
+  const hdr =
+    `${padDisplayEnd("종목명", COL_NAME_W)}  ` +
+    `${padDisplayStart("가격", COL_PRICE_W)}  ` +
+    `${padDisplayStart("전일대비", COL_PCT_W)}  `;
+  const sep = "─".repeat(Math.max(stringDisplayWidth(hdr), 28));
+  const lines: string[] = [hdr, sep];
   for (const r of rows) {
-    const nm = escapeHtml((r.name || r.symbol).slice(0, nameWidth)).padEnd(nameWidth, " ");
-    const px = fmtPriceCell(r).padStart(14, " ");
-    const pc = fmtPct(r.changePct);
-    lines.push(`${nm}  ${px}  ${pc}`);
+    const rawName = (r.name || r.symbol).trim() || r.symbol;
+    const nm = padDisplayEnd(rawName, COL_NAME_W);
+    const px = padDisplayStart(fmtPriceCell(r), COL_PRICE_W);
+    const pc = padDisplayStart(fmtPctPlain(r.changePct), COL_PCT_W);
+    const em = rowTrendEmoji(r.changePct);
+    const tail = em === "" ? "" : ` ${em}`;
+    lines.push(`${nm}  ${px}  ${pc}${tail}`);
   }
   return lines.join("\n");
 }
 
 /**
  * 텔레그램 HTML 브리핑 (parse_mode: HTML).
- * 총액 상단 강조, 주요 변동(±2%) 상단 + 코드블록, 나머지 요약, 시그널은 포찬 시만.
+ * 총액 미표시·전일 대비 포트폴리오 %만, 종목 표는 한글 폭 반영 정렬 + 구분선 + 행 이모지, 단일 `<pre>` 블록.
  */
 export function buildTelegramBriefingHtml(opts: {
   slotLabel?: string;
   dateLabel: string;
-  /** 오늘 기준 총 평가액(KRW) */
-  totalKrw: number | null;
   /** 전일 DB 스냅 합계 대비 포트폴리오 수익률(%) — 없으면 null */
   portfolioChangeVsYesterdayPct: number | null;
   items: BriefingItem[];
   signalHits: SignalHit[];
 }): string {
-  const { slotLabel, dateLabel, totalKrw, portfolioChangeVsYesterdayPct, items, signalHits } = opts;
+  const { slotLabel, dateLabel, portfolioChangeVsYesterdayPct, items, signalHits } = opts;
 
   const timeLine = slotLabel ? `⏰ ${escapeHtml(slotLabel)}\n` : "";
-  const totalLine =
-    totalKrw !== null && Number.isFinite(totalKrw) && totalKrw > 0
-      ? `<b>${fmtKrw(totalKrw)}</b>`
-      : "<b>—</b> <i>(포지션·시세로 합산 불가)</i>";
+  const cronHint =
+    "자동 발송(KST): <b>01:00 · 09:30 · 12:00 · 15:40 · 23:00</b> (<code>vercel.json</code> Cron)\n";
 
   let portfolioPctLine = "";
   if (portfolioChangeVsYesterdayPct !== null && Number.isFinite(portfolioChangeVsYesterdayPct)) {
     const p = portfolioChangeVsYesterdayPct;
     const arrow = p >= 0 ? "▲" : "▼";
-    portfolioPctLine = `\n전일 대비 포트폴리오: <b>${arrow} ${p >= 0 ? "+" : ""}${p.toFixed(2)}%</b>`;
+    portfolioPctLine = `전일 대비 포트폴리오 수익률: <b>${arrow} ${p >= 0 ? "+" : ""}${p.toFixed(2)}%</b>\n`;
   } else {
-    portfolioPctLine = "\n전일 대비 포트폴리오: <i>전일 일별 스냅 없음 (저장 후 비교 가능)</i>";
+    portfolioPctLine =
+      "전일 대비 포트폴리오 수익률: <i>전일 일별 스냅 없음 (저장 후 비교 가능)</i>\n";
   }
 
-  const header = `${timeLine}📊 <b>포트폴리오 브리핑</b> (${escapeHtml(dateLabel)})\n💰 총 평가금액: ${totalLine}${portfolioPctLine}\n`;
+  const header =
+    `${timeLine}${cronHint}` +
+    `📊 <b>포트폴리오 브리핑</b> (${escapeHtml(dateLabel)})\n` +
+    `${portfolioPctLine}\n`;
 
   const movers = items
     .filter((i) => i.changePct !== null && Math.abs(i.changePct) >= 2)
     .sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0));
   const rest = items.filter((i) => i.changePct === null || Math.abs(i.changePct) < 2);
+  const restSorted = [...rest].sort((a, b) => (a.name || a.symbol).localeCompare(b.name || b.symbol, "ko"));
 
-  const nameW = 14;
-  let moversBlock = "";
+  const tableParts: string[] = [];
   if (movers.length > 0) {
-    moversBlock =
-      `\n<b>🚨 주요 변동 타겟 (전일대비 ±2% 이상)</b>\n` +
-      `<pre>${buildAlignedTable(movers, nameW)}</pre>\n`;
+    tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
+    tableParts.push(buildAlignedTablePlain(movers));
   } else {
-    moversBlock = `\n<b>🚨 주요 변동 타겟</b>\n<i>해당 없음</i>\n`;
+    tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
+    tableParts.push("(해당 없음)");
   }
 
+  if (restSorted.length > 0) {
+    tableParts.push("");
+    tableParts.push(`📋 기타 (${restSorted.length}종, ±2% 미만)`);
+    tableParts.push(buildAlignedTablePlain(restSorted));
+  }
+
+  const tablePlain = tableParts.join("\n");
+  const preBlock = `<pre>${escapeHtml(tablePlain)}</pre>\n`;
+
   let restSummary = "";
-  if (rest.length > 0) {
-    const valid = rest.map((i) => i.changePct).filter((v): v is number => v !== null && Number.isFinite(v));
+  if (restSorted.length > 0) {
+    const valid = restSorted.map((i) => i.changePct).filter((v): v is number => v !== null && Number.isFinite(v));
     const avg = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
     restSummary =
-      `\n<b>📋 기타 ${rest.length}종</b> (±2% 미만)\n` +
-      (avg !== null
-        ? `평균 전일대비 등락: <b>${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%</b> (종목별 상세는 앱에서 확인)\n`
-        : `시세·등락 일부 누락 가능\n`);
+      avg !== null
+        ? `<i>기타 종목 평균 등락: ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%</i>\n`
+        : "";
   }
 
   const activeSignals = signalHits.filter(
@@ -167,7 +244,7 @@ export function buildTelegramBriefingHtml(opts: {
       lines.join("\n");
   }
 
-  return `${header}${moversBlock}${restSummary}${signalBlock}`.trim();
+  return `${header}<b>보유 종목</b>\n${preBlock}${restSummary}${signalBlock}`.trim();
 }
 
 /** Yahoo 6개월 일봉 — 시그널용 */

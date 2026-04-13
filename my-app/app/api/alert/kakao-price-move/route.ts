@@ -344,7 +344,6 @@ export async function GET(req: NextRequest) {
   const text = buildTelegramBriefingHtml({
     slotLabel,
     dateLabel: mmddKST(),
-    totalKrw: Number.isFinite(todayLiveKrw) && todayLiveKrw > 0 ? todayLiveKrw : null,
     portfolioChangeVsYesterdayPct,
     items: toBriefingItems(items),
     signalHits,
@@ -512,7 +511,6 @@ export async function POST(req: NextRequest) {
   const text = buildTelegramBriefingHtml({
     slotLabel: BRIEFING_SLOT_LABELS.manual,
     dateLabel: mmddKST(),
-    totalKrw: Number.isFinite(todayLiveKrw) && todayLiveKrw > 0 ? todayLiveKrw : null,
     portfolioChangeVsYesterdayPct,
     items: toBriefingItems(items),
     signalHits,
