@@ -105,10 +105,11 @@ async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?:
     return { ok: false, error: "TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수 미설정" };
   }
 
+  // parse_mode 미사용: 종목명·섹터명 등에 '<' '>'가 들어가면 HTML 파싱 오류(400)가 납니다.
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+    body: JSON.stringify({ chat_id: chatId, text }),
     cache: "no-store",
   });
 
@@ -140,6 +141,7 @@ function formatTotalValue(value: number | null): string {
 
 /** Cron 쿼리 ?slot= 과 DB briefing_slot 값 (한국 시간 발송 시각) */
 const BRIEFING_SLOT_LABELS: Record<string, string> = {
+  "0100": "01:00 KST",
   "0930": "09:30 KST",
   "1200": "12:00 KST",
   "1540": "15:40 KST",
@@ -195,8 +197,8 @@ function buildTelegramBriefing(
 
   const signalText =
     "\n🛰️ [기술적 시그널 포착]\n" +
-    "⚠️ RSI 과매수(>=70): 없음\n" +
-    "⚠️ RSI 과매도(<=30): 없음\n" +
+    "⚠️ RSI 과매수(70 이상): 없음\n" +
+    "⚠️ RSI 과매도(30 이하): 없음\n" +
     "🔄 MACD 골든크로스: 없음";
 
   return `${summary}${moversText}${sectorText}${signalText}`;
