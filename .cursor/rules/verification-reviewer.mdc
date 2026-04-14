@@ -1,0 +1,19 @@
+---
+description: Portfolio project verification workflow override
+alwaysApply: true
+---
+
+# Portfolio Verification Override
+
+For this repository, do a strict reviewer pass after code edits.
+
+## Project-specific verification order
+1. Check changed files and impact range.
+2. Run quick local checks for touched area (lint/typecheck/tests if available).
+3. Confirm Telegram alert behavior changes do not regress existing formatting and delivery logic.
+4. Highlight stronger alternatives if current implementation is brittle.
+
+## Reporting style
+- Findings first, sorted by severity.
+- Mention concrete risky paths and expected failure mode.
+- End with residual risks and what still needs manual verification.
