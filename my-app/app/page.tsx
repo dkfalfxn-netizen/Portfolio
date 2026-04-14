@@ -861,7 +861,7 @@ export default function Home() {
   }, [cashByOwner, usdKrw]);
 
   const enrichedPositions = useMemo(() => {
-    return positions.map((position) => {
+    return positions.map((position, sourceIndex) => {
       const q = marketQuery.data?.quotes?.[position.symbol];
       const livePrice = q?.price;
       const rawPreviousClose =
@@ -897,6 +897,7 @@ export default function Home() {
           : null;
       return {
         ...position,
+        sourceIndex,
         currentPrice,
         previousClose,
         pnl,
@@ -2286,7 +2287,7 @@ export default function Home() {
                             </TableRow>
                             {block.items.map((position) => {
                               const posIdx = displayItems.indexOf(position);
-                              const rowIndex = positions.findIndex((p) => p === position);
+                              const rowIndex = position.sourceIndex;
                               const rowKey = `${group.ownerName}-${position.symbol}-${rowIndex}`;
                               const isEditing = editingRowIndex === rowIndex;
                               const foreignMarketValue = formatPositionMarketValueForeign(position);
