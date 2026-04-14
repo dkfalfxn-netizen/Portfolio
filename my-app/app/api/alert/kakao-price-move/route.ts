@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { fetchPrices } from "@/lib/market-prices";
+import {
+  buildTelegramBriefingHtml,
+  collectHoldTransitions,
+  computeLivePortfolioKrw,
+  type BriefingItem,
+} from "@/lib/briefing-message";
 import { isKrxCommodity, toYahooSymbol } from "@/lib/finance-symbols";
 import { analyzeFourSignals, type FourSignalsResult } from "@/lib/technical-signals";
 
@@ -7,9 +14,13 @@ type Position = {
   symbol: string;
   name: string;
   owner: string;
+  quantity?: number;
+  currentPrice?: number;
+  currency?: "USD" | "EUR" | "KRW";
   sector?: string;
   accountType?: string;
 };
+type CashByOwner = Record<string, { usd: number; krw: number }>;
 
 type Quote = {
   price: number | null;
@@ -94,6 +105,7 @@ async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?:
     return { ok: false, error: "TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수 미설정" };
   }
 
+  /** 브리핑은 escapeHtml로 이스케이프된 HTML만 사용 */
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -112,67 +124,80 @@ function todayKST(): string {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+/** 전일 KST 날짜 (일별 스냅·전일대비용) */
+function yesterdayKST(): string {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000 - 86400000).toISOString().slice(0, 10);
+}
+
 function mmddKST(): string {
   const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
   return `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
-function formatUsdPrice(price: number | null): string {
-  if (price === null) return "시세없음";
-  return `$${price.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-}
-
-function formatTotalValue(value: number | null): string {
-  if (value === null) return "데이터 없음";
-  return `$${Math.round(value).toLocaleString("en-US")}`;
-}
-
-function buildTelegramBriefing(items: AlertItem[], totalValue: number | null): string {
-  const now = mmddKST();
-  const validPcts = items
-    .map((i) => i.changePct)
-    .filter((v): v is number => v !== null && Number.isFinite(v));
-  const avgPct = validPcts.length > 0 ? validPcts.reduce((a, b) => a + b, 0) / validPcts.length : 0;
-  const arrow = avgPct > 0 ? "🔺" : "📉";
-
-  const summary =
-    `📊 일일 포트폴리오 브리핑 (${now})\n` +
-    `💰 총 평가금액: ${formatTotalValue(totalValue)} (${avgPct >= 0 ? "+" : ""}${avgPct.toFixed(1)}% ${arrow})\n\n`;
-
-  const movers = items
-    .filter((i) => i.changePct !== null && Math.abs(i.changePct) >= 2)
-    .sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0));
-  let moversText = "🚨 [주요 변동 타겟] (±2% 이상)\n";
-  if (movers.length > 0) {
-    for (const m of movers.slice(0, 12)) {
-      moversText += `· ${m.name}: ${formatUsdPrice(m.price)} (${m.changePct! >= 0 ? "+" : ""}${m.changePct!.toFixed(1)}%)\n`;
-    }
-  } else {
-    moversText += "· 특이 변동 종목 없음\n";
-  }
-
-  const sectors = new Map<string, AlertItem[]>();
-  for (const item of items) {
-    if (!sectors.has(item.sector)) sectors.set(item.sector, []);
-    sectors.get(item.sector)!.push(item);
-  }
-
-  let sectorText = "\n📂 [섹터별 현황]";
-  for (const [sector, stocks] of sectors.entries()) {
-    sectorText += `\n${sector}\n`;
-    for (const s of stocks) {
-      const pctText = s.changePct === null ? "시세 없음" : `${s.changePct >= 0 ? "+" : ""}${s.changePct.toFixed(1)}%`;
-      sectorText += `· ${s.name}: ${formatUsdPrice(s.price)} (${pctText})\n`;
+function normalizeCash(raw: unknown): CashByOwner {
+  if (!raw || typeof raw !== "object") return {};
+  const o = raw as Record<string, unknown>;
+  const out: CashByOwner = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (v && typeof v === "object" && "usd" in (v as object) && "krw" in (v as object)) {
+      const u = (v as { usd: unknown; krw: unknown });
+      out[k] = {
+        usd: typeof u.usd === "number" && Number.isFinite(u.usd) ? u.usd : 0,
+        krw: typeof u.krw === "number" && Number.isFinite(u.krw) ? u.krw : 0,
+      };
     }
   }
+  return out;
+}
 
-  const signalText =
-    "\n🛰️ [기술적 시그널 포착]\n" +
-    "⚠️ RSI 과매수(>=70): 없음\n" +
-    "⚠️ RSI 과매도(<=30): 없음\n" +
-    "🔄 MACD 골든크로스: 없음";
+function normalizeDbPositions(raw: unknown): Array<{
+  symbol: string;
+  quantity: number;
+  currentPrice: number;
+  currency: "USD" | "EUR" | "KRW";
+  owner: string;
+}> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{
+    symbol: string;
+    quantity: number;
+    currentPrice: number;
+    currency: "USD" | "EUR" | "KRW";
+    owner: string;
+  }> = [];
+  for (const p of raw) {
+    if (!p || typeof p !== "object") continue;
+    const x = p as Record<string, unknown>;
+    const sym = typeof x.symbol === "string" ? x.symbol : "";
+    if (!sym) continue;
+    const q = typeof x.quantity === "number" && Number.isFinite(x.quantity) ? x.quantity : 0;
+    const cp = typeof x.currentPrice === "number" && Number.isFinite(x.currentPrice) ? x.currentPrice : 0;
+    const cur = x.currency === "USD" || x.currency === "EUR" || x.currency === "KRW" ? x.currency : "KRW";
+    const owner = typeof x.owner === "string" ? x.owner : "";
+    out.push({ symbol: sym, quantity: q, currentPrice: cp, currency: cur, owner });
+  }
+  return out;
+}
 
-  return `${summary}${moversText}${sectorText}${signalText}`;
+/** Cron 쿼리 ?slot= 과 DB briefing_slot 값 (한국 시간 발송 시각) */
+const BRIEFING_SLOT_LABELS: Record<string, string> = {
+  "0100": "01:00 KST",
+  "0930": "09:30 KST",
+  "1200": "12:00 KST",
+  "1540": "15:40 KST",
+  "2300": "23:00 KST",
+  legacy: "일일(레거시)",
+  manual: "수동 테스트",
+};
+
+function toBriefingItems(items: AlertItem[]): BriefingItem[] {
+  return items.map((i) => ({
+    symbol: i.symbol,
+    name: i.name,
+    sector: i.sector,
+    price: i.price,
+    changePct: i.changePct,
+  }));
 }
 
 type WatchlistRow = { symbol: string; name?: string };
@@ -238,6 +263,9 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const briefingSlot = req.nextUrl.searchParams.get("slot") ?? "legacy";
+  const slotLabel = BRIEFING_SLOT_LABELS[briefingSlot] ?? briefingSlot;
+
   const admin = createSupabaseAdmin();
   if (!admin) return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
 
@@ -251,14 +279,14 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const { data: snap, error } = await admin
+  const { data: snap, error: snapLoadErr } = await admin
     .from("portfolio_snapshots")
-    .select("sync_key, positions, watchlist")
+    .select("sync_key, positions, cash_by_owner, watchlist")
     .eq("sync_key", alertSyncKey)
     .maybeSingle();
 
-  if (error) {
-    const msg = error.message ?? "";
+  if (snapLoadErr) {
+    const msg = snapLoadErr.message ?? "";
     if (msg.includes("watchlist") || msg.includes("column")) {
       return NextResponse.json(
         {
@@ -278,84 +306,140 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const syncKey = String(snap.sync_key);
-  const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
+  const snaps = [snap];
   const watchEntries = parseWatchlist(snap.watchlist);
 
-  // 같은 날 중복 발송 방지
   const dateKst = todayKST();
-  const sentSet = new Set<string>();
-  const { data: logs } = await admin
-    .from("price_move_alert_logs")
-    .select("sync_key,symbol,date")
-    .eq("date", dateKst);
-  for (const l of logs ?? []) sentSet.add(`${l.sync_key}:${l.symbol}:${l.date}`);
+  const yst = yesterdayKST();
 
-  const items: AlertItem[] = [];
-  const logRows: Array<{ sync_key: string; symbol: string; date: string; change_pct: number }> = [];
-  let totalValue = 0;
-  let hasTotalValue = false;
+  const allSyms = new Set<string>();
+  for (const snap of snaps) {
+    for (const p of normalizeDbPositions(snap.positions)) {
+      allSyms.add(p.symbol);
+    }
+  }
+  const { quotes, usdKrw: fxUsd, eurKrw: fxEur } = await fetchPrices([...allSyms]);
+  const usdKrw = fxUsd ?? 1400;
+  const eurKrw = fxEur ?? 1500;
 
-  const { data: daily } = await admin
-    .from("portfolio_daily_snapshots")
-    .select("total_value")
-    .eq("sync_key", syncKey)
-    .eq("date", dateKst)
-    .maybeSingle();
-  if (daily?.total_value !== null && daily?.total_value !== undefined) {
-    const n = Number(daily.total_value);
-    if (Number.isFinite(n)) {
-      totalValue += n;
-      hasTotalValue = true;
+  let todayLiveKrw = 0;
+  let yesterdayPortfolioSum = 0;
+  let hasYesterdayPortfolio = false;
+  for (const snap of snaps) {
+    const pos = normalizeDbPositions(snap.positions);
+    const cash = normalizeCash(snap.cash_by_owner);
+    todayLiveKrw += computeLivePortfolioKrw(pos, cash, quotes, usdKrw, eurKrw);
+
+    const { data: yday } = await admin
+      .from("portfolio_daily_snapshots")
+      .select("total_value")
+      .eq("sync_key", String(snap.sync_key))
+      .eq("date", yst)
+      .maybeSingle();
+    if (yday?.total_value != null && Number.isFinite(Number(yday.total_value))) {
+      yesterdayPortfolioSum += Number(yday.total_value);
+      hasYesterdayPortfolio = true;
     }
   }
 
-  const symbolMap = new Map<string, { name: string; sector: string }>();
-  for (const p of positions) {
-    if (p.symbol && !symbolMap.has(p.symbol)) {
-      symbolMap.set(p.symbol, {
-        name: p.name || p.symbol,
-        sector: p.sector || p.accountType || "기타",
+  const portfolioChangeVsYesterdayPct =
+    hasYesterdayPortfolio && yesterdayPortfolioSum > 0
+      ? ((todayLiveKrw - yesterdayPortfolioSum) / yesterdayPortfolioSum) * 100
+      : null;
+
+  const sentSet = new Set<string>();
+  const { data: logs } = await admin
+    .from("price_move_alert_logs")
+    .select("sync_key,symbol,date,briefing_slot")
+    .eq("date", dateKst)
+    .eq("briefing_slot", briefingSlot);
+  for (const l of logs ?? []) {
+    sentSet.add(`${l.sync_key}:${l.symbol}:${l.date}:${l.briefing_slot}`);
+  }
+
+  const items: AlertItem[] = [];
+  const logRows: Array<{
+    sync_key: string;
+    symbol: string;
+    date: string;
+    change_pct: number;
+    briefing_slot: string;
+  }> = [];
+
+  for (const snap of snaps) {
+    const syncKey = String(snap.sync_key);
+    const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
+
+    const symbolMap = new Map<string, { name: string; sector: string }>();
+    for (const p of positions) {
+      if (p.symbol && !symbolMap.has(p.symbol)) {
+        symbolMap.set(p.symbol, {
+          name: p.name || p.symbol,
+          sector: p.sector || p.accountType || "기타",
+        });
+      }
+    }
+
+    for (const [symbol, info] of symbolMap) {
+      const dedupeKey = `${syncKey}:${symbol}:${dateKst}:${briefingSlot}`;
+      if (sentSet.has(dedupeKey)) continue;
+
+      const q = await fetchQuoteForSymbol(symbol);
+      const pct = (q.price && q.previousClose && q.previousClose > 0)
+        ? ((q.price - q.previousClose) / q.previousClose) * 100
+        : null;
+
+      items.push({
+        syncKey,
+        symbol,
+        name: info.name,
+        sector: info.sector,
+        price: q.price,
+        changePct: pct,
+      });
+      logRows.push({
+        sync_key: syncKey,
+        symbol,
+        date: dateKst,
+        change_pct: pct ?? 0,
+        briefing_slot: briefingSlot,
       });
     }
   }
 
-  for (const [symbol, info] of symbolMap) {
-    const dedupeKey = `${syncKey}:${symbol}:${dateKst}`;
-    if (sentSet.has(dedupeKey)) continue;
-
-    const q = await fetchQuoteForSymbol(symbol);
-    const pct = (q.price && q.previousClose && q.previousClose > 0)
-      ? ((q.price - q.previousClose) / q.previousClose) * 100
-      : null;
-
-    items.push({
-      syncKey,
-      symbol,
-      name: info.name,
-      sector: info.sector,
-      price: q.price,
-      changePct: pct,
-    });
-    logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct ?? 0 });
-  }
-
   if (items.length === 0 && watchEntries.length === 0) {
-    return NextResponse.json({ ok: true, message: "발송할 종목 없음 (보유·관심 모두 비어 있거나 이미 발송됨)", count: 0 });
+    return NextResponse.json({
+      ok: true,
+      message: "발송할 내용 없음 (보유·관심 없음 또는 이미 발송)",
+      count: 0,
+      briefing_slot: briefingSlot,
+    });
   }
 
   if (items.length > 0) {
-    const text = buildTelegramBriefing(items, hasTotalValue ? totalValue : null);
+    const holdTransitions = await collectHoldTransitions(toBriefingItems(items));
+    const text = buildTelegramBriefingHtml({
+      slotLabel,
+      dateLabel: mmddKST(),
+      portfolioChangeVsYesterdayPct,
+      items: toBriefingItems(items),
+      holdTransitions,
+    });
     const send = await sendTelegramMessage(text);
     if (!send.ok) return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
-    await admin.from("price_move_alert_logs").upsert(logRows, { onConflict: "sync_key,symbol,date" });
+
+    if (logRows.length > 0) {
+      await admin.from("price_move_alert_logs").upsert(logRows, {
+        onConflict: "sync_key,symbol,date,briefing_slot",
+      });
+    }
   }
 
   if (watchEntries.length > 0) {
     const block = await buildWatchlistTelegramBlock(watchEntries);
     if (block) {
-      const send2 = await sendTelegramMessage(block);
-      if (!send2.ok) return NextResponse.json({ error: send2.error ?? "관심종목 텔레그램 전송 실패" }, { status: 500 });
+      const sendW = await sendTelegramMessage(block);
+      if (!sendW.ok) return NextResponse.json({ error: sendW.error ?? "관심종목 텔레그램 전송 실패" }, { status: 500 });
     }
   }
 
@@ -363,28 +447,30 @@ export async function GET(req: NextRequest) {
     ok: true,
     sentHoldings: items.length,
     sentWatchlist: watchEntries.length,
-    sync_key_prefix: syncKey.slice(0, 4) + "…",
+    briefing_slot: briefingSlot,
   });
 }
 
 /**
- * POST /api/alert/kakao-price-move  { sync_key: string, dry_run?: boolean }
+ * POST /api/alert/kakao-price-move  { sync_key: string, dry_run?: boolean, force_resend?: boolean }
  *
  * 수동 테스트용. sync_key 소유자의 종목만 체크합니다.
  * dry_run: true → 실제 전송 없이 점검 결과만 반환 (기본값 true)
- * dry_run: false → 실제로 텔레그램 전송 (오늘 이미 보낸 종목은 건너뜀)
+ * dry_run: false → 실제로 텔레그램 전송 (기본: 오늘 manual 슬롯으로 이미 보낸 종목은 건너뜀)
+ * force_resend: true → manual 중복 기록을 무시하고 전 종목 다시 전송 (UI 테스트 버튼에서 사용)
  */
 export async function POST(req: NextRequest) {
   let body: unknown;
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "JSON 파싱 실패" }, { status: 400 });
   }
-  const b = body as { sync_key?: unknown; dry_run?: unknown };
+  const b = body as { sync_key?: unknown; dry_run?: unknown; force_resend?: unknown };
   const syncKey = typeof b.sync_key === "string" ? b.sync_key : null;
   if (!syncKey || syncKey.length < 8) {
     return NextResponse.json({ error: "sync_key가 필요합니다." }, { status: 400 });
   }
   const dryRun = b.dry_run !== false; // 기본값 true (실전 전송 안 함)
+  const forceResend = b.force_resend === true;
 
   // 환경변수 점검
   const hasBotToken = !!process.env.TELEGRAM_BOT_TOKEN;
@@ -405,7 +491,7 @@ export async function POST(req: NextRequest) {
 
   const { data: snap, error: snapErr } = await admin
     .from("portfolio_snapshots")
-    .select("positions, watchlist")
+    .select("positions, cash_by_owner, watchlist")
     .eq("sync_key", syncKey)
     .maybeSingle();
 
@@ -438,24 +524,35 @@ export async function POST(req: NextRequest) {
   }
 
   const dateKst = todayKST();
+  const manualSlot = "manual";
   const results: Array<{ symbol: string; name: string; price: number | null; previousClose: number | null; changePct: number | null; willAlert: boolean; sector: string }> = [];
   const items: AlertItem[] = [];
-  const logRows: Array<{ sync_key: string; symbol: string; date: string; change_pct: number }> = [];
+  const logRows: Array<{
+    sync_key: string;
+    symbol: string;
+    date: string;
+    change_pct: number;
+    briefing_slot: string;
+  }> = [];
 
-  // 오늘 이미 발송된 종목 확인
-  const { data: logs } = await admin
-    .from("price_move_alert_logs")
-    .select("symbol")
-    .eq("sync_key", syncKey)
-    .eq("date", dateKst);
-  const alreadySent = new Set((logs ?? []).map((l) => l.symbol));
+  // 오늘 수동 발송으로 이미 기록된 종목 확인 (Cron 슬롯과 별개). force_resend면 스킵
+  let alreadySent = new Set<string>();
+  if (!forceResend) {
+    const { data: logs } = await admin
+      .from("price_move_alert_logs")
+      .select("symbol")
+      .eq("sync_key", syncKey)
+      .eq("date", dateKst)
+      .eq("briefing_slot", manualSlot);
+    alreadySent = new Set((logs ?? []).map((l) => l.symbol));
+  }
 
   for (const [symbol, info] of symbolMap) {
     const q = await fetchQuoteForSymbol(symbol);
     const pct = (q.price && q.previousClose && q.previousClose > 0)
       ? ((q.price - q.previousClose) / q.previousClose) * 100
       : null;
-    const willAlert = !alreadySent.has(symbol); // 모든 종목 발송 (중복 방지만)
+    const willAlert = !alreadySent.has(symbol); // 모든 종목 발송 (중복 방지만, force_resend 시 무시)
     results.push({ symbol, name: info.name, price: q.price, previousClose: q.previousClose, changePct: pct, willAlert, sector: info.sector });
     if (willAlert) {
       items.push({
@@ -466,7 +563,13 @@ export async function POST(req: NextRequest) {
         price: q.price,
         changePct: pct,
       });
-      logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct ?? 0 });
+      logRows.push({
+        sync_key: syncKey,
+        symbol,
+        date: dateKst,
+        change_pct: pct ?? 0,
+        briefing_slot: manualSlot,
+      });
     }
   }
 
@@ -500,23 +603,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, dry_run: false, message: "발송할 내용 없음 (보유·관심)", count: 0 });
   }
 
-  let totalValue: number | null = null;
-  const { data: daily } = await admin
-    .from("portfolio_daily_snapshots")
-    .select("total_value")
-    .eq("sync_key", syncKey)
-    .eq("date", dateKst)
-    .maybeSingle();
-  if (daily?.total_value !== null && daily?.total_value !== undefined) {
-    const n = Number(daily.total_value);
-    totalValue = Number.isFinite(n) ? n : null;
-  }
-
   if (items.length > 0) {
-    const text = buildTelegramBriefing(items, totalValue);
+    const syms = [...symbolMap.keys()];
+    const { quotes, usdKrw: pUsd, eurKrw: pEur } = await fetchPrices(syms);
+    const usdK = pUsd ?? 1400;
+    const eurK = pEur ?? 1500;
+    const posNorm = normalizeDbPositions(snap.positions);
+    const cashNorm = normalizeCash(snap.cash_by_owner);
+    const todayLiveKrw = computeLivePortfolioKrw(posNorm, cashNorm, quotes, usdK, eurK);
+
+    const { data: ydayRow } = await admin
+      .from("portfolio_daily_snapshots")
+      .select("total_value")
+      .eq("sync_key", syncKey)
+      .eq("date", yesterdayKST())
+      .maybeSingle();
+    const yVal = ydayRow?.total_value != null && Number.isFinite(Number(ydayRow.total_value))
+      ? Number(ydayRow.total_value)
+      : null;
+    const portfolioChangeVsYesterdayPct =
+      yVal !== null && yVal > 0 ? ((todayLiveKrw - yVal) / yVal) * 100 : null;
+
+    const holdTransitions = await collectHoldTransitions(toBriefingItems(items));
+    const text = buildTelegramBriefingHtml({
+      slotLabel: BRIEFING_SLOT_LABELS.manual,
+      dateLabel: mmddKST(),
+      portfolioChangeVsYesterdayPct,
+      items: toBriefingItems(items),
+      holdTransitions,
+    });
     const send = await sendTelegramMessage(text);
     if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
-    await admin.from("price_move_alert_logs").upsert(logRows, { onConflict: "sync_key,symbol,date" });
+
+    await admin.from("price_move_alert_logs").upsert(logRows, {
+      onConflict: "sync_key,symbol,date,briefing_slot",
+    });
   }
 
   if (watchEntries.length > 0) {

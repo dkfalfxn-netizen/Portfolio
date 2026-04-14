@@ -16,6 +16,7 @@ import { LivePriceCell } from "@/components/live-price-cell";
 import { DailyTrendChart } from "@/components/daily-trend-chart";
 import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
+import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
@@ -24,6 +25,7 @@ import {
   type DailyPrice as SignalDailyPrice,
   type TradeSignal,
 } from "@/lib/signals";
+import { shouldShowDailyChangeVsPreviousClose } from "@/lib/trading-calendar";
 import {
   Card,
   CardContent,
@@ -705,6 +707,9 @@ export default function Home() {
   const [editAvgPrice, setEditAvgPrice] = useState("");
   const [editPurchaseUsdKrw, setEditPurchaseUsdKrw] = useState("");
   const [editPurchaseEurKrw, setEditPurchaseEurKrw] = useState("");
+  const [signalDetailTarget, setSignalDetailTarget] = useState<{ symbol: string; name: string } | null>(
+    null,
+  );
 
   const [cloudSyncKey, setCloudSyncKey] = useState("");
   const [syncKeyDraft, setSyncKeyDraft] = useState("");
@@ -859,8 +864,13 @@ export default function Home() {
     return positions.map((position) => {
       const q = marketQuery.data?.quotes?.[position.symbol];
       const livePrice = q?.price;
-      const previousClose =
+      const rawPreviousClose =
         typeof q?.previousClose === "number" && q.previousClose > 0 ? q.previousClose : null;
+      /** 김승주: 미국장 영업일에만, 그 외: 한국장 영업일에만 전일 대비 등락 표시 */
+      const previousClose =
+        rawPreviousClose !== null && shouldShowDailyChangeVsPreviousClose(position.owner)
+          ? rawPreviousClose
+          : null;
       const currentPrice = livePrice ?? position.currentPrice;
       const pnl = ((currentPrice - position.avgPrice) / position.avgPrice) * 100;
       /** 매입 시 환율 없으면 현재 환율로 원가 추정(기존 데이터 호환) */
@@ -1653,7 +1663,12 @@ export default function Home() {
       const res = await fetch("/api/alert/kakao-price-move", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sync_key: cloudSyncKey, dry_run: dryRun }),
+        body: JSON.stringify({
+          sync_key: cloudSyncKey,
+          dry_run: dryRun,
+          // 실제 발송은 같은 날 여러 번 눌러도 브리핑을 다시 보낼 수 있게 함 (Cron과 별개 manual 로그 무시)
+          ...(dryRun ? {} : { force_resend: true }),
+        }),
       });
       const j = await res.json() as typeof telegramTestResult;
       setTelegramTestResult(j);
@@ -2359,6 +2374,15 @@ export default function Home() {
                                         MA:{s.ma} RSI:{s.rsi} BB:{s.bb} VOL:{s.vol}
                                       </p>
                                     ) : null}
+                                    <button
+                                      type="button"
+                                      className="mt-1 block w-full text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                                      onClick={() =>
+                                        setSignalDetailTarget({ symbol: position.symbol, name: position.name })
+                                      }
+                                    >
+                                      차트·근거 보기
+                                    </button>
                                   </div>
                                 );
                               })()
@@ -2996,11 +3020,17 @@ export default function Home() {
           <section id="section-telegram" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">📲 텔레그램 가격 변동 알림</h2>
             <p className="mb-3 text-xs text-muted-foreground">
-              <b>본인 동기화 키</b>에 해당하는 <b>보유 종목만</b> 브리핑합니다. Vercel에{" "}
-              <code className="rounded bg-muted px-1">TELEGRAM_ALERT_SYNC_KEY</code>를 동기화 키와 동일하게 넣어야
-              크론 자동 발송이 동작합니다. 또한 <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
-              <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code>가 필요합니다. 관심종목 시그널은 위 섹션
-              저장분을 함께 발송합니다.
+              크론 자동 발송은 <b>본인 동기화 키</b> 한 계정만 대상으로 하려면 Vercel에{" "}
+              <code className="rounded bg-muted px-1">TELEGRAM_ALERT_SYNC_KEY</code>를 동기화 키와 동일하게 설정하세요.
+              Supabase 포트폴리오·시세 기준 <b>총 평가·전일 대비 수익률·종목 등락</b> HTML 브리핑이{" "}
+              <b>KST 01:00·09:30·12:00·15:40·23:00</b>(<code className="rounded bg-muted px-1">vercel.json</code>{" "}
+              <code className="rounded bg-muted px-1">slot</code>)에 발송됩니다. 관심종목 MA·RSI·BB·VOL 요약은 위에서 저장한
+              목록을 이어서 보냅니다. 환경변수:{" "}
+              <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
+              <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code>,{" "}
+              <code className="rounded bg-muted px-1">CRON_SECRET</code>. 브리핑 슬롯 로그는{" "}
+              <code className="rounded bg-muted px-1">price_move_alert_logs_briefing_slot.sql</code> 마이그레이션을
+              적용했는지 확인하세요.
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -3293,6 +3323,18 @@ export default function Home() {
 
         </main>
       </div>
+
+      <TechnicalSignalDetailModal
+        open={signalDetailTarget !== null}
+        onClose={() => setSignalDetailTarget(null)}
+        symbol={signalDetailTarget?.symbol ?? ""}
+        name={signalDetailTarget?.name ?? ""}
+        prices={
+          signalDetailTarget
+            ? (historyQuery.data?.history?.[signalDetailTarget.symbol] ?? [])
+            : []
+        }
+      />
     </div>
   );
 }
