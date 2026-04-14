@@ -202,21 +202,17 @@ export function buildTelegramBriefingHtml(opts: {
 
   function renderTable(rows: BriefingItem[]): string {
     const NAME_W = 8;
-    const PRICE_W = 9;
-    const PCT_W = 7;
     const lines: string[] = [];
-    lines.push(
-      `${padDisplayEnd("종목", NAME_W)} ${padDisplayEnd("가격", PRICE_W)} ${padDisplayEnd("등락", PCT_W)} 차트`,
-    );
-    lines.push(`${"-".repeat(NAME_W)} ${"-".repeat(PRICE_W)} ${"-".repeat(PCT_W)} ----------`);
+    lines.push(`${padDisplayEnd("종목", NAME_W)} | 가격 | 등락 | 차트`);
+    lines.push(`${"-".repeat(NAME_W)}-+------+------+-${"-".repeat(10)}`);
     for (const r of rows) {
       const name = padDisplayEnd(truncateDisplay((r.name || r.symbol).trim() || r.symbol, NAME_W), NAME_W);
-      const price = padDisplayEnd(fmtPriceCompactForMobile(r), PRICE_W);
-      const pct = padDisplayEnd(fmtPctPlain(r.changePct), PCT_W);
+      const price = fmtPriceCompactForMobile(r);
+      const pct = fmtPctPlain(r.changePct);
       const trendLine = (miniTrends?.[r.symbol] ?? "—").trim() || "—";
       const dir = r.changePct === null || !Number.isFinite(r.changePct) ? "⚪" : r.changePct >= 0 ? "🟢" : "🔴";
       const trend = `${dir}${trendLine}`;
-      lines.push(`${name} ${price} ${pct} ${trend}`);
+      lines.push(`${name} | ${price} | ${pct} | ${trend}`);
     }
     return lines.join("\n");
   }
