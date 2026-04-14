@@ -17,6 +17,10 @@ export type BriefingItem = {
 };
 
 export type MiniTrendMap = Record<string, string>;
+export type OwnerDailyReturn = {
+  owner: string;
+  changePct: number | null;
+};
 
 /** 지표 한 줄 (MA/RSI/BB/VOL) — HOLD→BUY|SELL 전환 시에만 */
 export type HoldTransitionRow = {
@@ -168,12 +172,21 @@ export function buildTelegramBriefingHtml(opts: {
   dateLabel: string;
   /** 전일 DB 스냅 합계 대비 포트폴리오 수익률(%) — 없으면 null */
   portfolioChangeVsYesterdayPct: number | null;
+  ownerDailyReturns?: OwnerDailyReturn[];
   items: BriefingItem[];
   miniTrends?: MiniTrendMap;
   /** 전일 일봉까지만 보면 HOLD였다가, 최신 일봉 반영 후 BUY/SELL로 바뀐 지표만 */
   holdTransitions: HoldTransitionSymbol[];
 }): string {
-  const { slotLabel, dateLabel, portfolioChangeVsYesterdayPct, items, miniTrends, holdTransitions } = opts;
+  const {
+    slotLabel,
+    dateLabel,
+    portfolioChangeVsYesterdayPct,
+    ownerDailyReturns,
+    items,
+    miniTrends,
+    holdTransitions,
+  } = opts;
 
   const timeLine = slotLabel ? `⏰ ${escapeHtml(slotLabel)}\n` : "";
   const cronHint =
@@ -189,10 +202,23 @@ export function buildTelegramBriefingHtml(opts: {
       "전일 대비 포트폴리오 수익률: <i>전일 일별 스냅 없음 (저장 후 비교 가능)</i>\n";
   }
 
+  let ownerSummaryBlock = "";
+  if (ownerDailyReturns && ownerDailyReturns.length > 0) {
+    const rows = [...ownerDailyReturns].sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
+    const lines = rows.map((r) => {
+      if (r.changePct === null || !Number.isFinite(r.changePct)) {
+        return `· ${escapeHtml(r.owner)}: <i>전일 스냅 없음</i>`;
+      }
+      const arrow = r.changePct >= 0 ? "▲" : "▼";
+      return `· ${escapeHtml(r.owner)}: <b>${arrow} ${r.changePct >= 0 ? "+" : ""}${r.changePct.toFixed(2)}%</b>`;
+    });
+    ownerSummaryBlock = `👤 <b>보유자별 전일 대비 수익률</b>\n${lines.join("\n")}\n\n`;
+  }
+
   const header =
     `${timeLine}${cronHint}` +
     `📊 <b>포트폴리오 브리핑</b> (${escapeHtml(dateLabel)})\n` +
-    `${portfolioPctLine}\n`;
+    `${portfolioPctLine}${ownerSummaryBlock}`;
 
   const movers = items
     .filter((i) => i.changePct !== null && Math.abs(i.changePct) >= 2)

@@ -28,6 +28,8 @@ type Quote = {
   previousClose: number | null;
 };
 
+type OwnerValueMap = Record<string, number>;
+
 type AlertItem = {
   syncKey: string;
   symbol: string;
@@ -180,6 +182,42 @@ function normalizeDbPositions(raw: unknown): Array<{
   return out;
 }
 
+function computeOwnerLiveValuesKrw(
+  positions: Array<{
+    symbol: string;
+    quantity: number;
+    currentPrice: number;
+    currency: "USD" | "EUR" | "KRW";
+    owner: string;
+  }>,
+  cashByOwner: CashByOwner,
+  quotes: Record<string, { price?: number | null } | undefined>,
+  usdKrw: number,
+  eurKrw: number,
+): OwnerValueMap {
+  const owners = [...new Set([...positions.map((p) => p.owner), ...Object.keys(cashByOwner)])];
+  const out: OwnerValueMap = {};
+
+  for (const owner of owners) {
+    const cash = cashByOwner[owner] ?? { usd: 0, krw: 0 };
+    let sum = cash.krw + cash.usd * usdKrw;
+    for (const p of positions) {
+      if (p.owner !== owner) continue;
+      const q = quotes[p.symbol];
+      const price =
+        typeof q?.price === "number" && Number.isFinite(q.price) && q.price > 0
+          ? q.price
+          : p.currentPrice;
+      if (p.currency === "USD") sum += p.quantity * price * usdKrw;
+      else if (p.currency === "EUR") sum += p.quantity * price * eurKrw;
+      else sum += p.quantity * price;
+    }
+    out[owner] = sum;
+  }
+
+  return out;
+}
+
 /** Cron 쿼리 ?slot= 과 DB briefing_slot 값 (한국 시간 발송 시각) */
 const BRIEFING_SLOT_LABELS: Record<string, string> = {
   "0100": "01:00 KST",
@@ -326,14 +364,20 @@ export async function GET(req: NextRequest) {
   let todayLiveKrw = 0;
   let yesterdayPortfolioSum = 0;
   let hasYesterdayPortfolio = false;
+  const ownerLiveTotals = new Map<string, number>();
+  const ownerYesterdayTotals = new Map<string, number>();
   for (const snap of snaps) {
     const pos = normalizeDbPositions(snap.positions);
     const cash = normalizeCash(snap.cash_by_owner);
     todayLiveKrw += computeLivePortfolioKrw(pos, cash, quotes, usdKrw, eurKrw);
+    const ownerLive = computeOwnerLiveValuesKrw(pos, cash, quotes, usdKrw, eurKrw);
+    for (const [owner, value] of Object.entries(ownerLive)) {
+      ownerLiveTotals.set(owner, (ownerLiveTotals.get(owner) ?? 0) + value);
+    }
 
     const { data: yday } = await admin
       .from("portfolio_daily_snapshots")
-      .select("total_value")
+      .select("total_value, owner_values")
       .eq("sync_key", String(snap.sync_key))
       .eq("date", yst)
       .maybeSingle();
@@ -341,12 +385,31 @@ export async function GET(req: NextRequest) {
       yesterdayPortfolioSum += Number(yday.total_value);
       hasYesterdayPortfolio = true;
     }
+    const yOwners =
+      yday?.owner_values && typeof yday.owner_values === "object" && !Array.isArray(yday.owner_values)
+        ? (yday.owner_values as Record<string, unknown>)
+        : null;
+    if (yOwners) {
+      for (const [owner, raw] of Object.entries(yOwners)) {
+        const n = Number(raw);
+        if (Number.isFinite(n)) {
+          ownerYesterdayTotals.set(owner, (ownerYesterdayTotals.get(owner) ?? 0) + n);
+        }
+      }
+    }
   }
 
   const portfolioChangeVsYesterdayPct =
     hasYesterdayPortfolio && yesterdayPortfolioSum > 0
       ? ((todayLiveKrw - yesterdayPortfolioSum) / yesterdayPortfolioSum) * 100
       : null;
+  const ownerDailyReturns = [...ownerLiveTotals.entries()]
+    .map(([owner, today]) => {
+      const y = ownerYesterdayTotals.get(owner);
+      const changePct = y !== undefined && y > 0 ? ((today - y) / y) * 100 : null;
+      return { owner, changePct };
+    })
+    .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
 
   const sentSet = new Set<string>();
   const { data: logs } = await admin
@@ -425,6 +488,7 @@ export async function GET(req: NextRequest) {
       slotLabel,
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,
+      ownerDailyReturns,
       items: briefingItems,
       miniTrends,
       holdTransitions,
@@ -618,7 +682,7 @@ export async function POST(req: NextRequest) {
 
     const { data: ydayRow } = await admin
       .from("portfolio_daily_snapshots")
-      .select("total_value")
+      .select("total_value, owner_values")
       .eq("sync_key", syncKey)
       .eq("date", yesterdayKST())
       .maybeSingle();
@@ -627,6 +691,19 @@ export async function POST(req: NextRequest) {
       : null;
     const portfolioChangeVsYesterdayPct =
       yVal !== null && yVal > 0 ? ((todayLiveKrw - yVal) / yVal) * 100 : null;
+    const ownerLive = computeOwnerLiveValuesKrw(posNorm, cashNorm, quotes, usdK, eurK);
+    const yOwners =
+      ydayRow?.owner_values && typeof ydayRow.owner_values === "object" && !Array.isArray(ydayRow.owner_values)
+        ? (ydayRow.owner_values as Record<string, unknown>)
+        : null;
+    const ownerDailyReturns = Object.entries(ownerLive)
+      .map(([owner, today]) => {
+        const yRaw = yOwners?.[owner];
+        const y = yRaw === undefined ? null : Number(yRaw);
+        const changePct = y !== null && Number.isFinite(y) && y > 0 ? ((today - y) / y) * 100 : null;
+        return { owner, changePct };
+      })
+      .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
 
     const briefingItems = toBriefingItems(items);
     const miniTrends = await collectMiniTrends(briefingItems);
@@ -635,6 +712,7 @@ export async function POST(req: NextRequest) {
       slotLabel: BRIEFING_SLOT_LABELS.manual,
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,
+      ownerDailyReturns,
       items: briefingItems,
       miniTrends,
       holdTransitions,
