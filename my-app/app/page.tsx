@@ -699,7 +699,7 @@ export default function Home() {
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
-  const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
+  const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
   const [editSymbol, setEditSymbol] = useState("");
   const [editName, setEditName] = useState("");
   const [editChartGroup, setEditChartGroup] = useState("");
@@ -1781,13 +1781,14 @@ export default function Home() {
     });
   }
 
-  function handleDeleteRow(rowKey: string) {
-    setPositions((prev) => prev.filter((p) => makePositionKey(p) !== rowKey));
+  function handleDeleteRow(rowIndex: number) {
+    if (rowIndex < 0) return;
+    setPositions((prev) => prev.filter((_, idx) => idx !== rowIndex));
   }
 
-  function startEditRow(p: Position) {
-    const key = makePositionKey(p);
-    setEditingRowKey(key);
+  function startEditRow(p: Position, rowIndex: number) {
+    if (rowIndex < 0) return;
+    setEditingRowIndex(rowIndex);
     setEditSymbol(p.symbol);
     setEditName(p.name);
     setEditChartGroup(p.chartGroup ?? "");
@@ -1802,7 +1803,7 @@ export default function Home() {
   }
 
   function cancelEditRow() {
-    setEditingRowKey(null);
+    setEditingRowIndex(null);
     setEditSymbol("");
     setEditName("");
     setEditChartGroup("");
@@ -1813,7 +1814,7 @@ export default function Home() {
   }
 
   function saveEditRow() {
-    if (!editingRowKey) return;
+    if (editingRowIndex === null) return;
     const q = Number(editQuantity);
     const a = Number(editAvgPrice);
     const px = Number(editPurchaseUsdKrw);
@@ -1825,8 +1826,8 @@ export default function Home() {
     if (!Number.isFinite(q) || q <= 0) return;
     if (!Number.isFinite(a) || a <= 0) return;
     setPositions((prev) =>
-      prev.map((p) => {
-        if (makePositionKey(p) !== editingRowKey) return p;
+      prev.map((p, idx) => {
+        if (idx !== editingRowIndex) return p;
         if (p.currency === "USD") {
           if (!Number.isFinite(px) || px <= 0) return p;
           return { ...p, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a, purchaseUsdKrw: px };
@@ -1841,10 +1842,10 @@ export default function Home() {
     cancelEditRow();
   }
 
-  function moveRow(rowKey: string, direction: "up" | "down") {
+  function moveRow(rowIndex: number, direction: "up" | "down") {
     setPositions((prev) => {
-      const idx = prev.findIndex((p) => makePositionKey(p) === rowKey);
-      if (idx === -1) return prev;
+      const idx = rowIndex;
+      if (idx < 0 || idx >= prev.length) return prev;
       const owner = prev[idx].owner;
       const ownerIndices = prev
         .map((p, i) => ({ p, i }))
@@ -2285,8 +2286,9 @@ export default function Home() {
                             </TableRow>
                             {block.items.map((position) => {
                               const posIdx = displayItems.indexOf(position);
-                              const rowKey = makePositionKey(position);
-                              const isEditing = editingRowKey === rowKey;
+                              const rowIndex = positions.findIndex((p) => p === position);
+                              const rowKey = `${group.ownerName}-${position.symbol}-${rowIndex}`;
+                              const isEditing = editingRowIndex === rowIndex;
                               const foreignMarketValue = formatPositionMarketValueForeign(position);
                               return (
                         <TableRow key={rowKey} className="group/row">
@@ -2564,7 +2566,7 @@ export default function Home() {
                                     }
                                     className="cursor-pointer rounded border px-1.5 py-0.5 text-xs transition-all duration-100 hover:bg-muted active:scale-95 disabled:cursor-not-allowed disabled:opacity-30"
                                     disabled={sortMode !== "manual" || posIdx === 0}
-                                    onClick={() => moveRow(rowKey, "up")}
+                                    onClick={() => moveRow(rowIndex, "up")}
                                   >
                                     ▲
                                   </button>
@@ -2580,7 +2582,7 @@ export default function Home() {
                                       sortMode !== "manual" ||
                                       posIdx === displayItems.length - 1
                                     }
-                                    onClick={() => moveRow(rowKey, "down")}
+                                    onClick={() => moveRow(rowIndex, "down")}
                                   >
                                     ▼
                                   </button>
@@ -2588,14 +2590,14 @@ export default function Home() {
                                 <button
                                   type="button"
                                   className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
-                                  onClick={() => startEditRow(position)}
+                                  onClick={() => startEditRow(position, rowIndex)}
                                 >
                                   수정
                                 </button>
                                 <button
                                   type="button"
                                   className="cursor-pointer rounded-md border px-2 py-1 text-xs text-destructive transition-all duration-100 hover:bg-destructive/10 active:scale-95"
-                                  onClick={() => handleDeleteRow(rowKey)}
+                                  onClick={() => handleDeleteRow(rowIndex)}
                                 >
                                   삭제
                                 </button>
