@@ -1,0 +1,21 @@
+---
+description: Always apply implementation verification mindset
+alwaysApply: true
+---
+
+# Verification-First Rule
+
+After implementing changes, always run a verification pass before finalizing.
+
+## Required checks
+- Validate correctness, regressions, and edge cases in changed scope.
+- Run relevant lint/typecheck/tests when feasible.
+- Identify missing tests and risky assumptions.
+- Propose better alternatives when current approach is fragile or overly complex.
+
+## Response requirements
+- Present findings first (Critical -> Important -> Suggestion).
+- Include why it is a problem and a concrete fix path.
+- If no findings, explicitly mention residual risks and untested areas.
+
+Use the `verification-reviewer` skill behavior when performing this pass.

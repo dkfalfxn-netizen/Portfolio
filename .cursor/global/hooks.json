@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "type": "prompt",
+        "timeout": 20,
+        "loop_limit": 1,
+        "prompt": "Before ending this task, verify whether implementation validation was completed. Validation must check changed scope for correctness, regressions, and test/lint gaps. If validation was skipped or too shallow, continue with one focused follow-up turn to perform verification and report findings first."
+      }
+    ]
+  }
+}
