@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { isKrxCommodity, toYahooSymbol } from "@/lib/finance-symbols";
+import { analyzeFourSignals, type FourSignalsResult } from "@/lib/technical-signals";
 
 type Position = {
   symbol: string;
@@ -22,19 +24,6 @@ type AlertItem = {
   price: number | null;
   changePct: number | null;
 };
-
-function isKrxCommodity(symbol: string): boolean {
-  return /^M\d{8}$/i.test(symbol.trim());
-}
-
-function toYahooSymbol(symbol: string): string {
-  const normalized = symbol.trim().toUpperCase();
-  if (normalized === "RMS") return "RMS.PA";
-  if (normalized.startsWith("KRX:")) return `${normalized.replace("KRX:", "")}.KS`;
-  if (/^[0-9][0-9A-Z]{5}$/.test(normalized)) return `${normalized}.KS`;
-  if (normalized.startsWith("KQ:")) return `${normalized.replace("KQ:", "")}.KQ`;
-  return normalized;
-}
 
 async function fetchYahooQuote(symbol: string): Promise<Quote> {
   try {
@@ -186,6 +175,60 @@ function buildTelegramBriefing(items: AlertItem[], totalValue: number | null): s
   return `${summary}${moversText}${sectorText}${signalText}`;
 }
 
+type WatchlistRow = { symbol: string; name?: string };
+
+function parseWatchlist(raw: unknown): WatchlistRow[] {
+  if (!Array.isArray(raw)) return [];
+  const out: WatchlistRow[] = [];
+  for (const x of raw) {
+    if (!x || typeof x !== "object") continue;
+    const o = x as Record<string, unknown>;
+    const sym = typeof o.symbol === "string" ? o.symbol.trim().toUpperCase() : "";
+    if (sym.length < 1) continue;
+    const name = typeof o.name === "string" ? o.name.trim() : undefined;
+    out.push({ symbol: sym, ...(name ? { name } : {}) });
+  }
+  return out;
+}
+
+function overallLabelKo(o: FourSignalsResult["overall"]): string {
+  switch (o) {
+    case "STRONG_BUY":
+      return "강한 매수 참고";
+    case "BUY":
+      return "매수 참고";
+    case "WAIT":
+      return "관망";
+    case "CAUTION":
+      return "주의";
+    case "HOLD":
+    default:
+      return "HOLD";
+  }
+}
+
+async function buildWatchlistTelegramBlock(entries: WatchlistRow[]): Promise<string> {
+  if (entries.length === 0) return "";
+  const now = mmddKST();
+  let t = `⭐ <b>관심종목 매수 타이밍 참고</b> (${now})\n`;
+  t += "MA·RSI·볼린저·거래량 기준 (참고용, 투자 권유 아님)\n\n";
+  for (const e of entries) {
+    const label = e.name && e.name.length > 0 ? e.name : e.symbol;
+    const sig = await analyzeFourSignals(e.symbol, label);
+    const line =
+      `● ${sig.name} (<code>${sig.symbol}</code>)\n` +
+      `<b>${overallLabelKo(sig.overall)}</b>\n` +
+      `MA:${sig.ma} RSI:${sig.rsi} BB:${sig.bb} VOL:${sig.vol}\n` +
+      `${sig.summaryKo}` +
+      (sig.rsi14 != null ? ` (RSI ${sig.rsi14.toFixed(1)})` : "") +
+      (sig.error ? `\n⚠️ ${sig.error}` : "") +
+      "\n\n";
+    t += line;
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  return t.trimEnd();
+}
+
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -198,12 +241,46 @@ export async function GET(req: NextRequest) {
   const admin = createSupabaseAdmin();
   if (!admin) return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
 
-  const { data: snaps, error } = await admin
-    .from("portfolio_snapshots")
-    .select("sync_key, positions");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const alertSyncKey = process.env.TELEGRAM_ALERT_SYNC_KEY?.trim();
+  if (!alertSyncKey || alertSyncKey.length < 8) {
+    return NextResponse.json({
+      ok: false,
+      skipped: true,
+      message:
+        "TELEGRAM_ALERT_SYNC_KEY 미설정: 텔레그램 자동 발송을 건너뜁니다. Vercel 환경 변수에 본인 동기화 키(문자열)를 설정하세요.",
+    });
+  }
 
-  if (!snaps || snaps.length === 0) return NextResponse.json({ ok: true, message: "portfolio_snapshots 없음" });
+  const { data: snap, error } = await admin
+    .from("portfolio_snapshots")
+    .select("sync_key, positions, watchlist")
+    .eq("sync_key", alertSyncKey)
+    .maybeSingle();
+
+  if (error) {
+    const msg = error.message ?? "";
+    if (msg.includes("watchlist") || msg.includes("column")) {
+      return NextResponse.json(
+        {
+          error: "Supabase에 watchlist 컬럼이 없습니다. supabase/watchlist_column.sql 을 실행하세요.",
+          detail: msg,
+        },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
+  if (!snap) {
+    return NextResponse.json({
+      ok: false,
+      message: `TELEGRAM_ALERT_SYNC_KEY(${alertSyncKey.slice(0, 4)}…)에 해당하는 portfolio_snapshots 행이 없습니다.`,
+    });
+  }
+
+  const syncKey = String(snap.sync_key);
+  const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
+  const watchEntries = parseWatchlist(snap.watchlist);
 
   // 같은 날 중복 발송 방지
   const dateKst = todayKST();
@@ -219,69 +296,75 @@ export async function GET(req: NextRequest) {
   let totalValue = 0;
   let hasTotalValue = false;
 
-  for (const snap of snaps) {
-    const syncKey = String(snap.sync_key);
-    const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
-    const { data: daily } = await admin
-      .from("portfolio_daily_snapshots")
-      .select("total_value")
-      .eq("sync_key", syncKey)
-      .eq("date", dateKst)
-      .maybeSingle();
-    if (daily?.total_value !== null && daily?.total_value !== undefined) {
-      const n = Number(daily.total_value);
-      if (Number.isFinite(n)) {
-        totalValue += n;
-        hasTotalValue = true;
-      }
+  const { data: daily } = await admin
+    .from("portfolio_daily_snapshots")
+    .select("total_value")
+    .eq("sync_key", syncKey)
+    .eq("date", dateKst)
+    .maybeSingle();
+  if (daily?.total_value !== null && daily?.total_value !== undefined) {
+    const n = Number(daily.total_value);
+    if (Number.isFinite(n)) {
+      totalValue += n;
+      hasTotalValue = true;
     }
+  }
 
-    // 종목별 대표 정보 추출 (symbol 기준)
-    const symbolMap = new Map<string, { name: string; sector: string }>();
-    for (const p of positions) {
-      if (p.symbol && !symbolMap.has(p.symbol)) {
-        symbolMap.set(p.symbol, {
-          name: p.name || p.symbol,
-          sector: p.sector || p.accountType || "기타",
-        });
-      }
-    }
-
-    for (const [symbol, info] of symbolMap) {
-      const dedupeKey = `${syncKey}:${symbol}:${dateKst}`;
-      if (sentSet.has(dedupeKey)) continue;
-
-      const q = await fetchQuoteForSymbol(symbol);
-      // 시세 조회 실패 종목도 포함 (변동률 없음으로 표시)
-      const pct = (q.price && q.previousClose && q.previousClose > 0)
-        ? ((q.price - q.previousClose) / q.previousClose) * 100
-        : null;
-
-      items.push({
-        syncKey,
-        symbol,
-        name: info.name,
-        sector: info.sector,
-        price: q.price,
-        changePct: pct,
+  const symbolMap = new Map<string, { name: string; sector: string }>();
+  for (const p of positions) {
+    if (p.symbol && !symbolMap.has(p.symbol)) {
+      symbolMap.set(p.symbol, {
+        name: p.name || p.symbol,
+        sector: p.sector || p.accountType || "기타",
       });
-      logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct ?? 0 });
     }
   }
 
-  if (items.length === 0) {
-    return NextResponse.json({ ok: true, message: "발송할 종목 없음", count: 0 });
+  for (const [symbol, info] of symbolMap) {
+    const dedupeKey = `${syncKey}:${symbol}:${dateKst}`;
+    if (sentSet.has(dedupeKey)) continue;
+
+    const q = await fetchQuoteForSymbol(symbol);
+    const pct = (q.price && q.previousClose && q.previousClose > 0)
+      ? ((q.price - q.previousClose) / q.previousClose) * 100
+      : null;
+
+    items.push({
+      syncKey,
+      symbol,
+      name: info.name,
+      sector: info.sector,
+      price: q.price,
+      changePct: pct,
+    });
+    logRows.push({ sync_key: syncKey, symbol, date: dateKst, change_pct: pct ?? 0 });
   }
 
-  const text = buildTelegramBriefing(items, hasTotalValue ? totalValue : null);
-  const send = await sendTelegramMessage(text);
-  if (!send.ok) return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
+  if (items.length === 0 && watchEntries.length === 0) {
+    return NextResponse.json({ ok: true, message: "발송할 종목 없음 (보유·관심 모두 비어 있거나 이미 발송됨)", count: 0 });
+  }
 
-  if (logRows.length > 0) {
+  if (items.length > 0) {
+    const text = buildTelegramBriefing(items, hasTotalValue ? totalValue : null);
+    const send = await sendTelegramMessage(text);
+    if (!send.ok) return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
     await admin.from("price_move_alert_logs").upsert(logRows, { onConflict: "sync_key,symbol,date" });
   }
 
-  return NextResponse.json({ ok: true, sent: items.length });
+  if (watchEntries.length > 0) {
+    const block = await buildWatchlistTelegramBlock(watchEntries);
+    if (block) {
+      const send2 = await sendTelegramMessage(block);
+      if (!send2.ok) return NextResponse.json({ error: send2.error ?? "관심종목 텔레그램 전송 실패" }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    sentHoldings: items.length,
+    sentWatchlist: watchEntries.length,
+    sync_key_prefix: syncKey.slice(0, 4) + "…",
+  });
 }
 
 /**
@@ -320,13 +403,26 @@ export async function POST(req: NextRequest) {
   const admin = createSupabaseAdmin();
   if (!admin) return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
 
-  const { data: snap } = await admin
+  const { data: snap, error: snapErr } = await admin
     .from("portfolio_snapshots")
-    .select("positions")
+    .select("positions, watchlist")
     .eq("sync_key", syncKey)
     .maybeSingle();
 
+  if (snapErr) {
+    const msg = snapErr.message ?? "";
+    if (msg.includes("watchlist") || msg.includes("column")) {
+      return NextResponse.json(
+        { error: "Supabase에 watchlist 컬럼이 없습니다. supabase/watchlist_column.sql 을 실행하세요.", detail: msg },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
   if (!snap) return NextResponse.json({ error: "portfolio_snapshots에 해당 sync_key가 없습니다." }, { status: 404 });
+
+  const watchEntries = parseWatchlist(snap.watchlist);
 
   const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
 
@@ -374,6 +470,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const watchlistPreview: FourSignalsResult[] = [];
+  for (const w of watchEntries) {
+    const label = w.name && w.name.length > 0 ? w.name : w.symbol;
+    watchlistPreview.push(await analyzeFourSignals(w.symbol, label));
+    await new Promise((r) => setTimeout(r, 80));
+  }
+
   if (dryRun) {
     return NextResponse.json({
       ok: true,
@@ -383,13 +486,18 @@ export async function POST(req: NextRequest) {
       symbols: results,
       alertCount: items.length,
       alreadySentToday: [...alreadySent],
-      message: items.length > 0 ? `${items.length}개 종목 발송 예정` : "오늘 이미 모두 발송됨",
+      watchlistCount: watchEntries.length,
+      watchlistSignals: watchlistPreview,
+      message:
+        items.length > 0 || watchEntries.length > 0
+          ? `보유 ${items.length}종목 · 관심 ${watchEntries.length}종목 발송 예정(실전 전송 아님)`
+          : "오늘 이미 보유 종목은 발송됨 · 관심종목 없음",
     });
   }
 
   // dry_run: false → 실제 전송
-  if (items.length === 0) {
-    return NextResponse.json({ ok: true, dry_run: false, message: "오늘 이미 모두 발송됨", count: 0 });
+  if (items.length === 0 && watchEntries.length === 0) {
+    return NextResponse.json({ ok: true, dry_run: false, message: "발송할 내용 없음 (보유·관심)", count: 0 });
   }
 
   let totalValue: number | null = null;
@@ -404,11 +512,27 @@ export async function POST(req: NextRequest) {
     totalValue = Number.isFinite(n) ? n : null;
   }
 
-  const text = buildTelegramBriefing(items, totalValue);
-  const send = await sendTelegramMessage(text);
-  if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
+  if (items.length > 0) {
+    const text = buildTelegramBriefing(items, totalValue);
+    const send = await sendTelegramMessage(text);
+    if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
+    await admin.from("price_move_alert_logs").upsert(logRows, { onConflict: "sync_key,symbol,date" });
+  }
 
-  await admin.from("price_move_alert_logs").upsert(logRows, { onConflict: "sync_key,symbol,date" });
-  return NextResponse.json({ ok: true, dry_run: false, sent: items.length, items });
+  if (watchEntries.length > 0) {
+    const block = await buildWatchlistTelegramBlock(watchEntries);
+    if (block) {
+      const sendW = await sendTelegramMessage(block);
+      if (!sendW.ok) return NextResponse.json({ ok: false, error: sendW.error }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    dry_run: false,
+    sentHoldings: items.length,
+    sentWatchlist: watchEntries.length,
+    items,
+  });
 }
 

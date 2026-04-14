@@ -744,7 +744,17 @@ export default function Home() {
     message?: string;
     error?: string;
     detail?: Record<string, string>;
+    watchlistCount?: number;
+    watchlistSignals?: unknown[];
+    sentHoldings?: number;
+    sentWatchlist?: number;
   } | null>(null);
+
+  type WatchlistRow = { symbol: string; name: string };
+  const [watchlistRows, setWatchlistRows] = useState<WatchlistRow[]>([]);
+  const [watchlistLoaded, setWatchlistLoaded] = useState(false);
+  const [watchlistBusy, setWatchlistBusy] = useState(false);
+  const [watchlistMessage, setWatchlistMessage] = useState("");
 
   // 가상 매수 시뮬레이터 상태
   const [simForm, setSimForm] = useState({
@@ -1519,6 +1529,52 @@ export default function Home() {
     })();
   }, [syncReady, cloudSyncKey, alertLoaded]);
 
+  useEffect(() => {
+    if (!syncReady || !cloudSyncKey || cloudSyncKey.length < 8 || watchlistLoaded) return;
+    setWatchlistLoaded(true);
+    void (async () => {
+      try {
+        const r = await fetch(`/api/watchlist?sync_key=${encodeURIComponent(cloudSyncKey)}`);
+        const j = (await r.json()) as { ok?: boolean; entries?: Array<{ symbol: string; name?: string }> };
+        if (r.ok && j.entries && j.entries.length > 0) {
+          setWatchlistRows(
+            j.entries.map((e) => ({ symbol: e.symbol, name: e.name ?? "" })),
+          );
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [syncReady, cloudSyncKey, watchlistLoaded]);
+
+  async function handleSaveWatchlist() {
+    if (!cloudSyncKey || cloudSyncKey.length < 8) {
+      setWatchlistMessage("먼저 동기화 키를 저장해 주세요.");
+      return;
+    }
+    setWatchlistBusy(true);
+    setWatchlistMessage("");
+    try {
+      const entries = watchlistRows
+        .map((row) => ({
+          symbol: row.symbol.trim().toUpperCase(),
+          ...(row.name.trim() ? { name: row.name.trim() } : {}),
+        }))
+        .filter((e) => e.symbol.length > 0);
+      const res = await fetch("/api/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_key: cloudSyncKey, entries }),
+      });
+      const j = (await res.json()) as { error?: string };
+      setWatchlistMessage(res.ok ? "관심종목을 저장했습니다." : (j.error ?? "저장 실패"));
+    } catch {
+      setWatchlistMessage("네트워크 오류입니다.");
+    } finally {
+      setWatchlistBusy(false);
+    }
+  }
+
   async function handleSaveAlertConfig() {
     if (!cloudSyncKey || cloudSyncKey.length < 8) {
       setAlertMessage("먼저 동기화 키를 저장해 주세요.");
@@ -1835,6 +1891,8 @@ export default function Home() {
               {([
                 { id: "section-add",       icon: "➕", label: "종목 추가" },
                 { id: "section-alert",     icon: "🔔", label: "이메일 알림" },
+                { id: "section-watchlist", icon: "⭐", label: "관심종목" },
+                { id: "section-telegram",  icon: "📲", label: "텔레그램" },
                 { id: "section-simulator", icon: "🧮", label: "가상 매수" },
                 { id: "section-sync",      icon: "🔑", label: "동기화 키" },
               ] as const).map(({ id, icon, label }) => (
@@ -1877,6 +1935,8 @@ export default function Home() {
                     { id: "section-holdings", icon: "📋", label: "보유 종목" },
                     { id: "section-add", icon: "➕", label: "종목 추가" },
                     { id: "section-alert", icon: "🔔", label: "이메일 알림" },
+                    { id: "section-watchlist", icon: "⭐", label: "관심종목" },
+                    { id: "section-telegram", icon: "📲", label: "텔레그램" },
                     { id: "section-simulator", icon: "🧮", label: "가상 매수" },
                     { id: "section-sync", icon: "🔑", label: "동기화 키" },
                   ] as const).map(({ id, icon, label }) => (
@@ -2865,13 +2925,82 @@ export default function Home() {
             </div>
           </section>
 
+          {/* 관심종목 (텔레그램 MA·RSI·BB·VOL) */}
+          <section id="section-watchlist" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
+            <h2 className="mb-1 font-semibold">⭐ 관심종목 (매수 타이밍 참고)</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              보유하지 않은 종목 중 <b>관심 티커</b>를 등록하면, 텔레그램으로{" "}
+              <b>이동평균(MA)·RSI·볼린저(BB)·거래량(VOL)</b> 네 가지 근거를 요약한 시그널을 함께 보냅니다.
+              아래 저장 시 서버(Supabase)에 동기화 키별로 저장됩니다.{" "}
+              <code className="rounded bg-muted px-1">supabase/watchlist_column.sql</code> 실행이 필요합니다.
+            </p>
+            <div className="space-y-2">
+              {watchlistRows.length === 0 && (
+                <p className="text-xs text-muted-foreground">행 추가 후 티커를 입력하세요. (예: 005930, NVDA, TSM)</p>
+              )}
+              {watchlistRows.map((row, idx) => (
+                <div key={idx} className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+                  <input
+                    className="w-28 rounded border bg-background px-2 py-1 text-xs font-mono uppercase"
+                    placeholder="티커"
+                    value={row.symbol}
+                    onChange={(e) =>
+                      setWatchlistRows((prev) =>
+                        prev.map((r, i) => (i === idx ? { ...r, symbol: e.target.value } : r)),
+                      )
+                    }
+                  />
+                  <input
+                    className="min-w-[120px] flex-1 rounded border bg-background px-2 py-1 text-xs"
+                    placeholder="표시 이름 (선택)"
+                    value={row.name}
+                    onChange={(e) =>
+                      setWatchlistRows((prev) =>
+                        prev.map((r, i) => (i === idx ? { ...r, name: e.target.value } : r)),
+                      )
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="ml-auto rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                    onClick={() => setWatchlistRows((prev) => prev.filter((_, i) => i !== idx))}
+                  >
+                    삭제
+                  </button>
+                </div>
+              ))}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
+                  onClick={() => setWatchlistRows((prev) => [...prev, { symbol: "", name: "" }])}
+                >
+                  + 종목 추가
+                </button>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  disabled={watchlistBusy}
+                  onClick={() => void handleSaveWatchlist()}
+                >
+                  {watchlistBusy ? "저장 중…" : "관심종목 저장"}
+                </button>
+              </div>
+              {watchlistMessage && (
+                <p className="text-xs text-muted-foreground">{watchlistMessage}</p>
+              )}
+            </div>
+          </section>
+
           {/* 텔레그램 가격 변동 알림 섹션 */}
-          <section className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
+          <section id="section-telegram" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">📲 텔레그램 가격 변동 알림</h2>
             <p className="mb-3 text-xs text-muted-foreground">
-              보유 전 종목의 당일 시세 현황을 <b>매일 오후 4시(KST)</b>에 텔레그램으로 발송합니다.
-              작동하려면 Vercel 환경변수에 <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
-              <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code>가 설정되어 있어야 합니다.
+              <b>본인 동기화 키</b>에 해당하는 <b>보유 종목만</b> 브리핑합니다. Vercel에{" "}
+              <code className="rounded bg-muted px-1">TELEGRAM_ALERT_SYNC_KEY</code>를 동기화 키와 동일하게 넣어야
+              크론 자동 발송이 동작합니다. 또한 <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
+              <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code>가 필요합니다. 관심종목 시그널은 위 섹션
+              저장분을 함께 발송합니다.
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -2924,6 +3053,27 @@ export default function Home() {
                             </p>
                           ))}
                         </div>
+                      </div>
+                    )}
+                    {telegramTestResult.watchlistSignals && telegramTestResult.watchlistSignals.length > 0 && (
+                      <div className="mt-2 border-t pt-2">
+                        <p className="mb-1 font-medium text-muted-foreground">관심종목 시그널 (진단):</p>
+                        <ul className="space-y-1 text-[11px]">
+                          {(telegramTestResult.watchlistSignals as Array<{
+                            symbol: string;
+                            name: string;
+                            ma: string;
+                            rsi: string;
+                            bb: string;
+                            vol: string;
+                            overall: string;
+                            summaryKo: string;
+                          }>).map((w) => (
+                            <li key={w.symbol}>
+                              <span className="font-medium">{w.name}</span> ({w.symbol}) — {w.overall} · MA:{w.ma} RSI:{w.rsi} BB:{w.bb} VOL:{w.vol} — {w.summaryKo}
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
                   </div>
