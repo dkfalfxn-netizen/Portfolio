@@ -16,6 +16,8 @@ export type BriefingItem = {
   changePct: number | null;
 };
 
+export type MiniTrendMap = Record<string, string>;
+
 /** 지표 한 줄 (MA/RSI/BB/VOL) — HOLD→BUY|SELL 전환 시에만 */
 export type HoldTransitionRow = {
   key: "MA" | "RSI" | "BB" | "VOL";
@@ -130,24 +132,19 @@ function padDisplayStart(str: string, target: number): string {
   return out;
 }
 
+function padDisplayEnd(str: string, target: number): string {
+  if (stringDisplayWidth(str) > target) return truncateDisplay(str, target);
+  let out = str;
+  while (stringDisplayWidth(out) < target) out = `${out} `;
+  return out;
+}
+
 function fmtPctPlain(p: number | null): string {
   if (p === null || !Number.isFinite(p)) return "—";
   return `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
 }
 
-/** +3%↑ 🚀, +2%↑ 📈, 음봉 📉 (2~3% 구간은 📈). 등락 문자열에 붙여 한 줄 폭을 줄임 */
-function rowTrendEmoji(changePct: number | null): string {
-  if (changePct === null || !Number.isFinite(changePct)) return "";
-  if (changePct >= 3) return "🚀";
-  if (changePct >= 2) return "📈";
-  if (changePct < 0) return "📉";
-  return "";
-}
-
-/** 좁은 화면: 한 줄(가격+등락)이 대략 이 폭을 넘지 않도록 (한글 폭 2 기준) */
-const MOBILE_BLOCK_W = 26;
-
-/** 가격 표기 (원화는 전액·쉼표, 모바일 폭은 buildRightColumnLine에서 잘림) */
+/** 가격 표기 (원화는 전액·쉼표) */
 function fmtPriceCompactForMobile(item: BriefingItem): string {
   if (item.price === null || !Number.isFinite(item.price)) return "—";
   const sym = item.symbol.trim();
@@ -162,40 +159,6 @@ function fmtPriceCompactForMobile(item: BriefingItem): string {
   return `$${p.toFixed(2)}`;
 }
 
-/** 가격·등락·이모지 한 줄을 블록 폭에 맞춤 (가격부터 짧게) */
-function buildRightColumnLine(item: BriefingItem): string {
-  const pc = fmtPctPlain(item.changePct);
-  const em = rowTrendEmoji(item.changePct);
-  let px = fmtPriceCompactForMobile(item);
-  for (let n = 0; n < 8; n++) {
-    const right = em ? `${px} ${pc}${em}` : `${px} ${pc}`;
-    if (stringDisplayWidth(right) <= MOBILE_BLOCK_W) return right;
-    const nextW = Math.max(3, stringDisplayWidth(px) - 1);
-    const shortened = truncateDisplay(px, nextW);
-    if (shortened === px) break;
-    px = shortened;
-  }
-  const right = em ? `${px} ${pc}${em}` : `${px} ${pc}`;
-  return truncateDisplay(right, MOBILE_BLOCK_W);
-}
-
-/** 종목당 2줄: 1줄 종목명, 2줄 가격·등락(우측 정렬) — 모바일에서 한 줄이 너무 길어 꺾이지 않게 함 */
-function buildMobileStackedBlock(rows: BriefingItem[]): string {
-  const lines: string[] = [];
-  for (const r of rows) {
-    const rawName = (r.name || r.symbol).trim() || r.symbol;
-    const nameLine = truncateDisplay(rawName, MOBILE_BLOCK_W);
-    const line2 = padDisplayStart(buildRightColumnLine(r), MOBILE_BLOCK_W);
-    lines.push(nameLine);
-    lines.push(line2);
-    lines.push("");
-  }
-  while (lines.length > 0 && lines[lines.length - 1] === "") {
-    lines.pop();
-  }
-  return lines.join("\n");
-}
-
 /**
  * 텔레그램 HTML 브리핑 (parse_mode: HTML).
  * 총액 미표시·전일 대비 포트폴리오 %만. 종목 목록은 모바일 줄바꿈을 피하기 위해 종목당 2줄·폭 제한 `<pre>`.
@@ -206,10 +169,11 @@ export function buildTelegramBriefingHtml(opts: {
   /** 전일 DB 스냅 합계 대비 포트폴리오 수익률(%) — 없으면 null */
   portfolioChangeVsYesterdayPct: number | null;
   items: BriefingItem[];
+  miniTrends?: MiniTrendMap;
   /** 전일 일봉까지만 보면 HOLD였다가, 최신 일봉 반영 후 BUY/SELL로 바뀐 지표만 */
   holdTransitions: HoldTransitionSymbol[];
 }): string {
-  const { slotLabel, dateLabel, portfolioChangeVsYesterdayPct, items, holdTransitions } = opts;
+  const { slotLabel, dateLabel, portfolioChangeVsYesterdayPct, items, miniTrends, holdTransitions } = opts;
 
   const timeLine = slotLabel ? `⏰ ${escapeHtml(slotLabel)}\n` : "";
   const cronHint =
@@ -236,10 +200,31 @@ export function buildTelegramBriefingHtml(opts: {
   const rest = items.filter((i) => i.changePct === null || Math.abs(i.changePct) < 2);
   const restSorted = [...rest].sort(sortByChangePctDesc);
 
+  function renderTable(rows: BriefingItem[]): string {
+    const NAME_W = 8;
+    const PRICE_W = 9;
+    const PCT_W = 7;
+    const lines: string[] = [];
+    lines.push(
+      `${padDisplayEnd("종목", NAME_W)} ${padDisplayStart("가격", PRICE_W)} ${padDisplayStart("등락", PCT_W)} 차트`,
+    );
+    lines.push(`${"-".repeat(NAME_W)} ${"-".repeat(PRICE_W)} ${"-".repeat(PCT_W)} ----------`);
+    for (const r of rows) {
+      const name = padDisplayEnd(truncateDisplay((r.name || r.symbol).trim() || r.symbol, NAME_W), NAME_W);
+      const price = padDisplayStart(fmtPriceCompactForMobile(r), PRICE_W);
+      const pct = padDisplayStart(fmtPctPlain(r.changePct), PCT_W);
+      const trendLine = (miniTrends?.[r.symbol] ?? "—").trim() || "—";
+      const dir = r.changePct === null || !Number.isFinite(r.changePct) ? "⚪" : r.changePct >= 0 ? "🟢" : "🔴";
+      const trend = `${dir}${trendLine}`;
+      lines.push(`${name} ${price} ${pct} ${trend}`);
+    }
+    return lines.join("\n");
+  }
+
   const tableParts: string[] = [];
   if (movers.length > 0) {
     tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
-    tableParts.push(buildMobileStackedBlock(movers));
+    tableParts.push(renderTable(movers));
   } else {
     tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
     tableParts.push("(해당 없음)");
@@ -248,7 +233,7 @@ export function buildTelegramBriefingHtml(opts: {
   if (restSorted.length > 0) {
     tableParts.push("");
     tableParts.push(`📋 기타 (${restSorted.length}종, ±2% 미만)`);
-    tableParts.push(buildMobileStackedBlock(restSorted));
+    tableParts.push(renderTable(restSorted));
   }
 
   const tablePlain = tableParts.join("\n");
@@ -300,6 +285,39 @@ export async function fetchDailyHistoryForSignal(symbol: string): Promise<DailyP
   } catch {
     return [];
   }
+}
+
+const SPARK_BARS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"] as const;
+const SPARK_POINTS = 8;
+
+function buildSparkline(values: number[], points = 10): string {
+  const clean = values.filter((v) => Number.isFinite(v) && v > 0);
+  if (clean.length < 2) return "—";
+  const sliced = clean.slice(-points);
+  const min = Math.min(...sliced);
+  const max = Math.max(...sliced);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return "—";
+  if (max === min) return "▅".repeat(sliced.length);
+
+  return sliced
+    .map((v) => {
+      const idx = Math.round(((v - min) / (max - min)) * (SPARK_BARS.length - 1));
+      return SPARK_BARS[Math.max(0, Math.min(SPARK_BARS.length - 1, idx))];
+    })
+    .join("");
+}
+
+export async function collectMiniTrends(items: BriefingItem[]): Promise<MiniTrendMap> {
+  const uniqueSymbols = [...new Set(items.map((i) => i.symbol))];
+  const out: MiniTrendMap = {};
+
+  await Promise.all(
+    uniqueSymbols.map(async (symbol) => {
+      const hist = await fetchDailyHistoryForSignal(symbol);
+      out[symbol] = hist.length >= 2 ? buildSparkline(hist.map((h) => h.close), SPARK_POINTS) : "—";
+    }),
+  );
+  return out;
 }
 
 function parseYahooSeries(data: unknown): DailyPrice[] {

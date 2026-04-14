@@ -3,6 +3,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchPrices } from "@/lib/market-prices";
 import {
   buildTelegramBriefingHtml,
+  collectMiniTrends,
   collectHoldTransitions,
   computeLivePortfolioKrw,
   type BriefingItem,
@@ -417,12 +418,15 @@ export async function GET(req: NextRequest) {
   }
 
   if (items.length > 0) {
-    const holdTransitions = await collectHoldTransitions(toBriefingItems(items));
+    const briefingItems = toBriefingItems(items);
+    const miniTrends = await collectMiniTrends(briefingItems);
+    const holdTransitions = await collectHoldTransitions(briefingItems);
     const text = buildTelegramBriefingHtml({
       slotLabel,
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,
-      items: toBriefingItems(items),
+      items: briefingItems,
+      miniTrends,
       holdTransitions,
     });
     const send = await sendTelegramMessage(text);
@@ -624,12 +628,15 @@ export async function POST(req: NextRequest) {
     const portfolioChangeVsYesterdayPct =
       yVal !== null && yVal > 0 ? ((todayLiveKrw - yVal) / yVal) * 100 : null;
 
-    const holdTransitions = await collectHoldTransitions(toBriefingItems(items));
+    const briefingItems = toBriefingItems(items);
+    const miniTrends = await collectMiniTrends(briefingItems);
+    const holdTransitions = await collectHoldTransitions(briefingItems);
     const text = buildTelegramBriefingHtml({
       slotLabel: BRIEFING_SLOT_LABELS.manual,
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,
-      items: toBriefingItems(items),
+      items: briefingItems,
+      miniTrends,
       holdTransitions,
     });
     const send = await sendTelegramMessage(text);
