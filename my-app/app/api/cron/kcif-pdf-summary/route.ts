@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const maxDuration = 60;
 
-const DEFAULT_KCIF_REPORT_URL =
-  "https://www.kcif.or.kr/annual/reportView?rpt_no=36942&mn=001005&pe=002014&skey=&sval=&pg=1&pp=10";
+const DEFAULT_KCIF_REPORT_LIST_URL = "https://www.kcif.or.kr/annual/reportList";
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
@@ -72,39 +72,70 @@ function extractMeta(html: string, reportUrl: string): KcifReport {
   };
 }
 
-function extractLatestReportUrl(html: string, baseUrl: string): string | null {
-  const links = [...html.matchAll(/href="([^"]*\/annual\/reportView\?[^"]+)"/gi)]
-    .map((m) => toAbsolute(baseUrl, m[1]))
-    .filter((u) => /rpt_no=\d+/.test(u));
-  if (links.length === 0) return null;
-  return links[0];
+function extractLatestFromList(html: string, baseUrl: string): {
+  reportUrl: string | null;
+  listTitle: string;
+  listDate: string;
+  listPdfUrl: string | null;
+} {
+  const match = [...html.matchAll(/<a[^>]*href="([^"]*\/annual\/reportView\?[^"]*rpt_no=\d+[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi)][0];
+  if (!match) {
+    return { reportUrl: null, listTitle: "", listDate: "", listPdfUrl: null };
+  }
+
+  const reportUrl = toAbsolute(baseUrl, match[1]);
+  const listTitle = normalizeWs(match[2].replace(/<[^>]+>/g, " "));
+  const idx = match.index ?? 0;
+  const window = html.slice(Math.max(0, idx - 300), Math.min(html.length, idx + 2400));
+
+  const dateMatch = window.match(/(\d{4}\.\d{2}\.\d{2}|\d{4}-\d{2}-\d{2})/);
+  const listDate = dateMatch ? dateMatch[1].replace(/\./g, "-") : "";
+
+  const pdfMatch = window.match(/href="([^"]+\.pdf[^"]*)"/i);
+  const listPdfUrl = pdfMatch ? toAbsolute(baseUrl, pdfMatch[1]) : null;
+
+  return { reportUrl, listTitle, listDate, listPdfUrl };
 }
 
 async function fetchKcifReport(): Promise<KcifReport> {
-  const seedUrl = process.env.KCIF_REPORT_URL?.trim() || DEFAULT_KCIF_REPORT_URL;
-  const seedRes = await fetch(seedUrl, {
+  const listUrl = process.env.KCIF_REPORT_URL?.trim() || DEFAULT_KCIF_REPORT_LIST_URL;
+  const listRes = await fetch(listUrl, {
     headers: { "User-Agent": DEFAULT_USER_AGENT },
     cache: "no-store",
   });
-  if (!seedRes.ok) {
-    throw new Error(`KCIF 페이지 조회 실패: ${seedRes.status}`);
+  if (!listRes.ok) {
+    throw new Error(`KCIF 목록 조회 실패: ${listRes.status}`);
   }
-  const seedHtml = await seedRes.text();
-
-  const latestUrl = extractLatestReportUrl(seedHtml, seedUrl);
-  if (!latestUrl || latestUrl === seedUrl) {
-    return extractMeta(seedHtml, seedUrl);
+  const listHtml = await listRes.text();
+  const latest = extractLatestFromList(listHtml, listUrl);
+  if (!latest.reportUrl) {
+    throw new Error("KCIF 목록에서 reportView 링크를 찾지 못했습니다.");
   }
 
-  const latestRes = await fetch(latestUrl, {
+  const detailRes = await fetch(latest.reportUrl, {
     headers: { "User-Agent": DEFAULT_USER_AGENT },
     cache: "no-store",
   });
-  if (!latestRes.ok) {
-    return extractMeta(seedHtml, seedUrl);
+  if (!detailRes.ok) {
+    // 상세 페이지 실패 시 목록 파싱 정보로 fallback
+    return {
+      title: latest.listTitle || "KCIF 보고서",
+      date: latest.listDate,
+      author: "",
+      reportUrl: latest.reportUrl,
+      pdfUrl: latest.listPdfUrl,
+      previewText: normalizeWs(listHtml.replace(/<[^>]+>/g, " ")).slice(0, 2500),
+    };
   }
-  const latestHtml = await latestRes.text();
-  return extractMeta(latestHtml, latestUrl);
+  const detailHtml = await detailRes.text();
+  const detail = extractMeta(detailHtml, latest.reportUrl);
+
+  return {
+    ...detail,
+    title: detail.title || latest.listTitle || "KCIF 보고서",
+    date: detail.date || latest.listDate,
+    pdfUrl: detail.pdfUrl ?? latest.listPdfUrl,
+  };
 }
 
 async function extractPdfText(pdfUrl: string): Promise<string> {
@@ -130,6 +161,7 @@ async function extractPdfText(pdfUrl: string): Promise<string> {
 async function summarizeWithOpenAI(input: {
   report: KcifReport;
   pdfText: string;
+  holdingsText: string;
 }): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -144,13 +176,20 @@ async function summarizeWithOpenAI(input: {
     `원문 URL: ${input.report.reportUrl}`,
     `PDF URL: ${input.report.pdfUrl ?? "없음"}`,
     "",
+    "[내 보유종목]",
+    input.holdingsText || "(보유종목 정보 없음)",
+    "",
     "[페이지 미리보기 텍스트]",
     input.report.previewText,
     "",
     "[PDF 본문 텍스트]",
     input.pdfText || "(없음)",
     "",
-    "요청: 한국어로 5줄 이내 핵심 요약 + 시장영향 포인트 3개 + 체크포인트 2개를 간결하게 작성",
+    "요청: 한국어로 아래 형식으로 작성",
+    "1) 핵심 요약 5줄 이내",
+    "2) 시장영향 포인트 3개",
+    "3) 내 보유종목 연관 분석(관련 종목만, 없으면 없음이라고 명시) 3개",
+    "4) 오늘 체크포인트 2개",
   ].join("\n");
 
   const completion = await client.chat.completions.create({
@@ -167,7 +206,36 @@ async function summarizeWithOpenAI(input: {
     ],
   });
 
-  return normalizeWs(completion.choices[0]?.message?.content ?? "요약 생성 실패");
+  return normalizeWs(completion.choices[0]?.message?.content ?? "요약 생성 실패").slice(0, 3000);
+}
+
+async function loadPortfolioHoldingsText(): Promise<string> {
+  const syncKey = process.env.TELEGRAM_ALERT_SYNC_KEY?.trim();
+  if (!syncKey) return "";
+
+  const supabase = createSupabaseAdmin();
+  if (!supabase) return "";
+
+  const { data } = await supabase
+    .from("portfolio_snapshots")
+    .select("positions")
+    .eq("sync_key", syncKey)
+    .maybeSingle();
+
+  const rows = Array.isArray(data?.positions) ? (data.positions as Array<Record<string, unknown>>) : [];
+  if (rows.length === 0) return "";
+
+  const lines = rows
+    .map((p) => {
+      const symbol = typeof p.symbol === "string" ? p.symbol : "";
+      const name = typeof p.name === "string" ? p.name : "";
+      const owner = typeof p.owner === "string" ? p.owner : "";
+      if (!symbol) return "";
+      return `- ${symbol}${name ? ` (${name})` : ""}${owner ? ` · 보유자: ${owner}` : ""}`;
+    })
+    .filter(Boolean);
+
+  return lines.join("\n");
 }
 
 async function sendTelegramMessage(text: string): Promise<void> {
@@ -219,7 +287,8 @@ async function run() {
   if (!pdfText || pdfText.length < 80) {
     throw new Error("PDF 본문을 충분히 추출하지 못했습니다.");
   }
-  const summary = await summarizeWithOpenAI({ report, pdfText });
+  const holdingsText = await loadPortfolioHoldingsText();
+  const summary = await summarizeWithOpenAI({ report, pdfText, holdingsText });
   const message = buildTelegramText(report, summary);
   await sendTelegramMessage(message);
 
