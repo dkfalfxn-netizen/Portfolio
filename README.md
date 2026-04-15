@@ -121,6 +121,8 @@ npm run build
 | `/api/alert/check` | `0 7 * * *` | 매일 **16:00** | 일별 스냅샷 저장(`saveAllSnapshots`), 이메일 알림 처리 |
 | `/api/alert/kakao-price-move` | `0 7 * * *` | 매일 **16:00** | 텔레그램 보유 브리핑 + 관심종목 시그널 (`TELEGRAM_ALERT_SYNC_KEY` 필요) |
 | `/api/cron/analyze-market` | `0 21 * * *` | 매일 **06:00** | AI 마켓 인사이트 |
+| `/api/cron/bok-financial-market` | `0 9 * * *` | 매일 **18:00** | 한국은행 금융시장 페이지 제목 요약 텔레그램 발송 |
+| `/api/cron/kcif-pdf-summary` | `1 9 * * *` | 매일 **18:01** | KCIF 보고서 PDF 본문 추출 후 AI 요약 텔레그램 발송 |
 
 **일별 자산 스냅샷**은 한국 장 마감(15:30) 직후에 가깝게 맞추기 위해 **오후 4시 KST**에 기록합니다. 앱에서 서버로 보내는 클라이언트 스냅샷도 같은 날 **KST 16시 이후**에만 전송되도록 되어 있습니다.
 
