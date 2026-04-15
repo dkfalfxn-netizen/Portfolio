@@ -34,6 +34,14 @@ function toAbsolute(baseUrl: string, maybeRelative: string): string {
   }
 }
 
+function todayKST(): string {
+  const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function extractMeta(html: string, reportUrl: string): KcifReport {
   const titleMatch = html.match(/<h\d[^>]*>\s*([^<]*?)\s*<\/h\d>/i);
   const strongTitleMatch = html.match(/<strong[^>]*>\s*([^<]+?)\s*<\/strong>/i);
@@ -280,6 +288,16 @@ function buildTelegramText(report: KcifReport, summary: string): string {
 
 async function run() {
   const report = await fetchKcifReport();
+  const today = todayKST();
+  if (!report.date || report.date !== today) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: `오늘 게시물 없음 (latest=${report.date || "unknown"}, today=${today})`,
+      reportUrl: report.reportUrl,
+      title: report.title,
+    };
+  }
   if (!report.pdfUrl) {
     throw new Error("PDF 링크를 찾지 못했습니다. KCIF 페이지 구조를 확인하세요.");
   }
