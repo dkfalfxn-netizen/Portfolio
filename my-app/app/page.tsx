@@ -1688,21 +1688,25 @@ export default function Home() {
   }
 
   async function handleDailySummaryTest(source: "bok" | "kcif") {
+    if (!cloudSyncKey || cloudSyncKey.length < 8) {
+      setDailySummaryTestResult({ ok: false, source, message: "먼저 동기화 키를 저장해 주세요." });
+      return;
+    }
     setDailySummaryTestBusy(true);
     setDailySummaryTestResult(null);
     try {
-      const path =
-        source === "bok"
-          ? "/api/cron/bok-financial-market"
-          : "/api/cron/kcif-pdf-summary";
-      const res = await fetch(path, { method: "POST" });
+      const res = await fetch("/api/alert/daily-summary-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source, sync_key: cloudSyncKey }),
+      });
       const body = await res.json() as Record<string, unknown>;
       setDailySummaryTestResult({
         ok: res.ok,
         source,
         message: res.ok
           ? `${source === "bok" ? "BOK" : "KCIF"} 요약 테스트 발송 완료`
-          : String(body.error ?? "요약 테스트 발송 실패"),
+          : String(body.error ?? body.message ?? "요약 테스트 발송 실패"),
         payload: body,
       });
     } catch {
@@ -1717,39 +1721,26 @@ export default function Home() {
   }
 
   async function handleDailySummaryCombinedTest() {
+    if (!cloudSyncKey || cloudSyncKey.length < 8) {
+      setDailySummaryTestResult({ ok: false, source: "both", message: "먼저 동기화 키를 저장해 주세요." });
+      return;
+    }
     setDailySummaryTestBusy(true);
     setDailySummaryTestResult(null);
     try {
-      const bokRes = await fetch("/api/cron/bok-financial-market", { method: "POST" });
-      const bokBody = await bokRes.json() as Record<string, unknown>;
-      if (!bokRes.ok) {
-        setDailySummaryTestResult({
-          ok: false,
-          source: "both",
-          message: `BOK 요약 전송 실패: ${String(bokBody.error ?? "알 수 없는 오류")}`,
-          payload: { bok: bokBody },
-        });
-        return;
-      }
-
-      setDailySummaryTestResult({
-        ok: true,
-        source: "both",
-        message: "BOK 전송 완료. 1분 뒤 KCIF PDF 요약을 이어서 전송합니다…",
-        payload: { bok: bokBody },
+      const kcifRes = await fetch("/api/alert/daily-summary-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "both", sync_key: cloudSyncKey }),
       });
-
-      await new Promise((resolve) => setTimeout(resolve, 60_000));
-
-      const kcifRes = await fetch("/api/cron/kcif-pdf-summary", { method: "POST" });
       const kcifBody = await kcifRes.json() as Record<string, unknown>;
       setDailySummaryTestResult({
         ok: kcifRes.ok,
         source: "both",
         message: kcifRes.ok
-          ? "BOK/KCIF 요약 테스트를 1분 간격으로 모두 발송했습니다."
-          : `KCIF PDF 요약 전송 실패: ${String(kcifBody.error ?? "알 수 없는 오류")}`,
-        payload: { bok: bokBody, kcif: kcifBody },
+          ? String(kcifBody.message ?? "BOK/KCIF 요약 테스트를 1분 간격으로 모두 발송했습니다.")
+          : String(kcifBody.error ?? kcifBody.message ?? "순차 테스트 발송 실패"),
+        payload: kcifBody.payload ?? kcifBody,
       });
     } catch {
       setDailySummaryTestResult({
