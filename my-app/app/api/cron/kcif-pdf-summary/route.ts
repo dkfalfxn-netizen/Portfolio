@@ -117,9 +117,14 @@ async function extractPdfText(pdfUrl: string): Promise<string> {
   }
   const arr = await res.arrayBuffer();
   const buf = Buffer.from(arr);
-  const pdfParseMod = await import("pdf-parse");
-  const parsed = await pdfParseMod.default(buf);
-  return normalizeWs(parsed.text ?? "").slice(0, 12000);
+  const { PDFParse } = await import("pdf-parse");
+  const parser = new PDFParse({ data: buf });
+  try {
+    const parsed = await parser.getText();
+    return normalizeWs(parsed.text ?? "").slice(0, 12000);
+  } finally {
+    await parser.destroy().catch(() => undefined);
+  }
 }
 
 async function summarizeWithOpenAI(input: {
