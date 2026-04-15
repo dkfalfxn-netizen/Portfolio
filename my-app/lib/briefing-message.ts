@@ -276,6 +276,7 @@ export function buildTelegramBriefingHtml(opts: {
     const lines: string[] = [
       `<b>🔄 HOLD에서 전환된 지표</b>`,
       `<i>전일까지 일봉만 반영 시 HOLD → 최신 일봉 포함 시 BUY/SELL (앱과 동일 MA·RSI·BB·VOL)</i>`,
+      "",
     ];
     for (const h of holdTransitions) {
       lines.push(
@@ -286,6 +287,8 @@ export function buildTelegramBriefingHtml(opts: {
           `  ${escapeHtml(r.key)}→<b>${r.to}</b>: ${escapeHtml(r.summary)}`,
         );
       }
+      // 종목 단위로 한 줄 띄워 가독성 향상
+      lines.push("");
     }
     holdBlock = `\n\n${lines.join("\n")}`;
   }
