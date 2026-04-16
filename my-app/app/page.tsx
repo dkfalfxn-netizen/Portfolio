@@ -42,8 +42,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율", "퇴직연금"] as const;
-type OwnerName = (typeof OWNER_NAMES)[number];
+const DEFAULT_OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율", "퇴직연금"] as const;
+type OwnerName = string;
 
 type Position = {
   symbol: string;
@@ -84,6 +84,7 @@ type HistoryResponse = {
 const STORAGE_KEY = "portfolio_positions_v2";
 const LEGACY_POSITIONS_STORAGE_KEY = "portfolio_positions_v1";
 const CASH_STORAGE_KEY = "portfolio_cash_v1";
+const OWNER_NAMES_STORAGE_KEY = "portfolio_owner_names_v1";
 const SYNC_KEY_STORAGE = "portfolio_sync_key_v1";
 const AUTO_SYNC_STORAGE = "portfolio_auto_sync_v1";
 const HOLDINGS_SORT_STORAGE_KEY = "portfolio_holdings_sort_v1";
@@ -121,6 +122,32 @@ type DailyLiveChange = {
   ownerChanges: Array<{ name: string; changeKrw: number; changePct: number | null }>;
   compareNote?: string;
 };
+
+function normalizeOwnerNames(raw: unknown): OwnerName[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_OWNER_NAMES];
+  const seen = new Set<string>();
+  const names: OwnerName[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  if (names.length === 0) return [...DEFAULT_OWNER_NAMES];
+  return names;
+}
+
+function loadOwnerNames(): OwnerName[] {
+  if (typeof window === "undefined") return [...DEFAULT_OWNER_NAMES];
+  try {
+    const raw = window.localStorage.getItem(OWNER_NAMES_STORAGE_KEY);
+    if (!raw) return [...DEFAULT_OWNER_NAMES];
+    return normalizeOwnerNames(JSON.parse(raw) as unknown);
+  } catch {
+    return [...DEFAULT_OWNER_NAMES];
+  }
+}
 
 function loadDailySnapshots(): DailySnapshot[] {
   if (typeof window === "undefined") return [];
@@ -164,13 +191,9 @@ function todayKST(): string {
 type HoldingsSortMode = "manual" | "valueAsc" | "valueDesc" | "group";
 
 function defaultHoldingsSort(): Record<OwnerName, HoldingsSortMode> {
-  return {
-    김승주: "manual",
-    강희진: "manual",
-    김도율: "manual",
-    김찬율: "manual",
-    퇴직연금: "manual",
-  };
+  return Object.fromEntries(
+    DEFAULT_OWNER_NAMES.map((name) => [name, "manual" as HoldingsSortMode]),
+  );
 }
 
 function loadHoldingsSort(): Record<OwnerName, HoldingsSortMode> {
@@ -189,9 +212,7 @@ function loadHoldingsSort(): Record<OwnerName, HoldingsSortMode> {
 function normalizeHoldingsSortFromServer(raw: unknown): Record<OwnerName, HoldingsSortMode> {
   const base = defaultHoldingsSort();
   if (!raw || typeof raw !== "object") return base;
-  const o = raw as Record<string, unknown>;
-  for (const name of OWNER_NAMES) {
-    const v = o[name];
+  for (const [name, v] of Object.entries(raw as Record<string, unknown>)) {
     if (v === "manual" || v === "valueAsc" || v === "valueDesc" || v === "group") {
       base[name] = v;
     }
@@ -401,7 +422,7 @@ const DEFAULT_CASH_BY_OWNER: CashByOwner = {
 };
 
 function isOwnerName(value: unknown): value is OwnerName {
-  return typeof value === "string" && (OWNER_NAMES as readonly string[]).includes(value);
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 /** 원화를 USD/KRW로 나눈 달러 표기 (Intl currency 심볼 대신 `$` 고정 — 가독성·환경 차이 대비) */
@@ -671,9 +692,9 @@ function loadCashByOwner(): CashByOwner {
       return { ...DEFAULT_CASH_BY_OWNER, 김승주: { ...legacy } };
     }
     const next: CashByOwner = { ...DEFAULT_CASH_BY_OWNER };
-    for (const name of OWNER_NAMES) {
-      if (obj[name] !== undefined) {
-        next[name] = parseCashPair(obj[name]);
+    for (const [name, value] of Object.entries(obj)) {
+      if (typeof name === "string" && name.trim()) {
+        next[name] = parseCashPair(value);
       }
     }
     return next;
@@ -686,15 +707,16 @@ function normalizeCashFromServer(raw: unknown): CashByOwner {
   const base: CashByOwner = { ...DEFAULT_CASH_BY_OWNER };
   if (!raw || typeof raw !== "object") return base;
   const obj = raw as Record<string, unknown>;
-  for (const name of OWNER_NAMES) {
-    if (obj[name] !== undefined) {
-      base[name] = parseCashPair(obj[name]);
+  for (const [name, value] of Object.entries(obj)) {
+    if (typeof name === "string" && name.trim()) {
+      base[name] = parseCashPair(value);
     }
   }
   return base;
 }
 
 export default function Home() {
+  const [ownerNames, setOwnerNames] = useState<OwnerName[]>(() => loadOwnerNames());
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -792,6 +814,24 @@ export default function Home() {
     selectedOwners: ["김승주"] as OwnerName[],
   });
 
+  useEffect(() => {
+    if (!isHydrated) return;
+    window.localStorage.setItem(OWNER_NAMES_STORAGE_KEY, JSON.stringify(ownerNames));
+  }, [ownerNames, isHydrated]);
+
+  useEffect(() => {
+    const merged = normalizeOwnerNames([
+      ...ownerNames,
+      ...positions.map((p) => p.owner),
+      ...Object.keys(cashByOwner),
+      ...Object.keys(holdingsSortByOwner),
+    ]);
+    if (merged.length === ownerNames.length && merged.every((name, idx) => ownerNames[idx] === name)) {
+      return;
+    }
+    setOwnerNames(merged);
+  }, [ownerNames, positions, cashByOwner, holdingsSortByOwner]);
+
   const marketSymbols = useMemo(
     () => [...new Set(positions.map((position) => position.symbol))].join(","),
     [positions],
@@ -861,11 +901,11 @@ export default function Home() {
   const eurKrw = marketQuery.data?.eurKrw ?? 1450;
 
   const totalCashKrw = useMemo(() => {
-    return OWNER_NAMES.reduce((sum, owner) => {
-      const c = cashByOwner[owner];
+    return ownerNames.reduce((sum, owner) => {
+      const c = cashByOwner[owner] ?? { usd: 0, krw: 0 };
       return sum + c.krw + c.usd * usdKrw;
     }, 0);
-  }, [cashByOwner, usdKrw]);
+  }, [ownerNames, cashByOwner, usdKrw]);
 
   const enrichedPositions = useMemo(() => {
     return positions.map((position, sourceIndex) => {
@@ -952,7 +992,7 @@ export default function Home() {
   }, [enrichedPositions, totalCashKrw, usdKrw]);
 
   const allocationByOwner = useMemo(() => {
-    return OWNER_NAMES.map((ownerName) => {
+    return ownerNames.map((ownerName) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
       // chartGroup이 있으면 그룹명 기준, 없으면 symbol 기준으로 차트 슬라이스 합산
       const groupMap = new Map<string, {
@@ -985,7 +1025,7 @@ export default function Home() {
         value,
       }));
 
-      const c = cashByOwner[ownerName];
+      const c = cashByOwner[ownerName] ?? { usd: 0, krw: 0 };
       const usd = Number.isFinite(c.usd) ? Math.max(0, c.usd) : 0;
       const krw = Number.isFinite(c.krw) ? Math.max(0, c.krw) : 0;
       const usdCashKrw = usd * usdKrw;
@@ -1016,14 +1056,14 @@ export default function Home() {
       }));
       return { ownerName, data, total };
     });
-  }, [enrichedPositions, cashByOwner, usdKrw]);
+  }, [ownerNames, enrichedPositions, cashByOwner, usdKrw]);
 
   const positionsByOwner = useMemo(() => {
-    return OWNER_NAMES.map((ownerName) => {
+    return ownerNames.map((ownerName) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
       const sectionStockValue = items.reduce((sum, item) => sum + item.valueKrw, 0);
       const sectionStockCost = items.reduce((sum, item) => sum + item.costKrw, 0);
-      const c = cashByOwner[ownerName];
+      const c = cashByOwner[ownerName] ?? { usd: 0, krw: 0 };
       const sectionCashKrw = c.krw + c.usd * usdKrw;
       const sectionTotal = sectionStockValue + sectionCashKrw;
       /** 주식 원가 + 현금(원화 환산) — 상단 카드와 동일한 투입 기준 */
@@ -1045,7 +1085,7 @@ export default function Home() {
         cashKrw: c.krw,
       };
     });
-  }, [enrichedPositions, cashByOwner, usdKrw]);
+  }, [ownerNames, enrichedPositions, cashByOwner, usdKrw]);
 
   /** 보유자별 그룹 오늘 등락 요약 (내림차순 정렬) */
   const ownerGroupDailySummary = useMemo(() => {
@@ -1808,7 +1848,7 @@ export default function Home() {
       if (!Number.isFinite(purchaseEurKrwNum) || purchaseEurKrwNum <= 0) return;
     }
 
-    const ownersOrdered = OWNER_NAMES.filter((o) => form.selectedOwners.includes(o));
+    const ownersOrdered = ownerNames.filter((o) => form.selectedOwners.includes(o));
     if (ownersOrdered.length === 0) return;
 
     const symbol = form.symbol.trim().toUpperCase();
@@ -1936,6 +1976,76 @@ export default function Home() {
     });
   }
 
+  function handleAddOwner() {
+    const next = window.prompt("추가할 보유자 이름을 입력하세요.");
+    const name = next?.trim();
+    if (!name) return;
+    if (ownerNames.includes(name)) return;
+    setOwnerNames((prev) => [...prev, name]);
+    setCashByOwner((prev) => ({ ...prev, [name]: prev[name] ?? { usd: 0, krw: 0 } }));
+    setHoldingsSortByOwner((prev) => ({ ...prev, [name]: prev[name] ?? "manual" }));
+  }
+
+  function handleRenameOwner(name: string) {
+    const next = window.prompt("새 보유자 이름", name);
+    const renamed = next?.trim();
+    if (!renamed || renamed === name) return;
+    if (ownerNames.includes(renamed)) return;
+    setOwnerNames((prev) => prev.map((n) => (n === name ? renamed : n)));
+    setPositions((prev) => prev.map((p) => (p.owner === name ? { ...p, owner: renamed } : p)));
+    setCashByOwner((prev) => {
+      const current = prev[name] ?? { usd: 0, krw: 0 };
+      const rest = { ...prev };
+      delete rest[name];
+      return { ...rest, [renamed]: current };
+    });
+    setHoldingsSortByOwner((prev) => {
+      const current = prev[name] ?? "manual";
+      const rest = { ...prev };
+      delete rest[name];
+      return { ...rest, [renamed]: current };
+    });
+    setForm((prev) => ({
+      ...prev,
+      selectedOwners: prev.selectedOwners.map((o) => (o === name ? renamed : o)),
+    }));
+    setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? renamed : prev.owner }));
+    setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? renamed : r.owner })));
+  }
+
+  function handleDeleteOwner(name: string) {
+    if (ownerNames.length <= 1) return;
+    const hasData =
+      positions.some((p) => p.owner === name) ||
+      (cashByOwner[name]?.usd ?? 0) > 0 ||
+      (cashByOwner[name]?.krw ?? 0) > 0;
+    const ok = window.confirm(
+      hasData
+        ? `${name} 보유자를 삭제하면 연결된 종목/현금도 함께 삭제됩니다. 계속할까요?`
+        : `${name} 보유자를 삭제할까요?`,
+    );
+    if (!ok) return;
+    const fallbackOwner = ownerNames.find((n) => n !== name) ?? "김승주";
+    setOwnerNames((prev) => prev.filter((n) => n !== name));
+    setPositions((prev) => prev.filter((p) => p.owner !== name));
+    setCashByOwner((prev) => {
+      const rest = { ...prev };
+      delete rest[name];
+      return rest;
+    });
+    setHoldingsSortByOwner((prev) => {
+      const rest = { ...prev };
+      delete rest[name];
+      return rest;
+    });
+    setForm((prev) => {
+      const selected = prev.selectedOwners.filter((o) => o !== name);
+      return { ...prev, selectedOwners: selected.length > 0 ? selected : [fallbackOwner] };
+    });
+    setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? fallbackOwner : prev.owner }));
+    setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? "전체" : r.owner })));
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="flex w-full gap-3 px-2 py-4 sm:gap-4 sm:py-6 md:px-4">
@@ -1967,7 +2077,7 @@ export default function Home() {
                 <span>보유 종목</span>
               </button>
               <div className="ml-4 space-y-0.5 border-l border-border/50 pl-2">
-                {OWNER_NAMES.map((name) => (
+                {ownerNames.map((name) => (
                   <button
                     key={name}
                     type="button"
@@ -2046,7 +2156,7 @@ export default function Home() {
               </div>
               <div className="overflow-x-auto">
                 <div className="flex min-w-max items-center gap-1.5">
-                  {OWNER_NAMES.map((name) => (
+                  {ownerNames.map((name) => (
                     <button
                       key={name}
                       type="button"
@@ -2117,7 +2227,7 @@ export default function Home() {
               이전에는 기록이 없던 것입니다(미방문, 다른 브라우저, 초기화 등). 동기화 키가 있으면 서버에
               누적된 날짜도 함께 불러옵니다.
             </p>
-            <DailyTrendChart snapshots={dailySnapshots} ownerNames={OWNER_NAMES} liveChangeByDate={dailyLiveChangeByDate} />
+            <DailyTrendChart snapshots={dailySnapshots} ownerNames={ownerNames} liveChangeByDate={dailyLiveChangeByDate} />
           </section>
           <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
 
@@ -2733,6 +2843,40 @@ export default function Home() {
 
           <section id="section-add" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-3 font-semibold">종목 추가</h2>
+            <div className="mb-4 rounded-xl border bg-muted/20 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-medium">보유자 관리</p>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all hover:bg-muted active:scale-95"
+                  onClick={handleAddOwner}
+                >
+                  + 보유자 추가
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {ownerNames.map((name) => (
+                  <div key={name} className="flex items-center gap-1 rounded-md border bg-background px-2 py-1">
+                    <span className="text-xs font-medium">{name}</span>
+                    <button
+                      type="button"
+                      className="rounded px-1 text-[11px] text-muted-foreground hover:bg-muted"
+                      onClick={() => handleRenameOwner(name)}
+                    >
+                      이름수정
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded px-1 text-[11px] text-destructive hover:bg-destructive/10 disabled:opacity-40"
+                      disabled={ownerNames.length <= 1}
+                      onClick={() => handleDeleteOwner(name)}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
             <p className="mb-3 text-xs text-muted-foreground">
               담당자를 여러 명 선택하면 같은 티커·수량·평단으로 각각 한 줄씩 추가됩니다.
               같은 티커·담당자·계좌(해외/국내+계좌명)·통화로 다시 추가하면 기존 줄에{" "}
@@ -2835,7 +2979,7 @@ export default function Home() {
               <div className="col-span-2 flex flex-col gap-2 sm:col-span-3 md:col-span-6">
                 <span className="text-[11px] font-medium text-muted-foreground">담당자 (복수 선택)</span>
                 <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-                  {OWNER_NAMES.map((name) => (
+                  {ownerNames.map((name) => (
                     <label
                       key={name}
                       className="flex cursor-pointer items-center gap-1.5 text-sm select-none"
@@ -2848,7 +2992,7 @@ export default function Home() {
                           const checked = e.target.checked;
                           setForm((prev) => {
                             const next = checked
-                              ? OWNER_NAMES.filter(
+                              ? ownerNames.filter(
                                   (o) => prev.selectedOwners.includes(o) || o === name,
                                 )
                               : prev.selectedOwners.filter((o) => o !== name);
@@ -2937,7 +3081,7 @@ export default function Home() {
                       }
                     >
                       <option value="전체">전체</option>
-                      {OWNER_NAMES.map((n) => (
+                      {ownerNames.map((n) => (
                         <option key={n} value={n}>{n}</option>
                       ))}
                     </select>
@@ -3273,7 +3417,7 @@ export default function Home() {
                 value={simForm.owner}
                 onChange={(e) => setSimForm((p) => ({ ...p, owner: e.target.value as OwnerName }))}
               >
-                {OWNER_NAMES.map((n) => (
+                {ownerNames.map((n) => (
                   <option key={n} value={n}>{n}</option>
                 ))}
               </select>

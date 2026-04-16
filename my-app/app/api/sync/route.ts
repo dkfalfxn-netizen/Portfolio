@@ -52,16 +52,13 @@ export async function GET() {
   });
 }
 
-const OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율", "퇴직연금"] as const;
 const HOLDINGS_SORT_MODES = new Set(["manual", "valueAsc", "valueDesc", "group"]);
 
 /** 클라이언트와 동일한 키만 허용해 jsonb에 저장 */
 function parseHoldingsSortFromJson(raw: unknown): Record<string, string> {
   const out: Record<string, string> = {};
   if (!raw || typeof raw !== "object") return out;
-  const o = raw as Record<string, unknown>;
-  for (const name of OWNER_NAMES) {
-    const v = o[name];
+  for (const [name, v] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof v === "string" && HOLDINGS_SORT_MODES.has(v)) {
       out[name] = v;
     }
