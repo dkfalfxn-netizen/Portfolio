@@ -1688,16 +1688,29 @@ export default function Home() {
       setSyncMessage("동기화 키는 8자 이상으로 정해 주세요.");
       return;
     }
-    const isKeyChange = k !== cloudSyncKey && cloudSyncKey.length >= 8;
+    const prevKey = cloudSyncKey.trim();
+    const isKeyChange = k !== prevKey && prevKey.length >= 8;
+    /** 이전에 유효 키가 없었던 상태(저장소 삭제 직후 등)에서 첫 저장: 기본 샘플 state가 로컬 변경으로 찍혀 push가 나가 서버를 덮는 것을 막기 위해 항상 pull */
+    const isFirstValidKeySave = prevKey.length < 8 && k.length >= 8;
     if (isKeyChange) {
       // 키가 바뀌는 경우: 로컬 변경 플래그·타임스탬프를 초기화해 새 키의 서버 데이터를 항상 pull
+      window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+      window.localStorage.removeItem(LAST_SYNC_TS_KEY);
+    } else if (isFirstValidKeySave) {
       window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
       window.localStorage.removeItem(LAST_SYNC_TS_KEY);
     }
     window.localStorage.setItem(SYNC_KEY_STORAGE, k);
     setCloudSyncKey(k);
     setSyncMessage("키를 저장했습니다. 서버와 맞추는 중…");
-    await syncWithServerForKey(k, positions, cashByOwner, holdingsSortByOwner, ownerNames, isKeyChange);
+    await syncWithServerForKey(
+      k,
+      positions,
+      cashByOwner,
+      holdingsSortByOwner,
+      ownerNames,
+      isKeyChange || isFirstValidKeySave,
+    );
   }
 
   // 알림 설정 불러오기 (동기화 키가 준비되면 한 번)
