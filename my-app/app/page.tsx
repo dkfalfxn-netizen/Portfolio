@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -136,6 +136,29 @@ function normalizeOwnerNames(raw: unknown): OwnerName[] {
   }
   if (names.length === 0) return [...DEFAULT_OWNER_NAMES];
   return names;
+}
+
+function inferOwnerNamesFromSyncPayload(payload: {
+  owner_names?: unknown;
+  positions?: unknown;
+  cash_by_owner?: unknown;
+  holdings_sort_by_owner?: unknown;
+}): OwnerName[] {
+  const fromOwnerNames = normalizeOwnerNames(payload.owner_names);
+  const fromPositions = Array.isArray(payload.positions)
+    ? payload.positions
+        .map((p) => (p && typeof p === "object" ? (p as { owner?: unknown }).owner : undefined))
+        .filter((name): name is string => typeof name === "string")
+    : [];
+  const fromCash =
+    payload.cash_by_owner && typeof payload.cash_by_owner === "object"
+      ? Object.keys(payload.cash_by_owner as Record<string, unknown>)
+      : [];
+  const fromSort =
+    payload.holdings_sort_by_owner && typeof payload.holdings_sort_by_owner === "object"
+      ? Object.keys(payload.holdings_sort_by_owner as Record<string, unknown>)
+      : [];
+  return normalizeOwnerNames([...fromOwnerNames, ...fromPositions, ...fromCash, ...fromSort]);
 }
 
 function loadOwnerNames(): OwnerName[] {
@@ -1267,7 +1290,7 @@ export default function Home() {
           setPositions(mergeDuplicatePositions(valid));
           setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
           setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
-          setOwnerNames(normalizeOwnerNames(j.owner_names));
+          setOwnerNames(inferOwnerNamesFromSyncPayload(j));
           window.localStorage.setItem(LAST_SYNC_TS_KEY, serverTs);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setLastSyncedAt(serverTs);
@@ -1520,7 +1543,7 @@ export default function Home() {
         setPositions(mergeDuplicatePositions(valid));
         setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
         setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
-        setOwnerNames(normalizeOwnerNames(j.owner_names));
+        setOwnerNames(inferOwnerNamesFromSyncPayload(j));
         if (typeof j.updated_at === "string") {
           window.localStorage.setItem(LAST_SYNC_TS_KEY, j.updated_at);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
