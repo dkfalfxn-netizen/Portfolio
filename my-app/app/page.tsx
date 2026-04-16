@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
+  ChangeEvent,
   Fragment,
   FormEvent,
   useCallback,
@@ -828,6 +829,7 @@ export default function Home() {
   const [autoSync, setAutoSync] = useState(true);
   const [syncReady, setSyncReady] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
+  const restoreBackupFileInputRef = useRef<HTMLInputElement>(null);
   const [syncMessage, setSyncMessage] = useState("");
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [serverHealth, setServerHealth] = useState<"loading" | "ok" | "error">("loading");
@@ -1783,6 +1785,115 @@ export default function Home() {
       a.remove();
       URL.revokeObjectURL(url);
       setSyncMessage("서버에 백업 한 줄을 추가한 뒤, JSON을 내려받았습니다.");
+    } catch {
+      setSyncMessage("네트워크 오류입니다.");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  /** 내려받은 백업 JSON(가장 최근 항목)을 서버 메인 잔고에 push한 뒤 불러오기로 화면을 맞춥니다. */
+  async function handleRestoreFromBackupFile(ev: ChangeEvent<HTMLInputElement>) {
+    const input = ev.target;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+
+    const key = cloudSyncKey.trim();
+    if (key.length < 8) {
+      setSyncMessage("동기화 키를 8자 이상 저장해 주세요.");
+      return;
+    }
+
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setSyncMessage("파일을 읽을 수 없습니다.");
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text) as unknown;
+    } catch {
+      setSyncMessage("JSON 형식이 아닙니다.");
+      return;
+    }
+
+    if (!raw || typeof raw !== "object") {
+      setSyncMessage("파일 내용이 올바르지 않습니다.");
+      return;
+    }
+
+    const root = raw as { format?: unknown; sync_key?: unknown; backups?: unknown };
+    if (
+      root.format !== "portfolio_snapshot_backups_v1" ||
+      !Array.isArray(root.backups) ||
+      root.backups.length === 0
+    ) {
+      setSyncMessage("이 앱에서 내려받은 백업 파일이 아니거나, 백업 목록이 비어 있습니다.");
+      return;
+    }
+
+    const first = root.backups[0];
+    if (!first || typeof first !== "object") {
+      setSyncMessage("백업 항목이 올바르지 않습니다.");
+      return;
+    }
+
+    const snap = (first as { snapshot?: unknown }).snapshot;
+    if (!snap || typeof snap !== "object") {
+      setSyncMessage("백업 스냅샷이 비어 있습니다.");
+      return;
+    }
+
+    const s = snap as Record<string, unknown>;
+    const fileKey = typeof root.sync_key === "string" ? root.sync_key.trim() : "";
+    if (fileKey && fileKey !== key) {
+      const okKey = window.confirm(
+        [
+          "파일에 적힌 동기화 키와 지금 이 기기에 저장된 키가 다릅니다.",
+          `파일 키 끝 4자: …${fileKey.slice(-4)}`,
+          `현재 키 끝 4자: …${key.slice(-4)}`,
+          "",
+          "지금 저장된 키로 서버에 올릴까요? (잘못 고르면 다른 키의 서버 데이터를 덮어쓸 수 있습니다.)",
+        ].join("\n"),
+      );
+      if (!okKey) return;
+    }
+
+    const ok = window.confirm(
+      [
+        "파일 안의 가장 최근 백업(목록 첫 번째)만 사용합니다.",
+        "그 내용으로 서버 메인 잔고를 덮어쓴 뒤, 이 화면도 서버에서 다시 불러옵니다.",
+        "",
+        "복원할까요?",
+      ].join("\n"),
+    );
+    if (!ok) return;
+
+    setSyncBusy(true);
+    try {
+      const r = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "push",
+          key,
+          positions: s.positions ?? [],
+          cashByOwner: s.cash_by_owner ?? {},
+          holdingsSortByOwner: s.holdings_sort_by_owner ?? {},
+          ownerNames: s.owner_names ?? [],
+        }),
+      });
+      const j = (await r.json()) as { error?: string };
+      if (!r.ok) {
+        setSyncMessage(j.error ?? "복원(서버 반영)에 실패했습니다.");
+        return;
+      }
+      await handlePullCloud();
+      setSyncMessage("백업 파일을 반영했습니다. 서버와 화면을 맞춰 두었습니다.");
     } catch {
       setSyncMessage("네트워크 오류입니다.");
     } finally {
@@ -3832,6 +3943,21 @@ export default function Home() {
                 >
                   백업 내려받기
                 </button>
+                <input
+                  ref={restoreBackupFileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={handleRestoreFromBackupFile}
+                />
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border border-dashed px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  disabled={syncBusy}
+                  onClick={() => restoreBackupFileInputRef.current?.click()}
+                >
+                  백업에서 복원
+                </button>
                 <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
                   <input
                     type="checkbox"
@@ -3853,7 +3979,9 @@ export default function Home() {
                 동기화 키의 백업은 <strong className="font-medium text-foreground">최대 1년</strong>치만 남기고
                 그보다 오래된 백업 행만 지웁니다. 「백업 내려받기」는 먼저 서버 잔고를 백업 테이블에 한 줄
                 추가한 뒤, 쌓인 백업(최대 500건)을 JSON 파일로 저장합니다. 내려받은 파일은 PC에 남으며 웹이
-                자동으로 지우지는 않습니다.
+                자동으로 지우지는 않습니다. 「백업에서 복원」은 그 JSON을 고르면{" "}
+                <strong className="font-medium text-foreground">목록 첫 번째(가장 최근) 백업</strong>만 서버
+                메인 잔고에 반영합니다.
               </p>
               {syncMessage ? (
                 <p className="text-xs text-muted-foreground">{syncMessage}</p>
