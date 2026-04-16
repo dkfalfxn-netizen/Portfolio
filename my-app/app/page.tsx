@@ -3741,7 +3741,7 @@ export default function Home() {
                   disabled={syncBusy}
                   onClick={handleBackupSnapshot}
                 >
-                  백업 받기
+                  백업
                 </button>
                 <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
                   <input
@@ -3758,7 +3758,7 @@ export default function Home() {
                 </label>
               </div>
               <p className="text-xs text-muted-foreground">
-                「백업 받기」는 지금 서버에 올라가 있는 잔고를 별도 백업 테이블에{" "}
+                「백업」은 지금 서버에 올라가 있는 잔고를 별도 백업 테이블에{" "}
                 <strong className="font-medium text-foreground">한 줄씩 추가</strong>합니다. 메인 동기화
                 데이터는 덮어쓰지 않습니다. 같은 동기화 키의 백업은{" "}
                 <strong className="font-medium text-foreground">최대 1년</strong>치만 남기고, 그보다 오래된
