@@ -832,6 +832,8 @@ export default function Home() {
   const restoreBackupFileInputRef = useRef<HTMLInputElement>(null);
   const [syncMessage, setSyncMessage] = useState("");
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [latestBackupAt, setLatestBackupAt] = useState<string | null>(null);
+  const [hasLoadedLatestBackup, setHasLoadedLatestBackup] = useState(false);
   const [serverHealth, setServerHealth] = useState<"loading" | "ok" | "error">("loading");
   const pushDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
@@ -906,6 +908,39 @@ export default function Home() {
     /** 종목 추가 시 한 번에 넣을 담당자(복수) */
     selectedOwners: ["김승주"] as OwnerName[],
   });
+
+  const refreshLatestBackupAt = useCallback(async () => {
+    const key = cloudSyncKey.trim();
+    if (key.length < 8) {
+      setLatestBackupAt(null);
+      setHasLoadedLatestBackup(false);
+      return;
+    }
+    setHasLoadedLatestBackup(false);
+    try {
+      const r = await fetch(`/api/backup/latest?sync_key=${encodeURIComponent(key)}`);
+      const j = (await r.json()) as { latest_backup_at?: string | null };
+      if (!r.ok) {
+        setLatestBackupAt(null);
+        setHasLoadedLatestBackup(false);
+        return;
+      }
+      setHasLoadedLatestBackup(true);
+      setLatestBackupAt(j.latest_backup_at ?? null);
+    } catch {
+      setLatestBackupAt(null);
+      setHasLoadedLatestBackup(false);
+    }
+  }, [cloudSyncKey]);
+
+  useEffect(() => {
+    if (!syncReady || cloudSyncKey.trim().length < 8) {
+      setLatestBackupAt(null);
+      setHasLoadedLatestBackup(false);
+      return;
+    }
+    void refreshLatestBackupAt();
+  }, [syncReady, cloudSyncKey, refreshLatestBackupAt]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -1714,6 +1749,7 @@ export default function Home() {
         setSyncMessage(j.error ?? "백업 실패");
       } else {
         setSyncMessage(j.warning ?? j.message ?? "백업을 저장했습니다.");
+        void refreshLatestBackupAt();
       }
     } catch {
       setSyncMessage("네트워크 오류입니다.");
@@ -1785,6 +1821,7 @@ export default function Home() {
       a.remove();
       URL.revokeObjectURL(url);
       setSyncMessage("서버에 백업 한 줄을 추가한 뒤, JSON을 내려받았습니다.");
+      void refreshLatestBackupAt();
     } catch {
       setSyncMessage("네트워크 오류입니다.");
     } finally {
@@ -1894,6 +1931,7 @@ export default function Home() {
       }
       await handlePullCloud();
       setSyncMessage("백업 파일을 반영했습니다. 서버와 화면을 맞춰 두었습니다.");
+      void refreshLatestBackupAt();
     } catch {
       setSyncMessage("네트워크 오류입니다.");
     } finally {
@@ -3990,6 +4028,18 @@ export default function Home() {
               {lastSyncedAt ? (
                 <p className="text-xs text-muted-foreground">
                   마지막 동기 시각: {new Date(lastSyncedAt).toLocaleString()}
+                </p>
+              ) : null}
+              {syncReady && cloudSyncKey.trim().length >= 8 && hasLoadedLatestBackup ? (
+                <p className="text-xs text-muted-foreground">
+                  서버 최근 백업:{" "}
+                  {latestBackupAt ? (
+                    <span className="font-medium text-foreground">
+                      {new Date(latestBackupAt).toLocaleString()}
+                    </span>
+                  ) : (
+                    <span>아직 없음 (「백업」 또는 「백업 내려받기」로 저장)</span>
+                  )}
                 </p>
               ) : null}
             </CardContent>
