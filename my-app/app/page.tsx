@@ -777,6 +777,34 @@ function normalizeHoldingsSortStrict(
   return base;
 }
 
+/**
+ * 서버 `updated_at`이 로컬 `portfolio_last_sync_ts_v1`보다 새로운지.
+ * 로컬 시각이 비어 있으면(저장소 삭제·최초) 항상 true → 서버 스냅샷을 반영해야 함.
+ * 문자열만 `>`로 비교하면 `"" > ""`가 false가 되어 pull 적용이 건너뛰어질 수 있다.
+ */
+function isServerSnapshotNewerThanLocal(serverTsRaw: string, lastSyncTsRaw: string): boolean {
+  const serverTs = serverTsRaw.trim();
+  const lastSyncTs = lastSyncTsRaw.trim();
+  if (lastSyncTs.length === 0) return true;
+  if (serverTs.length === 0) return false;
+  const a = Date.parse(serverTs);
+  const b = Date.parse(lastSyncTs);
+  if (Number.isFinite(a) && Number.isFinite(b)) return a > b;
+  return serverTs > lastSyncTs;
+}
+
+/** 포지션·보유자 로컬 캐시가 없으면(부분 삭제) 동기 시각만 남아 pull이 건너뛰어지는 문제를 막기 위함 */
+function isLocalPortfolioCacheCleared(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const pos = window.localStorage.getItem(STORAGE_KEY);
+    const owners = window.localStorage.getItem(OWNER_NAMES_STORAGE_KEY);
+    return pos == null || pos === "" || owners == null || owners === "";
+  } catch {
+    return true;
+  }
+}
+
 export default function Home() {
   const [ownerNames, setOwnerNames] = useState<OwnerName[]>(() => loadOwnerNames());
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
@@ -1313,12 +1341,19 @@ export default function Home() {
         return;
       }
       if (j.found) {
-        const serverTs = typeof j.updated_at === "string" ? j.updated_at : "";
-        const lastSyncTs = window.localStorage.getItem(LAST_SYNC_TS_KEY) ?? "";
+        const serverTs = typeof j.updated_at === "string" ? j.updated_at.trim() : "";
+        const lastSyncTs = (window.localStorage.getItem(LAST_SYNC_TS_KEY) ?? "").trim();
         const hasLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) === "1";
 
-        if (forcePull || (serverTs > lastSyncTs && !hasLocalChanges)) {
+        const cacheMissing = isLocalPortfolioCacheCleared();
+        if (
+          forcePull ||
+          (!hasLocalChanges &&
+            (isServerSnapshotNewerThanLocal(serverTs, lastSyncTs) ||
+              (lastSyncTs.length > 0 && cacheMissing)))
+        ) {
           // ─ forcePull(키 변경 시) 또는 서버가 더 최신이고 로컬 미반영 변경 없음 → 서버 데이터를 적용
+          //   (동기 시각만 남고 positions/owner_names 키는 지운 경우에도 서버 스냅샷을 다시 적용)
           setSyncMessage("서버에서 최신 잔고를 불러왔습니다.");
           skipMarkLocalChangedRef.current = 2;
           skipOwnerLocalChangedRef.current = 1;
@@ -1332,9 +1367,10 @@ export default function Home() {
           setCashByOwner(normalizeCashStrict(j.cash_by_owner, pulledOwners));
           setHoldingsSortByOwner(normalizeHoldingsSortStrict(j.holdings_sort_by_owner, pulledOwners));
           setOwnerNames(pulledOwners);
-          window.localStorage.setItem(LAST_SYNC_TS_KEY, serverTs);
+          const clockToStore = serverTs.length > 0 ? serverTs : new Date().toISOString();
+          window.localStorage.setItem(LAST_SYNC_TS_KEY, clockToStore);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
-          setLastSyncedAt(serverTs);
+          setLastSyncedAt(clockToStore);
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
           // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
@@ -1364,10 +1400,15 @@ export default function Home() {
           // ─ 이미 동기화된 상태
           if (!lastSyncTs) {
             // 최초 연결 시 lastSyncTs 를 서버 기준으로 초기화
-            window.localStorage.setItem(LAST_SYNC_TS_KEY, serverTs);
+            window.localStorage.setItem(
+              LAST_SYNC_TS_KEY,
+              serverTs.length > 0 ? serverTs : new Date().toISOString(),
+            );
           }
           setSyncMessage("서버와 동기화 상태입니다.");
-          setLastSyncedAt(serverTs || lastSyncTs);
+          setLastSyncedAt(
+            serverTs.length > 0 ? serverTs : lastSyncTs || new Date().toISOString(),
+          );
         }
       } else {
         // ─ 서버에 데이터 없음 → 이 기기 내용을 처음 올림
