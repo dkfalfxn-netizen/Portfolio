@@ -95,7 +95,10 @@ function inferOwnerNamesFromSnapshot(row: {
   cash_by_owner?: unknown;
   holdings_sort_by_owner?: unknown;
 }): string[] {
-  const fromOwnerNames = parseOwnerNames(row.owner_names);
+  const explicit = parseOwnerNames(row.owner_names);
+  if (explicit.length > 0) {
+    return explicit;
+  }
   const fromPositions = Array.isArray(row.positions)
     ? row.positions
         .map((p) => (p && typeof p === "object" ? (p as { owner?: unknown }).owner : undefined))
@@ -109,7 +112,42 @@ function inferOwnerNamesFromSnapshot(row: {
     row.holdings_sort_by_owner && typeof row.holdings_sort_by_owner === "object"
       ? Object.keys(row.holdings_sort_by_owner as Record<string, unknown>)
       : [];
-  return parseOwnerNames([...fromOwnerNames, ...fromPositions, ...fromCash, ...fromSort]);
+  return parseOwnerNames([...fromPositions, ...fromCash, ...fromSort]);
+}
+
+function sanitizePositionsForOwners(positions: unknown, allowed: Set<string>): unknown[] {
+  if (!Array.isArray(positions)) return [];
+  return positions.filter((p) => {
+    if (!p || typeof p !== "object") return false;
+    const owner = (p as { owner?: unknown }).owner;
+    return typeof owner === "string" && allowed.has(owner);
+  });
+}
+
+function sanitizeCashForOwners(
+  cash: unknown,
+  allowed: Set<string>,
+): Record<string, unknown> {
+  if (!cash || typeof cash !== "object") return {};
+  const obj = cash as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const name of allowed) {
+    if (Object.prototype.hasOwnProperty.call(obj, name)) {
+      out[name] = obj[name];
+    }
+  }
+  return out;
+}
+
+function sanitizeHoldingsSortForOwners(
+  sort: Record<string, string>,
+  allowed: Set<string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(sort)) {
+    if (allowed.has(k)) out[k] = v;
+  }
+  return out;
 }
 
 export async function POST(req: NextRequest) {
@@ -222,13 +260,30 @@ export async function POST(req: NextRequest) {
       ];
       ownerNames = parseOwnerNames(inferred);
     }
+    if (ownerNames.length === 0) {
+      ownerNames = parseOwnerNames([
+        ...Object.keys((b.cashByOwner as Record<string, unknown>) ?? {}),
+        ...(
+          Array.isArray(b.positions)
+            ? b.positions
+                .map((p) => (p && typeof p === "object" ? (p as { owner?: unknown }).owner : undefined))
+                .filter((name): name is string => typeof name === "string")
+            : []
+        ),
+      ]);
+    }
+
+    const allowed = new Set(ownerNames);
+    const positionsOut = sanitizePositionsForOwners(b.positions, allowed);
+    const cashOut = sanitizeCashForOwners(b.cashByOwner, allowed);
+    const holdingsSortOut = sanitizeHoldingsSortForOwners(holdingsSort, allowed);
 
     const updatedAt = new Date().toISOString();
     const payload = {
       sync_key: key,
-      positions: b.positions,
-      cash_by_owner: b.cashByOwner,
-      holdings_sort_by_owner: holdingsSort,
+      positions: positionsOut,
+      cash_by_owner: cashOut,
+      holdings_sort_by_owner: holdingsSortOut,
       owner_names: ownerNames,
       updated_at: updatedAt,
     };
@@ -242,9 +297,9 @@ export async function POST(req: NextRequest) {
             .upsert(
               {
                 sync_key: key,
-                positions: b.positions,
-                cash_by_owner: b.cashByOwner,
-                holdings_sort_by_owner: holdingsSort,
+                positions: positionsOut,
+                cash_by_owner: cashOut,
+                holdings_sort_by_owner: holdingsSortOut,
                 updated_at: updatedAt,
               },
               { onConflict: "sync_key" },

@@ -138,13 +138,32 @@ function normalizeOwnerNames(raw: unknown): OwnerName[] {
   return names;
 }
 
+/** 서버 owner_names 등: 빈 배열은 빈 배열(기본 보유자 주입 없음) */
+function parseOwnerNamesNoDefault(raw: unknown): OwnerName[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const names: OwnerName[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
+
 function inferOwnerNamesFromSyncPayload(payload: {
   owner_names?: unknown;
   positions?: unknown;
   cash_by_owner?: unknown;
   holdings_sort_by_owner?: unknown;
 }): OwnerName[] {
-  const fromOwnerNames = normalizeOwnerNames(payload.owner_names);
+  const explicit = parseOwnerNamesNoDefault(payload.owner_names);
+  // DB에 저장된 owner_names가 있으면 그것만 신뢰 (cash/sort 잔여 키로 부활 방지)
+  if (explicit.length > 0) {
+    return explicit;
+  }
   const fromPositions = Array.isArray(payload.positions)
     ? payload.positions
         .map((p) => (p && typeof p === "object" ? (p as { owner?: unknown }).owner : undefined))
@@ -158,7 +177,9 @@ function inferOwnerNamesFromSyncPayload(payload: {
     payload.holdings_sort_by_owner && typeof payload.holdings_sort_by_owner === "object"
       ? Object.keys(payload.holdings_sort_by_owner as Record<string, unknown>)
       : [];
-  return normalizeOwnerNames([...fromOwnerNames, ...fromPositions, ...fromCash, ...fromSort]);
+  const inferred = parseOwnerNamesNoDefault([...fromPositions, ...fromCash, ...fromSort]);
+  if (inferred.length > 0) return inferred;
+  return [...DEFAULT_OWNER_NAMES];
 }
 
 function loadOwnerNames(): OwnerName[] {
@@ -726,18 +747,6 @@ function loadCashByOwner(): CashByOwner {
   }
 }
 
-function normalizeCashFromServer(raw: unknown): CashByOwner {
-  const base: CashByOwner = { ...DEFAULT_CASH_BY_OWNER };
-  if (!raw || typeof raw !== "object") return base;
-  const obj = raw as Record<string, unknown>;
-  for (const [name, value] of Object.entries(obj)) {
-    if (typeof name === "string" && name.trim()) {
-      base[name] = parseCashPair(value);
-    }
-  }
-  return base;
-}
-
 /** 서버 pull 전용: owner_names 기준으로만 cash 복원 (DEFAULT 강제 주입 없음) */
 function normalizeCashStrict(raw: unknown, owners: OwnerName[]): CashByOwner {
   const obj =
@@ -1269,7 +1278,6 @@ export default function Home() {
         }
       }
     } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positionsByOwner, isHydrated]);
 
   /** pull → 있으면 반영, 없으면 이 기기(pos/cash/정렬)를 push (최초 기기·키 저장 직후 공통) */
