@@ -1729,17 +1729,36 @@ export default function Home() {
     }
     const ok = window.confirm(
       [
-        "서버에 저장된 백업 목록을 JSON 파일로 내려받습니다.",
+        "① 먼저 지금 서버에 올라가 있는 잔고를 백업 테이블에 한 줄 추가하고,",
+        "② 이어서 서버에 쌓인 백업 목록을 JSON 파일로 내려받습니다.",
         "",
-        "파일 안에는 동기화 키와 포트폴리오 백업 데이터가 들어갑니다. 메일·메신저 등으로 타인에게 보내지 마세요.",
+        "내려받은 파일은 내 PC의 다운로드 폴더 등에 남습니다. 웹이 그 파일을 대신 지우지는 못합니다(브라우저 보안). 필요 없으면 직접 삭제하세요.",
         "",
-        "내려받을까요?",
+        "파일에는 동기화 키와 백업 데이터가 들어갑니다. 타인과 공유하지 마세요.",
+        "",
+        "진행할까요?",
       ].join("\n"),
     );
     if (!ok) return;
 
     setSyncBusy(true);
     try {
+      const rSnap = await fetch("/api/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_key: key }),
+      });
+      const jSnap = (await rSnap.json().catch(() => ({}))) as { error?: string; ok?: boolean };
+      if (!rSnap.ok) {
+        setSyncMessage(
+          jSnap.error ??
+            (rSnap.status === 404
+              ? "서버에 해당 키의 잔고가 없어 백업을 만들 수 없습니다. 먼저 동기화해 주세요."
+              : "백업(스냅샷 저장)에 실패했습니다."),
+        );
+        return;
+      }
+
       const r = await fetch(`/api/backup/export?sync_key=${encodeURIComponent(key)}`);
       const text = await r.text();
       if (!r.ok) {
@@ -1763,7 +1782,7 @@ export default function Home() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      setSyncMessage("백업 JSON을 내려받았습니다.");
+      setSyncMessage("서버에 백업 한 줄을 추가한 뒤, JSON을 내려받았습니다.");
     } catch {
       setSyncMessage("네트워크 오류입니다.");
     } finally {
@@ -3832,8 +3851,9 @@ export default function Home() {
                 별도 백업 테이블에 <strong className="font-medium text-foreground">한 줄씩 추가</strong>
                 합니다(이 기기만 고친 내용은 서버 반영 후에 포함). 메인 동기화 데이터는 덮어쓰지 않습니다. 같은
                 동기화 키의 백업은 <strong className="font-medium text-foreground">최대 1년</strong>치만 남기고
-                그보다 오래된 백업 행만 지웁니다. 「백업 내려받기」는 서버에 쌓인 백업(최대 500건)을 JSON으로
-                저장합니다.
+                그보다 오래된 백업 행만 지웁니다. 「백업 내려받기」는 먼저 서버 잔고를 백업 테이블에 한 줄
+                추가한 뒤, 쌓인 백업(최대 500건)을 JSON 파일로 저장합니다. 내려받은 파일은 PC에 남으며 웹이
+                자동으로 지우지는 않습니다.
               </p>
               {syncMessage ? (
                 <p className="text-xs text-muted-foreground">{syncMessage}</p>
