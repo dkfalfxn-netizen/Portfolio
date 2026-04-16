@@ -89,6 +89,17 @@ function parseOwnerNames(raw: unknown): string[] {
   return out;
 }
 
+function parseCashPairInfer(raw: unknown): { usd: number; krw: number } {
+  if (!raw || typeof raw !== "object") return { usd: 0, krw: 0 };
+  const o = raw as { usd?: unknown; krw?: unknown };
+  const usd = Number(o.usd ?? 0);
+  const krw = Number(o.krw ?? 0);
+  return {
+    usd: Number.isFinite(usd) && usd >= 0 ? usd : 0,
+    krw: Number.isFinite(krw) && krw >= 0 ? krw : 0,
+  };
+}
+
 function inferOwnerNamesFromSnapshot(row: {
   owner_names?: unknown;
   positions?: unknown;
@@ -104,15 +115,16 @@ function inferOwnerNamesFromSnapshot(row: {
         .map((p) => (p && typeof p === "object" ? (p as { owner?: unknown }).owner : undefined))
         .filter((name): name is string => typeof name === "string")
     : [];
-  const fromCash =
-    row.cash_by_owner && typeof row.cash_by_owner === "object"
-      ? Object.keys(row.cash_by_owner as Record<string, unknown>)
-      : [];
-  const fromSort =
-    row.holdings_sort_by_owner && typeof row.holdings_sort_by_owner === "object"
-      ? Object.keys(row.holdings_sort_by_owner as Record<string, unknown>)
-      : [];
-  return parseOwnerNames([...fromPositions, ...fromCash, ...fromSort]);
+  /** 레거시: 잔액 0인 cash 키만으로는 보유자 부활하지 않도록 제외 (정렬 JSON 키도 제외) */
+  const fromCash: string[] = [];
+  if (row.cash_by_owner && typeof row.cash_by_owner === "object") {
+    for (const [name, value] of Object.entries(row.cash_by_owner as Record<string, unknown>)) {
+      if (typeof name !== "string" || !name.trim()) continue;
+      const { usd, krw } = parseCashPairInfer(value);
+      if (usd > 0 || krw > 0) fromCash.push(name);
+    }
+  }
+  return parseOwnerNames([...fromPositions, ...fromCash]);
 }
 
 function sanitizePositionsForOwners(positions: unknown, allowed: Set<string>): unknown[] {
@@ -217,12 +229,15 @@ export async function POST(req: NextRequest) {
         updated_at: null,
       });
     }
+    const ownerList = inferOwnerNamesFromSnapshot(data);
+    const allowed = new Set(ownerList);
+    const sortParsed = parseHoldingsSortFromJson(data.holdings_sort_by_owner ?? {});
     return NextResponse.json({
       found: true,
-      positions: data.positions ?? [],
-      cash_by_owner: data.cash_by_owner ?? {},
-      holdings_sort_by_owner: data.holdings_sort_by_owner ?? {},
-      owner_names: inferOwnerNamesFromSnapshot(data),
+      positions: sanitizePositionsForOwners(data.positions, allowed),
+      cash_by_owner: sanitizeCashForOwners(data.cash_by_owner, allowed),
+      holdings_sort_by_owner: sanitizeHoldingsSortForOwners(sortParsed, allowed),
+      owner_names: ownerList,
       updated_at: data.updated_at,
     });
   }

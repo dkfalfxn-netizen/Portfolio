@@ -169,15 +169,16 @@ function inferOwnerNamesFromSyncPayload(payload: {
         .map((p) => (p && typeof p === "object" ? (p as { owner?: unknown }).owner : undefined))
         .filter((name): name is string => typeof name === "string")
     : [];
-  const fromCash =
-    payload.cash_by_owner && typeof payload.cash_by_owner === "object"
-      ? Object.keys(payload.cash_by_owner as Record<string, unknown>)
-      : [];
-  const fromSort =
-    payload.holdings_sort_by_owner && typeof payload.holdings_sort_by_owner === "object"
-      ? Object.keys(payload.holdings_sort_by_owner as Record<string, unknown>)
-      : [];
-  const inferred = parseOwnerNamesNoDefault([...fromPositions, ...fromCash, ...fromSort]);
+  /** 레거시: 잔액 0 cash 키·sort 키만으로는 부활하지 않음 */
+  const fromCash: string[] = [];
+  if (payload.cash_by_owner && typeof payload.cash_by_owner === "object") {
+    for (const [name, value] of Object.entries(payload.cash_by_owner as Record<string, unknown>)) {
+      if (typeof name !== "string" || !name.trim()) continue;
+      const p = parseCashPair(value);
+      if (p.usd > 0 || p.krw > 0) fromCash.push(name);
+    }
+  }
+  const inferred = parseOwnerNamesNoDefault([...fromPositions, ...fromCash]);
   if (inferred.length > 0) return inferred;
   return [...DEFAULT_OWNER_NAMES];
 }
@@ -1325,7 +1326,9 @@ export default function Home() {
             ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
             : [];
           const pulledOwners = inferOwnerNamesFromSyncPayload(j);
-          setPositions(mergeDuplicatePositions(valid));
+          const allowedOwners = new Set(pulledOwners);
+          const filtered = valid.filter((p) => allowedOwners.has(p.owner));
+          setPositions(mergeDuplicatePositions(filtered));
           setCashByOwner(normalizeCashStrict(j.cash_by_owner, pulledOwners));
           setHoldingsSortByOwner(normalizeHoldingsSortStrict(j.holdings_sort_by_owner, pulledOwners));
           setOwnerNames(pulledOwners);
@@ -1579,7 +1582,9 @@ export default function Home() {
           ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
           : [];
         const pulledOwners = inferOwnerNamesFromSyncPayload(j);
-        setPositions(mergeDuplicatePositions(valid));
+        const allowedOwners = new Set(pulledOwners);
+        const filtered = valid.filter((p) => allowedOwners.has(p.owner));
+        setPositions(mergeDuplicatePositions(filtered));
         setCashByOwner(normalizeCashStrict(j.cash_by_owner, pulledOwners));
         setHoldingsSortByOwner(normalizeHoldingsSortStrict(j.holdings_sort_by_owner, pulledOwners));
         setOwnerNames(pulledOwners);
