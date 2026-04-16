@@ -1709,6 +1709,46 @@ export default function Home() {
     }
   }
 
+  /** 서버에 쌓인 백업 행을 JSON 파일로 내려받습니다(브라우저 다운로드). */
+  async function handleDownloadBackups() {
+    const key = cloudSyncKey.trim();
+    if (key.length < 8) {
+      setSyncMessage("동기화 키를 8자 이상 저장해 주세요.");
+      return;
+    }
+    setSyncBusy(true);
+    try {
+      const r = await fetch(`/api/backup/export?sync_key=${encodeURIComponent(key)}`);
+      const text = await r.text();
+      if (!r.ok) {
+        let msg = "백업 내려받기 실패";
+        try {
+          const j = JSON.parse(text) as { error?: string };
+          if (j.error) msg = j.error;
+        } catch {
+          /* ignore */
+        }
+        setSyncMessage(msg);
+        return;
+      }
+      const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `portfolio-backups-${new Date().toISOString().slice(0, 19).replace(/:/g, "-").replace("T", "_")}.json`;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setSyncMessage("백업 JSON을 내려받았습니다.");
+    } catch {
+      setSyncMessage("네트워크 오류입니다.");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
   async function handleSaveSyncKey() {
     const k = syncKeyDraft.trim();
     if (k.length < 8) {
@@ -3743,6 +3783,14 @@ export default function Home() {
                 >
                   백업
                 </button>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border border-dashed px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  disabled={syncBusy}
+                  onClick={handleDownloadBackups}
+                >
+                  백업 내려받기
+                </button>
                 <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
                   <input
                     type="checkbox"
@@ -3762,7 +3810,7 @@ export default function Home() {
                 <strong className="font-medium text-foreground">한 줄씩 추가</strong>합니다. 메인 동기화
                 데이터는 덮어쓰지 않습니다. 같은 동기화 키의 백업은{" "}
                 <strong className="font-medium text-foreground">최대 1년</strong>치만 남기고, 그보다 오래된
-                백업 행만 자동으로 지웁니다.
+                백업 행만 자동으로 지웁니다. 「백업 내려받기」는 서버에 쌓인 백업(최대 500건)을 JSON 파일로 저장합니다.
               </p>
               {syncMessage ? (
                 <p className="text-xs text-muted-foreground">{syncMessage}</p>
