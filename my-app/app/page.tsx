@@ -1271,7 +1271,7 @@ export default function Home() {
           window.localStorage.setItem(LAST_SYNC_TS_KEY, serverTs);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setLastSyncedAt(serverTs);
-        } else if (hasLocalChanges && pos.length > 0) {
+        } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
           // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
           const rPush = await fetch("/api/sync", {
@@ -2015,6 +2015,7 @@ export default function Home() {
     setOwnerNames((prev) => [...prev, name]);
     setCashByOwner((prev) => ({ ...prev, [name]: prev[name] ?? { usd: 0, krw: 0 } }));
     setHoldingsSortByOwner((prev) => ({ ...prev, [name]: prev[name] ?? "manual" }));
+    window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
   }
 
   function handleRenameOwner(name: string) {
@@ -2042,6 +2043,7 @@ export default function Home() {
     }));
     setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? renamed : prev.owner }));
     setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? renamed : r.owner })));
+    window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
   }
 
   function handleDeleteOwner(name: string) {
@@ -2075,6 +2077,7 @@ export default function Home() {
     });
     setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? fallbackOwner : prev.owner }));
     setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? "전체" : r.owner })));
+    window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
   }
 
   return (
