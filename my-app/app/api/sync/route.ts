@@ -89,6 +89,29 @@ function parseOwnerNames(raw: unknown): string[] {
   return out;
 }
 
+function inferOwnerNamesFromSnapshot(row: {
+  owner_names?: unknown;
+  positions?: unknown;
+  cash_by_owner?: unknown;
+  holdings_sort_by_owner?: unknown;
+}): string[] {
+  const fromOwnerNames = parseOwnerNames(row.owner_names);
+  const fromPositions = Array.isArray(row.positions)
+    ? row.positions
+        .map((p) => (p && typeof p === "object" ? (p as { owner?: unknown }).owner : undefined))
+        .filter((name): name is string => typeof name === "string")
+    : [];
+  const fromCash =
+    row.cash_by_owner && typeof row.cash_by_owner === "object"
+      ? Object.keys(row.cash_by_owner as Record<string, unknown>)
+      : [];
+  const fromSort =
+    row.holdings_sort_by_owner && typeof row.holdings_sort_by_owner === "object"
+      ? Object.keys(row.holdings_sort_by_owner as Record<string, unknown>)
+      : [];
+  return parseOwnerNames([...fromOwnerNames, ...fromPositions, ...fromCash, ...fromSort]);
+}
+
 export async function POST(req: NextRequest) {
   let body: unknown;
   try {
@@ -161,7 +184,7 @@ export async function POST(req: NextRequest) {
       positions: data.positions ?? [],
       cash_by_owner: data.cash_by_owner ?? {},
       holdings_sort_by_owner: data.holdings_sort_by_owner ?? {},
-      owner_names: parseOwnerNames(data.owner_names),
+      owner_names: inferOwnerNamesFromSnapshot(data),
       updated_at: data.updated_at,
     });
   }
