@@ -738,6 +738,35 @@ function normalizeCashFromServer(raw: unknown): CashByOwner {
   return base;
 }
 
+/** 서버 pull 전용: owner_names 기준으로만 cash 복원 (DEFAULT 강제 주입 없음) */
+function normalizeCashStrict(raw: unknown, owners: OwnerName[]): CashByOwner {
+  const obj =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const base: CashByOwner = {};
+  for (const name of owners) {
+    base[name] = parseCashPair(obj[name] ?? { usd: 0, krw: 0 });
+  }
+  return base;
+}
+
+/** 서버 pull 전용: owner_names 기준으로만 정렬 설정 복원 (DEFAULT 강제 주입 없음) */
+function normalizeHoldingsSortStrict(
+  raw: unknown,
+  owners: OwnerName[],
+): Record<OwnerName, HoldingsSortMode> {
+  const obj =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const base: Record<OwnerName, HoldingsSortMode> = {};
+  for (const name of owners) {
+    const v = obj[name];
+    base[name] =
+      v === "manual" || v === "valueAsc" || v === "valueDesc" || v === "group"
+        ? v
+        : "manual";
+  }
+  return base;
+}
+
 export default function Home() {
   const [ownerNames, setOwnerNames] = useState<OwnerName[]>(() => loadOwnerNames());
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
@@ -849,17 +878,17 @@ export default function Home() {
   }, [ownerNames, isHydrated]);
 
   useEffect(() => {
+    // positions.owner만 추가 — cash/sort keys는 포함하지 않음
+    // (cash/sort keys를 포함하면 삭제된 보유자가 부활하는 원인이 됨)
     const merged = normalizeOwnerNames([
       ...ownerNames,
       ...positions.map((p) => p.owner),
-      ...Object.keys(cashByOwner),
-      ...Object.keys(holdingsSortByOwner),
     ]);
     if (merged.length === ownerNames.length && merged.every((name, idx) => ownerNames[idx] === name)) {
       return;
     }
     setOwnerNames(merged);
-  }, [ownerNames, positions, cashByOwner, holdingsSortByOwner]);
+  }, [ownerNames, positions]);
 
   const marketSymbols = useMemo(
     () => [...new Set(positions.map((position) => position.symbol))].join(","),
@@ -1287,10 +1316,11 @@ export default function Home() {
           const valid = Array.isArray(j.positions)
             ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
             : [];
+          const pulledOwners = inferOwnerNamesFromSyncPayload(j);
           setPositions(mergeDuplicatePositions(valid));
-          setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
-          setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
-          setOwnerNames(inferOwnerNamesFromSyncPayload(j));
+          setCashByOwner(normalizeCashStrict(j.cash_by_owner, pulledOwners));
+          setHoldingsSortByOwner(normalizeHoldingsSortStrict(j.holdings_sort_by_owner, pulledOwners));
+          setOwnerNames(pulledOwners);
           window.localStorage.setItem(LAST_SYNC_TS_KEY, serverTs);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setLastSyncedAt(serverTs);
@@ -1540,10 +1570,11 @@ export default function Home() {
         const valid = Array.isArray(j.positions)
           ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
           : [];
+        const pulledOwners = inferOwnerNamesFromSyncPayload(j);
         setPositions(mergeDuplicatePositions(valid));
-        setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
-        setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
-        setOwnerNames(inferOwnerNamesFromSyncPayload(j));
+        setCashByOwner(normalizeCashStrict(j.cash_by_owner, pulledOwners));
+        setHoldingsSortByOwner(normalizeHoldingsSortStrict(j.holdings_sort_by_owner, pulledOwners));
+        setOwnerNames(pulledOwners);
         if (typeof j.updated_at === "string") {
           window.localStorage.setItem(LAST_SYNC_TS_KEY, j.updated_at);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
