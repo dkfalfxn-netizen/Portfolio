@@ -1682,6 +1682,33 @@ export default function Home() {
     }
   }
 
+  /** 서버(Supabase)에 저장된 현재 스냅샷을 백업 테이블에 복사합니다. 메인 portfolio_snapshots는 변경하지 않습니다. */
+  async function handleBackupSnapshot() {
+    const key = cloudSyncKey.trim();
+    if (key.length < 8) {
+      setSyncMessage("동기화 키를 8자 이상 저장해 주세요.");
+      return;
+    }
+    setSyncBusy(true);
+    try {
+      const r = await fetch("/api/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sync_key: key }),
+      });
+      const j = (await r.json()) as { ok?: boolean; message?: string; error?: string; warning?: string };
+      if (!r.ok) {
+        setSyncMessage(j.error ?? "백업 실패");
+      } else {
+        setSyncMessage(j.warning ?? j.message ?? "백업을 저장했습니다.");
+      }
+    } catch {
+      setSyncMessage("네트워크 오류입니다.");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
   async function handleSaveSyncKey() {
     const k = syncKeyDraft.trim();
     if (k.length < 8) {
@@ -3708,6 +3735,14 @@ export default function Home() {
                 >
                   서버로 올리기
                 </button>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border border-dashed px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+                  disabled={syncBusy}
+                  onClick={handleBackupSnapshot}
+                >
+                  백업 받기
+                </button>
                 <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
                   <input
                     type="checkbox"
@@ -3722,6 +3757,13 @@ export default function Home() {
                   변경 시 자동으로 서버에 저장 (2초 후)
                 </label>
               </div>
+              <p className="text-xs text-muted-foreground">
+                「백업 받기」는 지금 서버에 올라가 있는 잔고를 별도 백업 테이블에{" "}
+                <strong className="font-medium text-foreground">한 줄씩 추가</strong>합니다. 메인 동기화
+                데이터는 덮어쓰지 않습니다. 같은 동기화 키의 백업은{" "}
+                <strong className="font-medium text-foreground">최대 1년</strong>치만 남기고, 그보다 오래된
+                백업 행만 자동으로 지웁니다.
+              </p>
               {syncMessage ? (
                 <p className="text-xs text-muted-foreground">{syncMessage}</p>
               ) : null}
