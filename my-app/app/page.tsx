@@ -1228,6 +1228,8 @@ export default function Home() {
       cash: CashByOwner,
       holdingsSort: Record<OwnerName, HoldingsSortMode>,
       owners: OwnerName[],
+      /** true이면 로컬 변경 여부와 무관하게 항상 pull 우선 */
+      forcePull = false,
     ) => {
     setSyncBusy(true);
     try {
@@ -1254,8 +1256,8 @@ export default function Home() {
         const lastSyncTs = window.localStorage.getItem(LAST_SYNC_TS_KEY) ?? "";
         const hasLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) === "1";
 
-        if (serverTs > lastSyncTs && !hasLocalChanges) {
-          // ─ 서버가 더 최신이고 로컬 미반영 변경 없음 → 서버 데이터를 적용
+        if (forcePull || (serverTs > lastSyncTs && !hasLocalChanges)) {
+          // ─ forcePull(키 변경 시) 또는 서버가 더 최신이고 로컬 미반영 변경 없음 → 서버 데이터를 적용
           setSyncMessage("서버에서 최신 잔고를 불러왔습니다.");
           skipMarkLocalChangedRef.current = 2;
           skipOwnerLocalChangedRef.current = 1;
@@ -1578,10 +1580,16 @@ export default function Home() {
       setSyncMessage("동기화 키는 8자 이상으로 정해 주세요.");
       return;
     }
+    const isKeyChange = k !== cloudSyncKey && cloudSyncKey.length >= 8;
+    if (isKeyChange) {
+      // 키가 바뀌는 경우: 로컬 변경 플래그·타임스탬프를 초기화해 새 키의 서버 데이터를 항상 pull
+      window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+      window.localStorage.removeItem(LAST_SYNC_TS_KEY);
+    }
     window.localStorage.setItem(SYNC_KEY_STORAGE, k);
     setCloudSyncKey(k);
     setSyncMessage("키를 저장했습니다. 서버와 맞추는 중…");
-    await syncWithServerForKey(k, positions, cashByOwner, holdingsSortByOwner, ownerNames);
+    await syncWithServerForKey(k, positions, cashByOwner, holdingsSortByOwner, ownerNames, isKeyChange);
   }
 
   // 알림 설정 불러오기 (동기화 키가 준비되면 한 번)
