@@ -4,8 +4,12 @@ create table if not exists public.portfolio_snapshots (
   positions jsonb not null default '[]'::jsonb,
   cash_by_owner jsonb not null default '{}'::jsonb,
   holdings_sort_by_owner jsonb not null default '{}'::jsonb,
+  owner_names jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
 );
+
+alter table public.portfolio_snapshots
+  add column if not exists owner_names jsonb not null default '[]'::jsonb;
 
 alter table public.portfolio_snapshots enable row level security;
 

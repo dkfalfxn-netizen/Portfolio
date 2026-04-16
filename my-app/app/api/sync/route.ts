@@ -66,14 +66,28 @@ function parseHoldingsSortFromJson(raw: unknown): Record<string, string> {
   return out;
 }
 
-type PullBody = { action: "pull"; key: string };
 type PushBody = {
   action: "push";
   key: string;
   positions: unknown;
   cashByOwner: unknown;
   holdingsSortByOwner?: unknown;
+  ownerNames?: unknown;
 };
+
+function parseOwnerNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
 
 export async function POST(req: NextRequest) {
   let body: unknown;
@@ -105,11 +119,29 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "pull") {
-    const { data, error } = await admin
+    const withOwnerNames = await admin
       .from("portfolio_snapshots")
-      .select("positions, cash_by_owner, holdings_sort_by_owner, updated_at")
+      .select("positions, cash_by_owner, holdings_sort_by_owner, owner_names, updated_at")
       .eq("sync_key", key)
       .maybeSingle();
+    const fallback = withOwnerNames.error
+      ? await admin
+          .from("portfolio_snapshots")
+          .select("positions, cash_by_owner, holdings_sort_by_owner, updated_at")
+          .eq("sync_key", key)
+          .maybeSingle()
+      : null;
+    const data = (withOwnerNames.data ??
+      fallback?.data) as
+      | {
+          positions?: unknown;
+          cash_by_owner?: unknown;
+          holdings_sort_by_owner?: unknown;
+          owner_names?: unknown;
+          updated_at?: string | null;
+        }
+      | null;
+    const error = fallback?.error ?? withOwnerNames.error;
 
     if (error) {
       return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });
@@ -120,6 +152,7 @@ export async function POST(req: NextRequest) {
         positions: [],
         cash_by_owner: {},
         holdings_sort_by_owner: {},
+        owner_names: [],
         updated_at: null,
       });
     }
@@ -128,6 +161,7 @@ export async function POST(req: NextRequest) {
       positions: data.positions ?? [],
       cash_by_owner: data.cash_by_owner ?? {},
       holdings_sort_by_owner: data.holdings_sort_by_owner ?? {},
+      owner_names: parseOwnerNames(data.owner_names),
       updated_at: data.updated_at,
     });
   }
@@ -149,18 +183,51 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
       holdingsSort = parseHoldingsSortFromJson(existing?.holdings_sort_by_owner ?? {});
     }
+    let ownerNames: string[];
+    if ("ownerNames" in b) {
+      ownerNames = parseOwnerNames(b.ownerNames);
+    } else {
+      const inferred = [
+        ...Object.keys((b.cashByOwner as Record<string, unknown>) ?? {}),
+        ...(
+          Array.isArray(b.positions)
+            ? b.positions
+                .map((p) => (p && typeof p === "object" ? (p as { owner?: unknown }).owner : undefined))
+                .filter((name): name is string => typeof name === "string")
+            : []
+        ),
+      ];
+      ownerNames = parseOwnerNames(inferred);
+    }
 
     const updatedAt = new Date().toISOString();
-    const { error } = await admin.from("portfolio_snapshots").upsert(
-      {
-        sync_key: key,
-        positions: b.positions,
-        cash_by_owner: b.cashByOwner,
-        holdings_sort_by_owner: holdingsSort,
-        updated_at: updatedAt,
-      },
-      { onConflict: "sync_key" },
-    );
+    const payload = {
+      sync_key: key,
+      positions: b.positions,
+      cash_by_owner: b.cashByOwner,
+      holdings_sort_by_owner: holdingsSort,
+      owner_names: ownerNames,
+      updated_at: updatedAt,
+    };
+    const withOwnerNames = await admin
+      .from("portfolio_snapshots")
+      .upsert(payload, { onConflict: "sync_key" });
+    const error = withOwnerNames.error
+      ? (
+          await admin
+            .from("portfolio_snapshots")
+            .upsert(
+              {
+                sync_key: key,
+                positions: b.positions,
+                cash_by_owner: b.cashByOwner,
+                holdings_sort_by_owner: holdingsSort,
+                updated_at: updatedAt,
+              },
+              { onConflict: "sync_key" },
+            )
+        ).error
+      : null;
 
     if (error) {
       return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });

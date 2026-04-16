@@ -749,6 +749,7 @@ export default function Home() {
    * - setPositions + setCashByOwner를 한 번 호출할 때마다 2를 설정.
    */
   const skipMarkLocalChangedRef = useRef(0);
+  const skipOwnerLocalChangedRef = useRef(0);
   const [holdingsSortByOwner, setHoldingsSortByOwner] =
     useState<Record<OwnerName, HoldingsSortMode>>(defaultHoldingsSort);
 
@@ -817,6 +818,11 @@ export default function Home() {
   useEffect(() => {
     if (!isHydrated) return;
     window.localStorage.setItem(OWNER_NAMES_STORAGE_KEY, JSON.stringify(ownerNames));
+    if (skipOwnerLocalChangedRef.current > 0) {
+      skipOwnerLocalChangedRef.current -= 1;
+    } else {
+      window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    }
   }, [ownerNames, isHydrated]);
 
   useEffect(() => {
@@ -1221,6 +1227,7 @@ export default function Home() {
       pos: Position[],
       cash: CashByOwner,
       holdingsSort: Record<OwnerName, HoldingsSortMode>,
+      owners: OwnerName[],
     ) => {
     setSyncBusy(true);
     try {
@@ -1235,6 +1242,7 @@ export default function Home() {
         positions?: unknown;
         cash_by_owner?: unknown;
         holdings_sort_by_owner?: unknown;
+        owner_names?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -1250,12 +1258,14 @@ export default function Home() {
           // ─ 서버가 더 최신이고 로컬 미반영 변경 없음 → 서버 데이터를 적용
           setSyncMessage("서버에서 최신 잔고를 불러왔습니다.");
           skipMarkLocalChangedRef.current = 2;
+          skipOwnerLocalChangedRef.current = 1;
           const valid = Array.isArray(j.positions)
             ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
             : [];
           setPositions(mergeDuplicatePositions(valid));
           setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
           setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
+          setOwnerNames(normalizeOwnerNames(j.owner_names));
           window.localStorage.setItem(LAST_SYNC_TS_KEY, serverTs);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setLastSyncedAt(serverTs);
@@ -1265,7 +1275,14 @@ export default function Home() {
           const rPush = await fetch("/api/sync", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "push", key, positions: pos, cashByOwner: cash, holdingsSortByOwner: holdingsSort }),
+            body: JSON.stringify({
+              action: "push",
+              key,
+              positions: pos,
+              cashByOwner: cash,
+              holdingsSortByOwner: holdingsSort,
+              ownerNames: owners,
+            }),
           });
           const jPush = (await rPush.json()) as { ok?: boolean; updated_at?: string; error?: string };
           if (!rPush.ok) {
@@ -1297,6 +1314,7 @@ export default function Home() {
             positions: pos,
             cashByOwner: cash,
             holdingsSortByOwner: holdingsSort,
+            ownerNames: owners,
           }),
         });
         const j2 = (await r2.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -1350,7 +1368,7 @@ export default function Home() {
     }
 
     void (async () => {
-      await syncWithServerForKey(savedKey, pos, cash, holdSort);
+      await syncWithServerForKey(savedKey, pos, cash, holdSort, loadOwnerNames());
       setSyncReady(true);
     })();
   }, [syncWithServerForKey]);
@@ -1444,6 +1462,7 @@ export default function Home() {
           positions,
           cashByOwner,
           holdingsSortByOwner,
+          ownerNames,
         }),
       }).then(async (r) => {
         if (r.ok) {
@@ -1462,7 +1481,7 @@ export default function Home() {
     return () => {
       if (pushDebounceRef.current) clearTimeout(pushDebounceRef.current);
     };
-  }, [positions, cashByOwner, holdingsSortByOwner, isHydrated, syncReady, autoSync, cloudSyncKey]);
+  }, [positions, cashByOwner, holdingsSortByOwner, ownerNames, isHydrated, syncReady, autoSync, cloudSyncKey]);
 
   async function handlePullCloud() {
     const key = cloudSyncKey.trim();
@@ -1483,6 +1502,7 @@ export default function Home() {
         positions?: unknown;
         cash_by_owner?: unknown;
         holdings_sort_by_owner?: unknown;
+        owner_names?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -1491,12 +1511,14 @@ export default function Home() {
       }
       if (j.found) {
         skipMarkLocalChangedRef.current = 2;
+        skipOwnerLocalChangedRef.current = 1;
         const valid = Array.isArray(j.positions)
           ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
           : [];
         setPositions(mergeDuplicatePositions(valid));
         setCashByOwner(normalizeCashFromServer(j.cash_by_owner));
         setHoldingsSortByOwner(normalizeHoldingsSortFromServer(j.holdings_sort_by_owner));
+        setOwnerNames(normalizeOwnerNames(j.owner_names));
         if (typeof j.updated_at === "string") {
           window.localStorage.setItem(LAST_SYNC_TS_KEY, j.updated_at);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
@@ -1530,6 +1552,7 @@ export default function Home() {
           positions,
           cashByOwner,
           holdingsSortByOwner,
+          ownerNames,
         }),
       });
       const j = (await r.json()) as { error?: string };
@@ -1558,7 +1581,7 @@ export default function Home() {
     window.localStorage.setItem(SYNC_KEY_STORAGE, k);
     setCloudSyncKey(k);
     setSyncMessage("키를 저장했습니다. 서버와 맞추는 중…");
-    await syncWithServerForKey(k, positions, cashByOwner, holdingsSortByOwner);
+    await syncWithServerForKey(k, positions, cashByOwner, holdingsSortByOwner, ownerNames);
   }
 
   // 알림 설정 불러오기 (동기화 키가 준비되면 한 번)
