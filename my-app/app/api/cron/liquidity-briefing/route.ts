@@ -38,12 +38,13 @@ async function fetchFredSeriesLatest(seriesId: string): Promise<{ latest: Series
   const points: SeriesPoint[] = [];
   for (const line of lines) {
     const [date, valueRaw] = line.split(",");
-    if (!date || !valueRaw || valueRaw === ".") continue;
+    if (!date || !valueRaw || valueRaw.trim() === ".") continue;
     const value = Number(valueRaw);
     if (!Number.isFinite(value)) continue;
-    points.push({ date, value });
+    points.push({ date: date.trim(), value });
   }
   if (points.length === 0) return { latest: null, previous: null };
+  points.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const latest = points[points.length - 1] ?? null;
   const previous = points.length >= 2 ? points[points.length - 2] : null;
   return { latest, previous };
@@ -165,8 +166,11 @@ async function generateAiSummary(snapshot: LiquiditySnapshot): Promise<string> {
 
 async function saveSnapshot(snapshot: LiquiditySnapshot): Promise<void> {
   const admin = createSupabaseAdmin();
-  if (!admin) return;
-  await admin.from("liquidity_briefings").upsert(
+  if (!admin) {
+    console.error("[liquidity-briefing] Supabase admin 클라이언트 초기화 실패 — DB 저장 건너뜀");
+    return;
+  }
+  const { error } = await admin.from("liquidity_briefings").upsert(
     {
       report_date: snapshot.date,
       net_liquidity: snapshot.netLiquidity,
@@ -190,6 +194,9 @@ async function saveSnapshot(snapshot: LiquiditySnapshot): Promise<void> {
     },
     { onConflict: "report_date" },
   );
+  if (error) {
+    console.error("[liquidity-briefing] DB upsert 실패:", error.message);
+  }
 }
 
 async function run() {

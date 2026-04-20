@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
+export const revalidate = 3600; // 1시간 캐시 (Edge/CDN 레벨)
+
 type Row = {
   report_date: string;
   net_liquidity: number | null;
@@ -40,7 +42,8 @@ export async function GET() {
   }
 
   const rows = (data ?? []) as Row[];
-  return NextResponse.json({
+  return NextResponse.json(
+    {
     ok: true,
     rows: rows.map((r) => ({
       date: r.report_date,
@@ -54,5 +57,11 @@ export async function GET() {
       gold: toNum(r.gold),
       aiSummary: r.ai_summary ?? "",
     })),
-  });
+  },
+  {
+    headers: {
+      "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=300",
+    },
+  },
+  );
 }

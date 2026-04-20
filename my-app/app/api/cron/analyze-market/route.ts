@@ -530,10 +530,9 @@ export async function POST(req: NextRequest) {
 
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack?.slice(0, 500) : undefined;
-    console.error("[analyze-market] 오류:", message, stack);
+    console.error("[analyze-market] 오류:", message, err instanceof Error ? err.stack?.slice(0, 500) : undefined);
     return NextResponse.json(
-      { error: message, stack, durationMs: Date.now() - startTime },
+      { error: message, durationMs: Date.now() - startTime },
       { status: 500 },
     );
   }
