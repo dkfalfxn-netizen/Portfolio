@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { todayKST } from "@/lib/date-utils";
 
 export const maxDuration = 30;
 
@@ -37,13 +38,6 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function todayLabelKst(): string {
-  const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 function toSignedPct(current: number, prev: number): number | null {
   if (!Number.isFinite(current) || !Number.isFinite(prev) || prev === 0) return null;
@@ -276,7 +270,7 @@ async function run() {
   const vixPct = vix.price !== null && vix.previousClose !== null ? toSignedPct(vix.price, vix.previousClose) : null;
   const btcPct = btc.price !== null && btc.previousClose !== null ? toSignedPct(btc.price, btc.previousClose) : null;
   const goldPct = gold.price !== null && gold.previousClose !== null ? toSignedPct(gold.price, gold.previousClose) : null;
-  const date = todayLabelKst();
+  const date = todayKST();
   const baseSnapshot: LiquiditySnapshot = {
     date,
     netLiquidity,

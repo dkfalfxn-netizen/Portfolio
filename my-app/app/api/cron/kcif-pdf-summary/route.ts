@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { todayKST } from "@/lib/date-utils";
 
 export const maxDuration = 60;
 
@@ -34,13 +35,6 @@ function toAbsolute(baseUrl: string, maybeRelative: string): string {
   }
 }
 
-function todayKST(): string {
-  const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 function extractMeta(html: string, reportUrl: string): KcifReport {
   const titleMatch = html.match(/<h\d[^>]*>\s*([^<]*?)\s*<\/h\d>/i);

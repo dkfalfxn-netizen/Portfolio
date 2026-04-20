@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchPrices } from "@/lib/market-prices";
+import { todayKST } from "@/lib/date-utils";
 
 type Position = {
   symbol: string;
@@ -71,9 +72,6 @@ async function calcOwnerValues(
   return { ownerValues, breakdownValues, totalValue, usdKrw };
 }
 
-function todayKST(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 /**
  * GET /api/snapshot?sync_key=XXX&days=90

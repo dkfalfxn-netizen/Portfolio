@@ -5,7 +5,7 @@ create table if not exists price_move_alert_logs (
   symbol text not null,
   date date not null,
   briefing_slot text not null default 'legacy',
-  change_pct double precision not null default 0,
+  change_pct double precision,           -- null = 시세 조회 실패, 0 이상 = 실제 등락률
   created_at timestamptz not null default now(),
   primary key (sync_key, symbol, date, briefing_slot)
 );

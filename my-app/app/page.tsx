@@ -18,10 +18,10 @@ import { DailyTrendChart } from "@/components/daily-trend-chart";
 import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
-import {
-  LiquidityBriefingChart,
-  type LiquidityHistoryRow,
-} from "@/components/liquidity-briefing-chart";
+import { SimulatorSection, type SimResult } from "@/components/simulator-section";
+import { LiquiditySection } from "@/components/liquidity-section";
+import { todayKST } from "@/lib/date-utils";
+import type { LiquidityHistoryRow } from "@/components/liquidity-briefing-chart";
 import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
@@ -238,9 +238,6 @@ function saveDailySnapshot(snap: DailySnapshot) {
   } catch {}
 }
 
-function todayKST(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 /** 보유 종목 표시 순: 입력 순(저장된 배열 순) / 평가금액 / 차트 그룹 */
 type HoldingsSortMode = "manual" | "valueAsc" | "valueDesc" | "group";
@@ -2617,20 +2614,11 @@ export default function Home() {
           </section>
           <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
 
-          <section id="section-liquidity" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
-            <h2 className="mb-1 font-semibold">유동성 브리핑 차트</h2>
-            <p className="mb-3 text-xs text-muted-foreground">
-              매일 오전 9시 브리핑 데이터를 시계열로 보여줍니다. 순유동성·DXY·미10년·VIX를 그래프로 보고,
-              최신 AI 한두 문장 요약을 함께 확인할 수 있습니다.
-            </p>
-            {liquidityHistoryQuery.isLoading ? (
-              <p className="text-sm text-muted-foreground">유동성 브리핑 데이터를 불러오는 중...</p>
-            ) : liquidityHistoryQuery.error ? (
-              <p className="text-sm text-red-500">유동성 브리핑 조회에 실패했습니다.</p>
-            ) : (
-              <LiquidityBriefingChart rows={liquidityHistoryQuery.data?.rows ?? []} />
-            )}
-          </section>
+          <LiquiditySection
+            isLoading={liquidityHistoryQuery.isLoading}
+            isError={!!liquidityHistoryQuery.error}
+            rows={liquidityHistoryQuery.data?.rows ?? []}
+          />
 
           {/* 리밸런싱 계산기 */}
           <section id="section-rebalance" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
@@ -3733,123 +3721,13 @@ export default function Home() {
             )}
           </section>
 
-          {/* 가상 매수 시뮬레이터 섹션 */}
-          <section id="section-simulator" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
-            <h2 className="mb-1 font-semibold">가상 매수 시뮬레이터</h2>
-            <p className="mb-3 text-xs text-muted-foreground">
-              종목을 추가로 매수했을 때의 예상 비중 변화를 미리 확인합니다.
-            </p>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
-              <input
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="티커 (예: NVDA)"
-                value={simForm.symbol}
-                onChange={(e) => setSimForm((p) => ({ ...p, symbol: e.target.value }))}
-              />
-              <input
-                type="number"
-                min="0"
-                step="any"
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="수량"
-                value={simForm.quantity}
-                onChange={(e) => setSimForm((p) => ({ ...p, quantity: e.target.value }))}
-              />
-              <input
-                type="number"
-                min="0"
-                step="any"
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="매수 단가"
-                value={simForm.avgPrice}
-                onChange={(e) => setSimForm((p) => ({ ...p, avgPrice: e.target.value }))}
-              />
-              <select
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                value={simForm.currency}
-                onChange={(e) =>
-                  setSimForm((p) => ({ ...p, currency: e.target.value as "USD" | "EUR" | "KRW" }))
-                }
-              >
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="KRW">KRW</option>
-              </select>
-              <select
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                value={simForm.owner}
-                onChange={(e) => setSimForm((p) => ({ ...p, owner: e.target.value as OwnerName }))}
-              >
-                {ownerNames.map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                  className="cursor-pointer rounded-md border px-3 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95"
-                  onClick={() =>
-                    setSimForm({
-                      symbol: "",
-                      name: "",
-                      quantity: "",
-                      avgPrice: "",
-                      currency: "USD",
-                      owner: "김승주",
-                    })
-                  }
-              >
-                초기화
-              </button>
-            </div>
-
-            {simResult && (
-              <div className="mt-4 space-y-2">
-                <p className="text-sm font-medium">
-                  {simForm.owner} 총 평가: ₩{Math.round(simResult.beforeTotal).toLocaleString()}
-                  {" → "}
-                  <span className="text-primary">₩{Math.round(simResult.afterTotal).toLocaleString()}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    (매수 금액 ₩{Math.round(simResult.simValueKrw).toLocaleString()} 추가)
-                  </span>
-                </p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-xs text-muted-foreground">
-                        <th className="pb-1 text-left font-medium">종목</th>
-                        <th className="pb-1 text-right font-medium">현재 비중</th>
-                        <th className="pb-1 text-right font-medium">매수 후 비중</th>
-                        <th className="pb-1 text-right font-medium">변화</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {simResult.rows.map((row) => (
-                        <tr key={row.label} className="border-b last:border-0">
-                          <td className="py-1.5 pr-4">{row.label}</td>
-                          <td className="py-1.5 text-right text-muted-foreground">
-                            {row.beforePct.toFixed(1)}%
-                          </td>
-                          <td className="py-1.5 text-right font-medium text-primary">
-                            {row.afterPct.toFixed(1)}%
-                          </td>
-                          <td
-                            className={`py-1.5 text-right text-xs font-medium ${
-                              row.delta > 0 ? "text-red-500" : row.delta < 0 ? "text-blue-500" : "text-muted-foreground"
-                            }`}
-                          >
-                            {row.delta > 0 ? "+" : ""}{row.delta.toFixed(1)}%p
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-            {!simResult && simForm.symbol && (
-              <p className="mt-3 text-xs text-muted-foreground">수량과 매수 단가를 입력하면 결과가 표시됩니다.</p>
-            )}
-          </section>
+          {/* 가상 매수 시뮬레이터 */}
+          <SimulatorSection
+            simForm={simForm}
+            setSimForm={setSimForm as React.Dispatch<React.SetStateAction<typeof simForm>>}
+            simResult={simResult as SimResult}
+            ownerNames={ownerNames}
+          />
 
           <Card id="section-sync" className="border-dashed">
             <CardHeader className="pb-2">

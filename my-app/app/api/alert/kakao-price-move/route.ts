@@ -9,6 +9,7 @@ import {
   type BriefingItem,
 } from "@/lib/briefing-message";
 import { isKrxCommodity, toYahooSymbol } from "@/lib/finance-symbols";
+import { todayKST, yesterdayKST, mmddKST } from "@/lib/date-utils";
 import { analyzeFourSignals, type FourSignalsResult } from "@/lib/technical-signals";
 import { isKrEquityTradingSessionDay, isUsEquityTradingSessionDay } from "@/lib/trading-calendar";
 
@@ -143,19 +144,6 @@ async function sendTelegramMessage(text: string): Promise<{ ok: boolean; error?:
   return { ok: true };
 }
 
-function todayKST(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-/** 전일 KST 날짜 (일별 스냅·전일대비용) */
-function yesterdayKST(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000 - 86400000).toISOString().slice(0, 10);
-}
-
-function mmddKST(): string {
-  const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  return `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
-}
 
 function normalizeCash(raw: unknown): CashByOwner {
   if (!raw || typeof raw !== "object") return {};
@@ -493,7 +481,7 @@ export async function GET(req: NextRequest) {
         sync_key: syncKey,
         symbol,
         date: dateKst,
-        change_pct: pct ?? 0,
+        change_pct: pct ?? null,  // null = 시세 조회 실패
         briefing_slot: briefingSlot,
       });
     }
@@ -721,7 +709,7 @@ export async function POST(req: NextRequest) {
         sync_key: syncKey,
         symbol,
         date: dateKst,
-        change_pct: pct ?? 0,
+        change_pct: pct ?? null,  // null = 시세 조회 실패
         briefing_slot: manualSlot,
       });
     }

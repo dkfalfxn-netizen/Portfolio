@@ -9,6 +9,7 @@ import {
 } from "@/lib/resend";
 import type { AlertRule } from "@/app/api/alert/config/route";
 import { saveAllSnapshots } from "@/app/api/snapshot/route";
+import { todayKST } from "@/lib/date-utils";
 
 type Position = {
   symbol: string;
@@ -35,9 +36,6 @@ function calcValueKrw(p: Position, usdKrw: number, eurKrw: number): number {
   return p.quantity * p.currentPrice;
 }
 
-function todayKST(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 function buildDailySummary(
   positions: Position[],

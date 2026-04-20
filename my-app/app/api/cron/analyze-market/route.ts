@@ -21,6 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { YoutubeTranscript } from "youtube-transcript";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { todayKST } from "@/lib/date-utils";
 import {
   YOUTUBE_CHANNELS,
   INTEREST_SECTORS,
@@ -101,16 +102,6 @@ type MarketReport = {
   errorChannels: string[];
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 유틸: 오늘 날짜 (KST, YYYY-MM-DD)
-// ─────────────────────────────────────────────────────────────────────────────
-function todayKST(): string {
-  return new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }),
-  )
-    .toISOString()
-    .slice(0, 10);
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 1: YouTube RSS로 채널 최신 영상 메타 가져오기 (API 키 불필요)
@@ -344,12 +335,18 @@ ${sectorList}
   });
 
   const raw = response.choices[0]?.message?.content ?? "{}";
-  const parsed = JSON.parse(raw) as {
+  let parsed: {
     macroIssues?: MacroIssue[];
     portfolioAnalysis?: PortfolioAnalysis[];
     buySellOpinion?: BuySellOpinion;
     futureSectors?: FutureSector[];
   };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch (parseErr) {
+    console.error("[analyze-market] OpenAI 응답 JSON 파싱 실패:", String(parseErr), "raw:", raw.slice(0, 200));
+    parsed = {};
+  }
 
   return {
     result: {
