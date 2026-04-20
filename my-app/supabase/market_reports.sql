@@ -60,9 +60,12 @@ create index if not exists idx_market_reports_date
   on market_reports (report_date desc);
 
 -- ============================================================
--- Row Level Security (서비스 롤 키만 쓸 것이므로 RLS 비활성화)
+-- Row Level Security
+-- 서버(service_role 키)는 RLS를 우회하므로 API Route 저장·조회는 정상 동작합니다.
+-- anon / authenticated 클라이언트의 직접 접근은 차단합니다.
 -- ============================================================
-alter table market_reports disable row level security;
+alter table market_reports enable row level security;
+create policy "deny anon" on market_reports for all using (false);
 
 -- ============================================================
 -- 사용 예시 (Supabase SQL Editor에서 확인용)

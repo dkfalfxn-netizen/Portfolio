@@ -539,16 +539,18 @@ export async function GET(req: NextRequest) {
     return null;
   }
 
-  const domesticSendError = await sendHoldingsByMarket(domesticItems, "국내주식");
-  if (domesticSendError) return domesticSendError;
-  const overseasSendError = await sendHoldingsByMarket(overseasItems, "해외주식");
-  if (overseasSendError) return overseasSendError;
-
+  // 중복 방지 로그를 전송 전에 먼저 저장합니다.
+  // 전송 중 실패해도 다음 크론에서 이미 로그된 종목은 건너뛰어 중복 발송을 방지합니다.
   if (logRows.length > 0) {
     await admin.from("price_move_alert_logs").upsert(logRows, {
       onConflict: "sync_key,symbol,date,briefing_slot",
     });
   }
+
+  const domesticSendError = await sendHoldingsByMarket(domesticItems, "국내주식");
+  if (domesticSendError) return domesticSendError;
+  const overseasSendError = await sendHoldingsByMarket(overseasItems, "해외주식");
+  if (overseasSendError) return overseasSendError;
 
   async function sendWatchlistByMarket(entries: WatchlistRow[], label: string): Promise<Response | null> {
     if (entries.length === 0) return null;

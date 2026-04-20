@@ -9,6 +9,30 @@ type QuotePoint = { symbol: string; price: number | null; previousClose: number 
 
 const FRED_GRAPH_BASE = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=";
 
+/**
+ * 여러 FRED 시계열의 날짜 교집합에서 최신 두 날짜를 찾아 반환합니다.
+ * WALCL(주간)·WTREGEN·RRPONTSYD(일간)은 최신 날짜가 서로 다를 수 있어,
+ * 공통 날짜 기준으로만 비교해야 % 변화율이 정확합니다.
+ */
+function joinSeriesLatestTwo(
+  ...histories: SeriesPoint[][]
+): { latest: SeriesPoint[]; previous: SeriesPoint[] } | null {
+  if (histories.length === 0 || histories.some((h) => h.length === 0)) return null;
+  const dateSets = histories.map((h) => new Set(h.map((p) => p.date)));
+  const commonDates = [...dateSets[0]].filter((d) => dateSets.every((s) => s.has(d)));
+  if (commonDates.length === 0) return null;
+  commonDates.sort(); // 오름차순
+  const latestDate = commonDates[commonDates.length - 1];
+  const previousDate = commonDates.length >= 2 ? commonDates[commonDates.length - 2] : null;
+  const pick = (h: SeriesPoint[], date: string) => h.find((p) => p.date === date);
+  const latest = histories.map((h) => pick(h, latestDate)).filter((p): p is SeriesPoint => p != null);
+  if (latest.length !== histories.length) return null;
+  const previous = previousDate
+    ? histories.map((h) => pick(h, previousDate)).filter((p): p is SeriesPoint => p != null)
+    : [];
+  return { latest, previous: previous.length === histories.length ? previous : [] };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -26,12 +50,12 @@ function toSignedPct(current: number, prev: number): number | null {
   return ((current - prev) / prev) * 100;
 }
 
-async function fetchFredSeriesLatest(seriesId: string): Promise<{ latest: SeriesPoint | null; previous: SeriesPoint | null }> {
+async function fetchFredSeriesPoints(seriesId: string): Promise<SeriesPoint[]> {
   const res = await fetch(`${FRED_GRAPH_BASE}${encodeURIComponent(seriesId)}`, {
     headers: { "User-Agent": "Mozilla/5.0" },
     cache: "no-store",
   });
-  if (!res.ok) return { latest: null, previous: null };
+  if (!res.ok) return [];
 
   const text = await res.text();
   const lines = text.split(/\r?\n/).slice(1);
@@ -43,11 +67,8 @@ async function fetchFredSeriesLatest(seriesId: string): Promise<{ latest: Series
     if (!Number.isFinite(value)) continue;
     points.push({ date: date.trim(), value });
   }
-  if (points.length === 0) return { latest: null, previous: null };
   points.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  const latest = points[points.length - 1] ?? null;
-  const previous = points.length >= 2 ? points[points.length - 2] : null;
-  return { latest, previous };
+  return points;
 }
 
 async function fetchYahooQuote(symbol: string): Promise<QuotePoint> {
@@ -164,11 +185,12 @@ async function generateAiSummary(snapshot: LiquiditySnapshot): Promise<string> {
   }
 }
 
-async function saveSnapshot(snapshot: LiquiditySnapshot): Promise<void> {
+async function saveSnapshot(snapshot: LiquiditySnapshot): Promise<{ ok: boolean; error?: string }> {
   const admin = createSupabaseAdmin();
   if (!admin) {
-    console.error("[liquidity-briefing] Supabase admin 클라이언트 초기화 실패 — DB 저장 건너뜀");
-    return;
+    const msg = "Supabase admin 클라이언트 초기화 실패";
+    console.error("[liquidity-briefing]", msg);
+    return { ok: false, error: msg };
   }
   const { error } = await admin.from("liquidity_briefings").upsert(
     {
@@ -196,27 +218,29 @@ async function saveSnapshot(snapshot: LiquiditySnapshot): Promise<void> {
   );
   if (error) {
     console.error("[liquidity-briefing] DB upsert 실패:", error.message);
+    return { ok: false, error: error.message };
   }
+  return { ok: true };
 }
 
 async function run() {
   const [
-    walcl,
-    tga,
-    rrp,
-    hyYield,
-    igYield,
+    walclPts,
+    tgaPts,
+    rrpPts,
+    hyYieldPts,
+    igYieldPts,
     dxy,
     us10y,
     vix,
     btc,
     gold,
   ] = await Promise.all([
-    fetchFredSeriesLatest("WALCL"),
-    fetchFredSeriesLatest("WTREGEN"),
-    fetchFredSeriesLatest("RRPONTSYD"),
-    fetchFredSeriesLatest("BAMLH0A0HYM2EY"),
-    fetchFredSeriesLatest("BAMLC0A4CBBBEY"),
+    fetchFredSeriesPoints("WALCL"),
+    fetchFredSeriesPoints("WTREGEN"),
+    fetchFredSeriesPoints("RRPONTSYD"),
+    fetchFredSeriesPoints("BAMLH0A0HYM2EY"),
+    fetchFredSeriesPoints("BAMLC0A4CBBBEY"),
     fetchYahooQuote("DX-Y.NYB"),
     fetchYahooQuote("^TNX"),
     fetchYahooQuote("^VIX"),
@@ -224,29 +248,28 @@ async function run() {
     fetchYahooQuote("GC=F"),
   ]);
 
-  if (!walcl.latest || !tga.latest || !rrp.latest) {
-    throw new Error("순유동성 계산용 FRED 데이터(WALCL/WTREGEN/RRPONTSYD) 수집 실패");
+  // 순유동성: WALCL(주간)·WTREGEN·RRPONTSYD(일간)의 날짜가 달라 교집합 날짜 기준으로 조인합니다.
+  const netLiqJoin = joinSeriesLatestTwo(walclPts, tgaPts, rrpPts);
+  if (!netLiqJoin) {
+    throw new Error("순유동성 계산용 FRED 데이터(WALCL/WTREGEN/RRPONTSYD) 수집 또는 날짜 조인 실패");
   }
-
-  const netLiquidity = walcl.latest.value - (tga.latest.value + rrp.latest.value);
+  const [walclLatest, tgaLatest, rrpLatest] = netLiqJoin.latest;
+  const netLiquidity = walclLatest.value - (tgaLatest.value + rrpLatest.value);
   const prevNetLiquidity =
-    walcl.previous && tga.previous && rrp.previous
-      ? walcl.previous.value - (tga.previous.value + rrp.previous.value)
+    netLiqJoin.previous.length === 3
+      ? netLiqJoin.previous[0].value - (netLiqJoin.previous[1].value + netLiqJoin.previous[2].value)
       : null;
   const netLiquidityPct = prevNetLiquidity !== null ? toSignedPct(netLiquidity, prevNetLiquidity) : null;
 
-  const hySpread =
-    hyYield.latest && igYield.latest
-      ? hyYield.latest.value - igYield.latest.value
-      : null;
+  // HY 스프레드: HY·IG 공통 날짜 기준 조인
+  const hyJoin = joinSeriesLatestTwo(hyYieldPts, igYieldPts);
+  const hySpread = hyJoin ? hyJoin.latest[0].value - hyJoin.latest[1].value : null;
   const prevHySpread =
-    hyYield.previous && igYield.previous
-      ? hyYield.previous.value - igYield.previous.value
+    hyJoin && hyJoin.previous.length === 2
+      ? hyJoin.previous[0].value - hyJoin.previous[1].value
       : null;
   const hySpreadDiffBp =
-    hySpread !== null && prevHySpread !== null
-      ? (hySpread - prevHySpread) * 100
-      : null;
+    hySpread !== null && prevHySpread !== null ? (hySpread - prevHySpread) * 100 : null;
 
   const dxyPct = dxy.price !== null && dxy.previousClose !== null ? toSignedPct(dxy.price, dxy.previousClose) : null;
   const us10yPct = us10y.price !== null && us10y.previousClose !== null ? toSignedPct(us10y.price, us10y.previousClose) : null;
@@ -258,9 +281,9 @@ async function run() {
     date,
     netLiquidity,
     netLiquidityPct,
-    walcl: walcl.latest.value,
-    tga: tga.latest.value,
-    rrp: rrp.latest.value,
+    walcl: walclLatest.value,
+    tga: tgaLatest.value,
+    rrp: rrpLatest.value,
     dxy: dxy.price,
     dxyPct,
     us10y: us10y.price,
@@ -277,7 +300,12 @@ async function run() {
   };
   const aiSummary = await generateAiSummary(baseSnapshot);
   const snapshot: LiquiditySnapshot = { ...baseSnapshot, aiSummary };
-  await saveSnapshot(snapshot);
+
+  // DB 저장 먼저 — 실패하면 500을 반환해 Vercel이 재시도하도록 하고 Telegram은 보내지 않습니다.
+  const saved = await saveSnapshot(snapshot);
+  if (!saved.ok) {
+    throw new Error(`DB 저장 실패: ${saved.error ?? "unknown"} — 텔레그램 전송을 건너뜁니다.`);
+  }
 
   const text = [
     "🌊 <b>오전 9시 유동성 브리핑</b>",

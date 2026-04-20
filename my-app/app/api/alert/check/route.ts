@@ -26,8 +26,8 @@ type Position = {
 
 type CashEntry = { usd: number; krw: number };
 
-const FALLBACK_USD_KRW = 1350;
-const FALLBACK_EUR_KRW = 1450;
+const FALLBACK_USD_KRW = 1400;
+const FALLBACK_EUR_KRW = 1500;
 
 function calcValueKrw(p: Position, usdKrw: number, eurKrw: number): number {
   if (p.currency === "USD") return p.quantity * p.currentPrice * usdKrw;

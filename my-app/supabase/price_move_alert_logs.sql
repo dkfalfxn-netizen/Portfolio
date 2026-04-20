@@ -12,5 +12,7 @@ create table if not exists price_move_alert_logs (
 
 create index if not exists idx_price_move_alert_logs_date on price_move_alert_logs(date desc);
 
-alter table price_move_alert_logs disable row level security;
+-- 서버(service_role 키)는 RLS를 우회합니다. anon 직접 접근 차단.
+alter table price_move_alert_logs enable row level security;
+create policy "deny anon" on price_move_alert_logs for all using (false);
 

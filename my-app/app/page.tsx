@@ -982,7 +982,8 @@ export default function Home() {
     },
     /** 보유 종목이 없어도 USD/KRW만 받아 현금(USD) 환산·비중에 반영 */
     enabled: true,
-    refetchInterval: 10000,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   });
 
   // 요청: 김승주 보유 종목에 대해 기술적 시그널 표시
