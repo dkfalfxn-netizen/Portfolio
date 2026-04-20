@@ -1,1 +1,15 @@
 .vercel
+
+# env and secret-like local files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+
+# local tool/editor artifacts
+.DS_Store
+Thumbs.db

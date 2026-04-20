@@ -6,6 +6,7 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
+  Treemap,
   Tooltip,
   type PieLabelRenderProps,
 } from "recharts";
@@ -70,6 +71,51 @@ function NeonTooltip({
         {formatKrw(p.value)} · {p.weight.toFixed(1)}%
       </p>
     </div>
+  );
+}
+
+function NeonTreemapNode(props: {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  index?: number;
+  name?: string;
+  payload?: { weight?: number };
+}) {
+  const x = props.x ?? 0;
+  const y = props.y ?? 0;
+  const width = props.width ?? 0;
+  const height = props.height ?? 0;
+  const idx = props.index ?? 0;
+  const c = NEON_PALETTE[idx % NEON_PALETTE.length];
+  const weight = props.payload?.weight ?? 0;
+
+  if (width < 22 || height < 16) return null;
+
+  return (
+    <g>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        fill={c}
+        stroke="rgba(255,255,255,0.18)"
+        strokeWidth={1}
+        style={{ filter: `drop-shadow(0 0 8px ${c}66)` }}
+      />
+      {width > 40 && height > 22 && (
+        <text x={x + 5} y={y + 13} fill="white" fontSize={11} fontWeight={700}>
+          {props.name}
+        </text>
+      )}
+      {width > 68 && height > 30 && (
+        <text x={x + 5} y={y + 26} fill="rgba(255,255,255,0.85)" fontSize={10}>
+          {weight.toFixed(1)}%
+        </text>
+      )}
+    </g>
   );
 }
 
@@ -155,95 +201,112 @@ export function FamilyAllocationDonut({
         })}
       </div>
 
-      <div className="relative h-[280px] w-full sm:h-[320px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
-            <Pie
-              data={chartData}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              innerRadius="52%"
-              outerRadius="88%"
-              startAngle={90}
-              endAngle={-270}
-              paddingAngle={2.5}
-              stroke="rgba(255,255,255,0.12)"
-              strokeWidth={1}
-              cornerRadius={4}
-              labelLine={false}
-              label={(props: PieLabelRenderProps) => {
-                const pct = (props.percent ?? 0) * 100;
-                const RADIAN = Math.PI / 180;
-                const cx = props.cx ?? 0;
-                const cy = props.cy ?? 0;
-                const inner = Number(props.innerRadius) || 0;
-                const outer = Number(props.outerRadius) || 0;
-                const midAngle = props.midAngle ?? 0;
-                const radius = inner + (outer - inner) * 0.55;
-                const x = cx + radius * Math.cos(-midAngle * RADIAN);
-                const y = cy + radius * Math.sin(-midAngle * RADIAN);
-                const c = NEON_PALETTE[(props.index ?? 0) % NEON_PALETTE.length];
-                return (
-                  <text
-                    x={x}
-                    y={y}
-                    fill="white"
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    className={`pointer-events-none select-none font-semibold ${
-                      pct < 5 ? "text-[10px]" : "text-xs sm:text-[13px]"
-                    }`}
-                    style={{
-                      textShadow: `0 0 8px ${c}, 0 0 2px rgba(0,0,0,0.9)`,
-                    }}
-                  >
-                    {pct.toFixed(1)}%
-                  </text>
-                );
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="relative h-[280px] w-full sm:h-[320px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+              <Pie
+                data={chartData}
+                dataKey="value"
+                nameKey="name"
+                cx="50%"
+                cy="50%"
+                innerRadius="52%"
+                outerRadius="88%"
+                startAngle={90}
+                endAngle={-270}
+                paddingAngle={2.5}
+                stroke="rgba(255,255,255,0.12)"
+                strokeWidth={1}
+                cornerRadius={4}
+                labelLine={false}
+                label={(props: PieLabelRenderProps) => {
+                  const pct = (props.percent ?? 0) * 100;
+                  const RADIAN = Math.PI / 180;
+                  const cx = props.cx ?? 0;
+                  const cy = props.cy ?? 0;
+                  const inner = Number(props.innerRadius) || 0;
+                  const outer = Number(props.outerRadius) || 0;
+                  const midAngle = props.midAngle ?? 0;
+                  const radius = inner + (outer - inner) * 0.55;
+                  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                  const c = NEON_PALETTE[(props.index ?? 0) % NEON_PALETTE.length];
+                  return (
+                    <text
+                      x={x}
+                      y={y}
+                      fill="white"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      className={`pointer-events-none select-none font-semibold ${
+                        pct < 5 ? "text-[10px]" : "text-xs sm:text-[13px]"
+                      }`}
+                      style={{
+                        textShadow: `0 0 8px ${c}, 0 0 2px rgba(0,0,0,0.9)`,
+                      }}
+                    >
+                      {pct.toFixed(1)}%
+                    </text>
+                  );
+                }}
+              >
+                {chartData.map((entry, index) => {
+                  const c = NEON_PALETTE[index % NEON_PALETTE.length];
+                  return (
+                    <Cell
+                      key={entry.name}
+                      fill={c}
+                      style={{
+                        filter: `drop-shadow(0 0 6px ${c}) drop-shadow(0 0 14px ${c}55)`,
+                      }}
+                    />
+                  );
+                })}
+              </Pie>
+              <Tooltip
+                content={<NeonTooltip />}
+                allowEscapeViewBox={{ x: true, y: true }}
+                wrapperStyle={{ zIndex: 50 }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+
+          {/* 중앙 허브 (이름 + 합계) */}
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div
+              className="flex h-[100px] w-[100px] flex-col items-center justify-center rounded-full border border-white/10 bg-zinc-950/90 text-center backdrop-blur-sm sm:h-[108px] sm:w-[108px]"
+              style={{
+                boxShadow: `
+                  inset 0 2px 16px rgba(0,0,0,0.65),
+                  inset 0 -1px 0 rgba(255,255,255,0.06),
+                  0 0 0 1px rgba(255,255,255,0.05)
+                `,
               }}
             >
-              {chartData.map((entry, index) => {
-                const c = NEON_PALETTE[index % NEON_PALETTE.length];
-                return (
-                  <Cell
-                    key={entry.name}
-                    fill={c}
-                    style={{
-                      filter: `drop-shadow(0 0 6px ${c}) drop-shadow(0 0 14px ${c}55)`,
-                    }}
-                  />
-                );
-              })}
-            </Pie>
-            <Tooltip
-              content={<NeonTooltip />}
-              allowEscapeViewBox={{ x: true, y: true }}
-              wrapperStyle={{ zIndex: 50 }}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-
-        {/* 중앙 허브 (이름 + 합계) */}
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div
-            className="flex h-[100px] w-[100px] flex-col items-center justify-center rounded-full border border-white/10 bg-zinc-950/90 text-center backdrop-blur-sm sm:h-[108px] sm:w-[108px]"
-            style={{
-              boxShadow: `
-                inset 0 2px 16px rgba(0,0,0,0.65),
-                inset 0 -1px 0 rgba(255,255,255,0.06),
-                0 0 0 1px rgba(255,255,255,0.05)
-              `,
-            }}
-          >
-            <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-              {ownerName}
-            </span>
-            <span className="mt-0.5 max-w-[100px] truncate text-[13px] font-bold tabular-nums leading-tight text-zinc-100 sm:max-w-[108px] sm:text-sm">
-              {formatKrw(total)}
-            </span>
+              <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+                {ownerName}
+              </span>
+              <span className="mt-0.5 max-w-[100px] truncate text-[13px] font-bold tabular-nums leading-tight text-zinc-100 sm:max-w-[108px] sm:text-sm">
+                {formatKrw(total)}
+              </span>
+            </div>
           </div>
+        </div>
+
+        <div className="h-[280px] w-full rounded-xl border border-white/10 bg-zinc-950/40 p-2 sm:h-[320px]">
+          <p className="mb-2 px-1 text-[11px] font-medium tracking-wide text-zinc-400">
+            GROUP TREEMAP
+          </p>
+          <ResponsiveContainer width="100%" height="100%">
+            <Treemap
+              data={chartData}
+              dataKey="value"
+              stroke="rgba(255,255,255,0.12)"
+              content={<NeonTreemapNode />}
+              aspectRatio={1.6}
+            />
+          </ResponsiveContainer>
         </div>
       </div>
     </div>
