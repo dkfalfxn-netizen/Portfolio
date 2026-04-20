@@ -1133,6 +1133,7 @@ export default function Home() {
         allEntries: { name: string; symbol: string }[];
         value: number;
         weightedChangeSum: number;
+        prevCloseValueSum: number;
       }>();
       for (const position of items) {
         const v = Math.max(0, Number.isFinite(position.valueKrw) ? position.valueKrw : 0);
@@ -1140,15 +1141,15 @@ export default function Home() {
           typeof position.previousClose === "number" && position.previousClose > 0
             ? position.previousClose
             : null;
-        const dailyChangePct =
-          prevClose !== null
-            ? ((position.currentPrice - prevClose) / prevClose) * 100
-            : position.pnl;
+        const dailyChangePct = prevClose !== null ? ((position.currentPrice - prevClose) / prevClose) * 100 : null;
         const groupKey = position.chartGroup?.trim() || position.symbol;
         const existing = groupMap.get(groupKey);
         if (existing) {
           existing.value += v;
-          existing.weightedChangeSum += dailyChangePct * v;
+          if (dailyChangePct !== null) {
+            existing.weightedChangeSum += dailyChangePct * v;
+            existing.prevCloseValueSum += v;
+          }
           if (!existing.allEntries.some((e) => e.symbol === position.symbol && e.name === position.name)) {
             existing.allEntries.push({ name: position.name, symbol: position.symbol });
           }
@@ -1157,18 +1158,19 @@ export default function Home() {
             displayName: position.chartGroup?.trim() || position.name,
             allEntries: [{ name: position.name, symbol: position.symbol }],
             value: v,
-            weightedChangeSum: dailyChangePct * v,
+            weightedChangeSum: dailyChangePct !== null ? dailyChangePct * v : 0,
+            prevCloseValueSum: dailyChangePct !== null ? v : 0,
           });
         }
       }
       const stockSlices = Array.from(groupMap.entries()).map(
-        ([groupKey, { displayName, allEntries, value, weightedChangeSum }]) => ({
+        ([groupKey, { displayName, allEntries, value, weightedChangeSum, prevCloseValueSum }]) => ({
           name: `stk|${groupKey}|${ownerName}`,
           displayName,
           ticker: groupKey,
           allEntries,
           value,
-          changePct: value > 0 ? weightedChangeSum / value : 0,
+          changePct: prevCloseValueSum > 0 ? weightedChangeSum / prevCloseValueSum : null,
         }),
       );
 
@@ -1182,7 +1184,7 @@ export default function Home() {
         ticker: string;
         allEntries: { name: string; symbol: string }[];
         value: number;
-        changePct: number;
+        changePct: number | null;
       }[] = [];
       if (usdCashKrw > 0) {
         extra.push({
@@ -1191,7 +1193,7 @@ export default function Home() {
           ticker: "USD 현금",
           allEntries: [{ name: "USD 현금", symbol: "" }],
           value: usdCashKrw,
-          changePct: 0,
+          changePct: null,
         });
       }
       if (krw > 0) {
@@ -1201,7 +1203,7 @@ export default function Home() {
           ticker: "KRW 현금",
           allEntries: [{ name: "KRW 현금", symbol: "" }],
           value: krw,
-          changePct: 0,
+          changePct: null,
         });
       }
       const merged = [...stockSlices, ...extra];

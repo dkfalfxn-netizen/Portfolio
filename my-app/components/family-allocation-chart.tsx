@@ -28,7 +28,7 @@ export type AllocationSlice = {
   allEntries: { name: string; symbol: string }[];
   value: number;
   weight: number;
-  changePct: number;
+  changePct: number | null;
 };
 
 function formatKrw(n: number) {
@@ -83,7 +83,7 @@ function NeonTreemapNode(props: {
   index?: number;
   name?: string;
   value?: number;
-  payload?: { ticker?: string; weight?: number; value?: number; changePct?: number };
+  payload?: { ticker?: string; weight?: number; value?: number; changePct?: number | null };
   root?: { value?: number };
 }) {
   const x = props.x ?? 0;
@@ -97,9 +97,10 @@ function NeonTreemapNode(props: {
   const nodeValue = props.payload?.value ?? props.value ?? 0;
   const rootValue = props.root?.value ?? 0;
   const weight = props.payload?.weight ?? (rootValue > 0 ? (nodeValue / rootValue) * 100 : 0);
-  const changePct = props.payload?.changePct ?? 0;
+  const changePct = props.payload?.changePct ?? null;
   const c = NEON_PALETTE[idx % NEON_PALETTE.length];
-  const changeColor = changePct > 0 ? "#ef4444" : changePct < 0 ? "#3b82f6" : "rgba(255,255,255,0.85)";
+  const changeColor =
+    changePct === null ? "rgba(255,255,255,0.72)" : changePct > 0 ? "#ef4444" : changePct < 0 ? "#3b82f6" : "rgba(255,255,255,0.85)";
 
   if (width < 22 || height < 16) return null;
 
@@ -115,6 +116,15 @@ function NeonTreemapNode(props: {
         strokeWidth={1}
         style={{ filter: `drop-shadow(0 0 8px ${c}66)` }}
       />
+      {/* 상단 하이라이트 + 하단 음영으로 박스를 살짝 입체적으로 보이게 함 */}
+      <rect x={x + 1} y={y + 1} width={Math.max(0, width - 2)} height={Math.max(0, height * 0.35)} fill="rgba(255,255,255,0.12)" />
+      <rect
+        x={x + 1}
+        y={y + Math.max(0, height * 0.7)}
+        width={Math.max(0, width - 2)}
+        height={Math.max(0, height * 0.3 - 1)}
+        fill="rgba(0,0,0,0.16)"
+      />
       {width > 40 && height > 22 && (
         <text x={x + 5} y={y + 13} fill="white" fontSize={11} fontWeight={700}>
           {ticker}
@@ -127,8 +137,7 @@ function NeonTreemapNode(props: {
       )}
       {width > 90 && height > 42 && (
         <text x={x + 5} y={y + 39} fill={changeColor} fontSize={10} fontWeight={700}>
-          {changePct > 0 ? "+" : ""}
-          {changePct.toFixed(2)}%
+          {changePct === null ? "--" : `${changePct > 0 ? "+" : ""}${changePct.toFixed(2)}%`}
         </text>
       )}
     </g>
