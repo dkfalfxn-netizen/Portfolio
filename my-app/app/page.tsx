@@ -880,14 +880,6 @@ export default function Home() {
     sentHoldings?: number;
     sentWatchlist?: number;
   } | null>(null);
-  const [dailySummaryTestBusy, setDailySummaryTestBusy] = useState(false);
-  const [dailySummaryTestResult, setDailySummaryTestResult] = useState<{
-    ok: boolean;
-    source: "bok" | "kcif" | "both";
-    message: string;
-    payload?: unknown;
-  } | null>(null);
-
   type WatchlistRow = { symbol: string; name: string };
   const [watchlistRows, setWatchlistRows] = useState<WatchlistRow[]>([]);
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
@@ -2178,72 +2170,6 @@ export default function Home() {
       setTelegramTestResult({ ok: false, error: "네트워크 오류입니다." });
     } finally {
       setTelegramTestBusy(false);
-    }
-  }
-
-  async function handleDailySummaryTest(source: "bok" | "kcif") {
-    if (!cloudSyncKey || cloudSyncKey.length < 8) {
-      setDailySummaryTestResult({ ok: false, source, message: "먼저 동기화 키를 저장해 주세요." });
-      return;
-    }
-    setDailySummaryTestBusy(true);
-    setDailySummaryTestResult(null);
-    try {
-      const res = await fetch("/api/alert/daily-summary-test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, sync_key: cloudSyncKey }),
-      });
-      const body = await res.json() as Record<string, unknown>;
-      setDailySummaryTestResult({
-        ok: res.ok,
-        source,
-        message: res.ok
-          ? `${source === "bok" ? "BOK" : "KCIF"} 요약 테스트 발송 완료`
-          : String(body.error ?? body.message ?? "요약 테스트 발송 실패"),
-        payload: body,
-      });
-    } catch {
-      setDailySummaryTestResult({
-        ok: false,
-        source,
-        message: "네트워크 오류입니다.",
-      });
-    } finally {
-      setDailySummaryTestBusy(false);
-    }
-  }
-
-  async function handleDailySummaryCombinedTest() {
-    if (!cloudSyncKey || cloudSyncKey.length < 8) {
-      setDailySummaryTestResult({ ok: false, source: "both", message: "먼저 동기화 키를 저장해 주세요." });
-      return;
-    }
-    setDailySummaryTestBusy(true);
-    setDailySummaryTestResult(null);
-    try {
-      const kcifRes = await fetch("/api/alert/daily-summary-test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "both", sync_key: cloudSyncKey }),
-      });
-      const kcifBody = await kcifRes.json() as Record<string, unknown>;
-      setDailySummaryTestResult({
-        ok: kcifRes.ok,
-        source: "both",
-        message: kcifRes.ok
-          ? String(kcifBody.message ?? "BOK/KCIF 요약 테스트를 1분 간격으로 모두 발송했습니다.")
-          : String(kcifBody.error ?? kcifBody.message ?? "순차 테스트 발송 실패"),
-        payload: kcifBody.payload ?? kcifBody,
-      });
-    } catch {
-      setDailySummaryTestResult({
-        ok: false,
-        source: "both",
-        message: "네트워크 오류입니다.",
-      });
-    } finally {
-      setDailySummaryTestBusy(false);
     }
   }
 
@@ -3743,45 +3669,7 @@ export default function Home() {
               >
                 {telegramTestBusy ? "전송 중…" : "📨 테스트 전송 (실제 발송)"}
               </button>
-              <button
-                type="button"
-                className="cursor-pointer rounded-md border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-600 transition-all duration-100 hover:bg-emerald-500/20 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                disabled={dailySummaryTestBusy}
-                onClick={() => void handleDailySummaryTest("bok")}
-              >
-                {dailySummaryTestBusy ? "요약 전송 중…" : "🏦 BOK 요약 테스트"}
-              </button>
-              <button
-                type="button"
-                className="cursor-pointer rounded-md border border-violet-500/40 bg-violet-500/10 px-4 py-2 text-sm text-violet-600 transition-all duration-100 hover:bg-violet-500/20 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                disabled={dailySummaryTestBusy}
-                onClick={() => void handleDailySummaryTest("kcif")}
-              >
-                {dailySummaryTestBusy ? "요약 전송 중…" : "📄 KCIF PDF 요약 테스트"}
-              </button>
-              <button
-                type="button"
-                className="cursor-pointer rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-600 transition-all duration-100 hover:bg-amber-500/20 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                disabled={dailySummaryTestBusy}
-                onClick={() => void handleDailySummaryCombinedTest()}
-              >
-                {dailySummaryTestBusy ? "순차 전송 중…" : "🧩 BOK+KCIF 순차 테스트(1분 간격)"}
-              </button>
             </div>
-            {dailySummaryTestResult && (
-              <div
-                className={`mt-3 rounded-lg border p-3 text-xs ${
-                  dailySummaryTestResult.ok
-                    ? "border-green-500/30 bg-green-500/5"
-                    : "border-red-500/30 bg-red-500/5"
-                }`}
-              >
-                <p className={dailySummaryTestResult.ok ? "font-semibold text-green-600" : "font-semibold text-red-500"}>
-                  {dailySummaryTestResult.ok ? "✅" : "❌"} [{dailySummaryTestResult.source.toUpperCase()}]{" "}
-                  {dailySummaryTestResult.message}
-                </p>
-              </div>
-            )}
             {telegramTestResult && (
               <div className={`mt-3 rounded-lg border p-3 text-xs ${telegramTestResult.ok ? "border-green-500/30 bg-green-500/5" : "border-red-500/30 bg-red-500/5"}`}>
                 {!telegramTestResult.ok ? (
