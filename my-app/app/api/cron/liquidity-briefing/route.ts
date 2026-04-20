@@ -26,25 +26,6 @@ function toSignedPct(current: number, prev: number): number | null {
   return ((current - prev) / prev) * 100;
 }
 
-function fmtBillionsFromMillions(v: number): string {
-  const b = v / 1000;
-  return `$${b.toLocaleString("en-US", { maximumFractionDigits: 1 })}B`;
-}
-
-function fmtPlain(v: number, digits = 2): string {
-  return v.toLocaleString("en-US", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
-}
-
-function fmtDeltaPct(p: number | null): string {
-  if (p === null || !Number.isFinite(p)) return "변화율 계산 불가";
-  const arrow = p >= 0 ? "▲" : "▼";
-  const signed = `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
-  return `${arrow} ${signed}`;
-}
-
 async function fetchFredSeriesLatest(seriesId: string): Promise<{ latest: SeriesPoint | null; previous: SeriesPoint | null }> {
   const res = await fetch(`${FRED_GRAPH_BASE}${encodeURIComponent(seriesId)}`, {
     headers: { "User-Agent": "Mozilla/5.0" },
@@ -294,26 +275,6 @@ async function run() {
   const text = [
     "🌊 <b>오전 9시 유동성 브리핑</b>",
     `기준일: ${escapeHtml(date)}`,
-    "",
-    "1) <b>순유동성 지수 (Fed - TGA - RRP)</b>",
-    `- Net Liquidity: ${escapeHtml(fmtBillionsFromMillions(netLiquidity))} (${escapeHtml(fmtDeltaPct(netLiquidityPct))})`,
-    `- Fed 총자산(WALCL): ${escapeHtml(fmtBillionsFromMillions(walcl.latest.value))}`,
-    `- TGA(WTREGEN): ${escapeHtml(fmtBillionsFromMillions(tga.latest.value))}`,
-    `- 역레포(RRPONTSYD): ${escapeHtml(fmtBillionsFromMillions(rrp.latest.value))}`,
-    "",
-    "2) <b>통화 가치 및 금리</b>",
-    `- DXY: ${escapeHtml(dxy.price !== null ? fmtPlain(dxy.price, 2) : "N/A")} (${escapeHtml(fmtDeltaPct(dxyPct))})`,
-    `- 미국 10년물 금리: ${escapeHtml(us10y.price !== null ? `${fmtPlain(us10y.price, 2)}%` : "N/A")} (${escapeHtml(fmtDeltaPct(us10yPct))})`,
-    "",
-    "3) <b>위험감내 수준</b>",
-    `- 하이일드 스프레드(HY-IG): ${escapeHtml(
-      hySpread !== null ? `${fmtPlain(hySpread, 2)}%p` : "N/A",
-    )}${escapeHtml(hySpreadDiffBp !== null ? ` (${hySpreadDiffBp >= 0 ? "+" : ""}${hySpreadDiffBp.toFixed(1)}bp)` : "")}`,
-    `- VIX: ${escapeHtml(vix.price !== null ? fmtPlain(vix.price, 2) : "N/A")} (${escapeHtml(fmtDeltaPct(vixPct))})`,
-    "",
-    "4) <b>자금 방향성</b>",
-    `- 비트코인: ${escapeHtml(btc.price !== null ? `$${fmtPlain(btc.price, 2)}` : "N/A")} (${escapeHtml(fmtDeltaPct(btcPct))})`,
-    `- 금 선물(GC=F): ${escapeHtml(gold.price !== null ? `$${fmtPlain(gold.price, 2)}` : "N/A")} (${escapeHtml(fmtDeltaPct(goldPct))})`,
     "",
     `<b>AI 한줄 코멘트</b> ${escapeHtml(aiSummary)}`,
     "",
