@@ -4,6 +4,7 @@
   "buildCommand": "npm run build",
   "crons": [
     { "path": "/api/alert/check", "schedule": "0 7 * * *" },
+    { "path": "/api/cron/liquidity-briefing", "schedule": "0 0 * * *" },
     { "path": "/api/cron/analyze-market", "schedule": "0 21 * * *" },
     { "path": "/api/cron/bok-financial-market", "schedule": "0 9 * * *" },
     { "path": "/api/cron/kcif-pdf-summary", "schedule": "1 9 * * *" },

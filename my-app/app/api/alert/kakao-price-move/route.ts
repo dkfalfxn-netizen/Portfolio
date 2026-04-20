@@ -10,6 +10,7 @@ import {
 } from "@/lib/briefing-message";
 import { isKrxCommodity, toYahooSymbol } from "@/lib/finance-symbols";
 import { analyzeFourSignals, type FourSignalsResult } from "@/lib/technical-signals";
+import { isKrEquityTradingSessionDay, isUsEquityTradingSessionDay } from "@/lib/trading-calendar";
 
 type Position = {
   symbol: string;
@@ -38,6 +39,25 @@ type AlertItem = {
   price: number | null;
   changePct: number | null;
 };
+
+type MarketGroup = "DOMESTIC" | "OVERSEAS";
+
+function normalizeSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase();
+}
+
+function marketGroupOfSymbol(symbol: string): MarketGroup {
+  const normalized = normalizeSymbol(symbol);
+  if (isKrxCommodity(normalized)) return "DOMESTIC";
+  if (normalized.startsWith("KRX:") || normalized.startsWith("KQ:")) return "DOMESTIC";
+  if (/^[0-9][0-9A-Z]{5}$/.test(normalized)) return "DOMESTIC";
+  return "OVERSEAS";
+}
+
+function isMarketTradingDay(group: MarketGroup, at: Date): boolean {
+  if (group === "DOMESTIC") return isKrEquityTradingSessionDay(at);
+  return isUsEquityTradingSessionDay(at);
+}
 
 async function fetchYahooQuote(symbol: string): Promise<Quote> {
   try {
@@ -350,6 +370,11 @@ export async function GET(req: NextRequest) {
 
   const dateKst = todayKST();
   const yst = yesterdayKST();
+  const now = new Date();
+  const marketOpen = {
+    DOMESTIC: isKrEquityTradingSessionDay(now),
+    OVERSEAS: isUsEquityTradingSessionDay(now),
+  } as const;
 
   const allSyms = new Set<string>();
   for (const snap of snaps) {
@@ -445,6 +470,9 @@ export async function GET(req: NextRequest) {
     }
 
     for (const [symbol, info] of symbolMap) {
+      const marketGroup = marketGroupOfSymbol(symbol);
+      if (!isMarketTradingDay(marketGroup, now)) continue;
+
       const dedupeKey = `${syncKey}:${symbol}:${dateKst}:${briefingSlot}`;
       if (sentSet.has(dedupeKey)) continue;
 
@@ -471,21 +499,32 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (items.length === 0 && watchEntries.length === 0) {
+  const domesticItems = items.filter((item) => marketGroupOfSymbol(item.symbol) === "DOMESTIC");
+  const overseasItems = items.filter((item) => marketGroupOfSymbol(item.symbol) === "OVERSEAS");
+  const domesticWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "DOMESTIC");
+  const overseasWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "OVERSEAS");
+
+  const eligibleWatchCount =
+    (marketOpen.DOMESTIC ? domesticWatchEntries.length : 0) +
+    (marketOpen.OVERSEAS ? overseasWatchEntries.length : 0);
+
+  if (items.length === 0 && eligibleWatchCount === 0) {
     return NextResponse.json({
       ok: true,
-      message: "발송할 내용 없음 (보유·관심 없음 또는 이미 발송)",
+      message: "발송할 내용 없음 (영업일/보유·관심 기준)",
       count: 0,
       briefing_slot: briefingSlot,
+      marketOpen,
     });
   }
 
-  if (items.length > 0) {
-    const briefingItems = toBriefingItems(items);
+  async function sendHoldingsByMarket(itemsForMarket: AlertItem[], label: string): Promise<Response | null> {
+    if (itemsForMarket.length === 0) return null;
+    const briefingItems = toBriefingItems(itemsForMarket);
     const miniTrends = await collectMiniTrends(briefingItems);
     const holdTransitions = await collectHoldTransitions(briefingItems);
     const text = buildTelegramBriefingHtml({
-      slotLabel,
+      slotLabel: `${slotLabel} · ${label}`,
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,
       ownerDailyReturns,
@@ -494,28 +533,54 @@ export async function GET(req: NextRequest) {
       holdTransitions,
     });
     const send = await sendTelegramMessage(text);
-    if (!send.ok) return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
-
-    if (logRows.length > 0) {
-      await admin.from("price_move_alert_logs").upsert(logRows, {
-        onConflict: "sync_key,symbol,date,briefing_slot",
-      });
+    if (!send.ok) {
+      return NextResponse.json({ error: send.error ?? `${label} 텔레그램 전송 실패` }, { status: 500 });
     }
+    return null;
   }
 
-  if (watchEntries.length > 0) {
-    const block = await buildWatchlistTelegramBlock(watchEntries);
-    if (block) {
-      const sendW = await sendTelegramMessage(block);
-      if (!sendW.ok) return NextResponse.json({ error: sendW.error ?? "관심종목 텔레그램 전송 실패" }, { status: 500 });
+  const domesticSendError = await sendHoldingsByMarket(domesticItems, "국내주식");
+  if (domesticSendError) return domesticSendError;
+  const overseasSendError = await sendHoldingsByMarket(overseasItems, "해외주식");
+  if (overseasSendError) return overseasSendError;
+
+  if (logRows.length > 0) {
+    await admin.from("price_move_alert_logs").upsert(logRows, {
+      onConflict: "sync_key,symbol,date,briefing_slot",
+    });
+  }
+
+  async function sendWatchlistByMarket(entries: WatchlistRow[], label: string): Promise<Response | null> {
+    if (entries.length === 0) return null;
+    const block = await buildWatchlistTelegramBlock(entries);
+    if (!block) return null;
+    const text = `⭐ <b>${label} 관심종목</b>\n\n${block}`;
+    const send = await sendTelegramMessage(text);
+    if (!send.ok) {
+      return NextResponse.json({ error: send.error ?? `${label} 관심종목 텔레그램 전송 실패` }, { status: 500 });
     }
+    return null;
+  }
+
+  if (marketOpen.DOMESTIC) {
+    const watchSendError = await sendWatchlistByMarket(domesticWatchEntries, "국내주식");
+    if (watchSendError) return watchSendError;
+  }
+  if (marketOpen.OVERSEAS) {
+    const watchSendError = await sendWatchlistByMarket(overseasWatchEntries, "해외주식");
+    if (watchSendError) return watchSendError;
   }
 
   return NextResponse.json({
     ok: true,
     sentHoldings: items.length,
-    sentWatchlist: watchEntries.length,
+    sentHoldingsDomestic: domesticItems.length,
+    sentHoldingsOverseas: overseasItems.length,
+    sentWatchlist: eligibleWatchCount,
+    sentWatchlistDomestic: marketOpen.DOMESTIC ? domesticWatchEntries.length : 0,
+    sentWatchlistOverseas: marketOpen.OVERSEAS ? overseasWatchEntries.length : 0,
     briefing_slot: briefingSlot,
+    marketOpen,
   });
 }
 
@@ -539,6 +604,11 @@ export async function POST(req: NextRequest) {
   }
   const dryRun = b.dry_run !== false; // 기본값 true (실전 전송 안 함)
   const forceResend = b.force_resend === true;
+  const now = new Date();
+  const marketOpen = {
+    DOMESTIC: isKrEquityTradingSessionDay(now),
+    OVERSEAS: isUsEquityTradingSessionDay(now),
+  } as const;
 
   // 환경변수 점검
   const hasBotToken = !!process.env.TELEGRAM_BOT_TOKEN;
@@ -616,6 +686,20 @@ export async function POST(req: NextRequest) {
   }
 
   for (const [symbol, info] of symbolMap) {
+    const marketGroup = marketGroupOfSymbol(symbol);
+    if (!isMarketTradingDay(marketGroup, now)) {
+      results.push({
+        symbol,
+        name: info.name,
+        price: null,
+        previousClose: null,
+        changePct: null,
+        willAlert: false,
+        sector: info.sector,
+      });
+      continue;
+    }
+
     const q = await fetchQuoteForSymbol(symbol);
     const pct = (q.price && q.previousClose && q.previousClose > 0)
       ? ((q.price - q.previousClose) / q.previousClose) * 100
@@ -643,6 +727,7 @@ export async function POST(req: NextRequest) {
 
   const watchlistPreview: FourSignalsResult[] = [];
   for (const w of watchEntries) {
+    if (!isMarketTradingDay(marketGroupOfSymbol(w.symbol), now)) continue;
     const label = w.name && w.name.length > 0 ? w.name : w.symbol;
     watchlistPreview.push(await analyzeFourSignals(w.symbol, label));
     await new Promise((r) => setTimeout(r, 80));
@@ -657,19 +742,25 @@ export async function POST(req: NextRequest) {
       symbols: results,
       alertCount: items.length,
       alreadySentToday: [...alreadySent],
-      watchlistCount: watchEntries.length,
+      watchlistCount: watchlistPreview.length,
       watchlistSignals: watchlistPreview,
+      marketOpen,
       message:
-        items.length > 0 || watchEntries.length > 0
-          ? `보유 ${items.length}종목 · 관심 ${watchEntries.length}종목 발송 예정(실전 전송 아님)`
-          : "오늘 이미 보유 종목은 발송됨 · 관심종목 없음",
+        items.length > 0 || watchlistPreview.length > 0
+          ? `보유 ${items.length}종목 · 관심 ${watchlistPreview.length}종목 발송 예정(실전 전송 아님)`
+          : "오늘 영업일 기준 발송 대상 없음 또는 이미 발송됨",
     });
   }
 
   // dry_run: false → 실제 전송
-  if (items.length === 0 && watchEntries.length === 0) {
-    return NextResponse.json({ ok: true, dry_run: false, message: "발송할 내용 없음 (보유·관심)", count: 0 });
+  if (items.length === 0 && watchlistPreview.length === 0) {
+    return NextResponse.json({ ok: true, dry_run: false, message: "발송할 내용 없음 (영업일/보유·관심 기준)", count: 0, marketOpen });
   }
+
+  const domesticItems = items.filter((item) => marketGroupOfSymbol(item.symbol) === "DOMESTIC");
+  const overseasItems = items.filter((item) => marketGroupOfSymbol(item.symbol) === "OVERSEAS");
+  const domesticWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "DOMESTIC");
+  const overseasWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "OVERSEAS");
 
   if (items.length > 0) {
     const syms = [...symbolMap.keys()];
@@ -705,40 +796,68 @@ export async function POST(req: NextRequest) {
       })
       .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
 
-    const briefingItems = toBriefingItems(items);
-    const miniTrends = await collectMiniTrends(briefingItems);
-    const holdTransitions = await collectHoldTransitions(briefingItems);
-    const text = buildTelegramBriefingHtml({
-      slotLabel: BRIEFING_SLOT_LABELS.manual,
-      dateLabel: mmddKST(),
-      portfolioChangeVsYesterdayPct,
-      ownerDailyReturns,
-      items: briefingItems,
-      miniTrends,
-      holdTransitions,
-    });
-    const send = await sendTelegramMessage(text);
-    if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
+    async function sendHoldingsByMarket(itemsForMarket: AlertItem[], label: string): Promise<Response | null> {
+      if (itemsForMarket.length === 0) return null;
+      const briefingItems = toBriefingItems(itemsForMarket);
+      const miniTrends = await collectMiniTrends(briefingItems);
+      const holdTransitions = await collectHoldTransitions(briefingItems);
+      const text = buildTelegramBriefingHtml({
+        slotLabel: `${BRIEFING_SLOT_LABELS.manual} · ${label}`,
+        dateLabel: mmddKST(),
+        portfolioChangeVsYesterdayPct,
+        ownerDailyReturns,
+        items: briefingItems,
+        miniTrends,
+        holdTransitions,
+      });
+      const send = await sendTelegramMessage(text);
+      if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
+      return null;
+    }
+
+    const domesticSendError = await sendHoldingsByMarket(domesticItems, "국내주식");
+    if (domesticSendError) return domesticSendError;
+    const overseasSendError = await sendHoldingsByMarket(overseasItems, "해외주식");
+    if (overseasSendError) return overseasSendError;
 
     await admin.from("price_move_alert_logs").upsert(logRows, {
       onConflict: "sync_key,symbol,date,briefing_slot",
     });
   }
 
-  if (watchEntries.length > 0) {
-    const block = await buildWatchlistTelegramBlock(watchEntries);
-    if (block) {
-      const sendW = await sendTelegramMessage(block);
-      if (!sendW.ok) return NextResponse.json({ ok: false, error: sendW.error }, { status: 500 });
-    }
+  async function sendWatchlistByMarket(entries: WatchlistRow[], label: string): Promise<Response | null> {
+    if (entries.length === 0) return null;
+    const block = await buildWatchlistTelegramBlock(entries);
+    if (!block) return null;
+    const text = `⭐ <b>${label} 관심종목</b>\n\n${block}`;
+    const sendW = await sendTelegramMessage(text);
+    if (!sendW.ok) return NextResponse.json({ ok: false, error: sendW.error }, { status: 500 });
+    return null;
+  }
+
+  if (marketOpen.DOMESTIC) {
+    const watchSendError = await sendWatchlistByMarket(domesticWatchEntries, "국내주식");
+    if (watchSendError) return watchSendError;
+  }
+  if (marketOpen.OVERSEAS) {
+    const watchSendError = await sendWatchlistByMarket(overseasWatchEntries, "해외주식");
+    if (watchSendError) return watchSendError;
   }
 
   return NextResponse.json({
     ok: true,
     dry_run: false,
     sentHoldings: items.length,
-    sentWatchlist: watchEntries.length,
+    sentHoldingsDomestic: domesticItems.length,
+    sentHoldingsOverseas: overseasItems.length,
+    sentWatchlist: (marketOpen.DOMESTIC ? domesticWatchEntries.length : 0) + (marketOpen.OVERSEAS ? overseasWatchEntries.length : 0),
+    sentWatchlistDomestic: marketOpen.DOMESTIC ? domesticWatchEntries.length : 0,
+    sentWatchlistOverseas: marketOpen.OVERSEAS ? overseasWatchEntries.length : 0,
+    marketOpen,
     items,
   });
 }
 
+/*
+ * 기존 POST 구현이 아래에 중복으로 남지 않도록 정리됨
+ */

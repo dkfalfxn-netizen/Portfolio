@@ -19,6 +19,10 @@ import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import {
+  LiquidityBriefingChart,
+  type LiquidityHistoryRow,
+} from "@/components/liquidity-briefing-chart";
+import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
   calculateRSISignal,
@@ -79,6 +83,11 @@ type MarketResponse = {
 type HistoryResponse = {
   history: Record<string, SignalDailyPrice[]>;
   fetchedAt?: number;
+};
+
+type LiquidityHistoryResponse = {
+  ok: boolean;
+  rows: LiquidityHistoryRow[];
 };
 
 /** 로컬 저장 키 — v1에서 한 번만 마이그레이션 후 v2만 사용 */
@@ -1009,6 +1018,17 @@ export default function Home() {
     // 일봉은 분봉보다 덜 자주 바뀌므로 30분 캐시
     staleTime: 1000 * 60 * 30,
     refetchInterval: 1000 * 60 * 30,
+  });
+
+  const liquidityHistoryQuery = useQuery<LiquidityHistoryResponse>({
+    queryKey: ["liquidity-history"],
+    queryFn: async () => {
+      const res = await fetch("/api/liquidity/history");
+      if (!res.ok) throw new Error("유동성 브리핑 조회 실패");
+      return res.json() as Promise<LiquidityHistoryResponse>;
+    },
+    staleTime: 1000 * 60 * 60,
+    refetchInterval: 1000 * 60 * 60,
   });
 
   const signalBySymbol = useMemo(() => {
@@ -2528,6 +2548,7 @@ export default function Home() {
               {([
                 { id: "section-add",       icon: "➕", label: "종목 추가" },
                 { id: "section-alert",     icon: "🔔", label: "이메일 알림" },
+                { id: "section-liquidity", icon: "🌊", label: "유동성 브리핑" },
                 { id: "section-watchlist", icon: "⭐", label: "관심종목" },
                 { id: "section-telegram",  icon: "📲", label: "텔레그램" },
                 { id: "section-simulator", icon: "🧮", label: "가상 매수" },
@@ -2572,6 +2593,7 @@ export default function Home() {
                     { id: "section-holdings", icon: "📋", label: "보유 종목" },
                     { id: "section-add", icon: "➕", label: "종목 추가" },
                     { id: "section-alert", icon: "🔔", label: "이메일 알림" },
+                    { id: "section-liquidity", icon: "🌊", label: "유동성 브리핑" },
                     { id: "section-watchlist", icon: "⭐", label: "관심종목" },
                     { id: "section-telegram", icon: "📲", label: "텔레그램" },
                     { id: "section-simulator", icon: "🧮", label: "가상 매수" },
@@ -2667,6 +2689,21 @@ export default function Home() {
             <DailyTrendChart snapshots={dailySnapshots} ownerNames={ownerNames} liveChangeByDate={dailyLiveChangeByDate} />
           </section>
           <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
+
+          <section id="section-liquidity" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
+            <h2 className="mb-1 font-semibold">유동성 브리핑 차트</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              매일 오전 9시 브리핑 데이터를 시계열로 보여줍니다. 순유동성·DXY·미10년·VIX를 그래프로 보고,
+              최신 AI 한두 문장 요약을 함께 확인할 수 있습니다.
+            </p>
+            {liquidityHistoryQuery.isLoading ? (
+              <p className="text-sm text-muted-foreground">유동성 브리핑 데이터를 불러오는 중...</p>
+            ) : liquidityHistoryQuery.error ? (
+              <p className="text-sm text-red-500">유동성 브리핑 조회에 실패했습니다.</p>
+            ) : (
+              <LiquidityBriefingChart rows={liquidityHistoryQuery.data?.rows ?? []} />
+            )}
+          </section>
 
           {/* 리밸런싱 계산기 */}
           <section id="section-rebalance" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
