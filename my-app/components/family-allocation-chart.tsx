@@ -75,12 +75,6 @@ function NeonTooltip({
   );
 }
 
-function getTreemapColor(changePct: number) {
-  if (changePct > 0) return "#16A34A";
-  if (changePct < 0) return "#DC2626";
-  return "#334155";
-}
-
 function NeonTreemapNode(props: {
   x?: number;
   y?: number;
@@ -96,12 +90,16 @@ function NeonTreemapNode(props: {
   const y = props.y ?? 0;
   const width = props.width ?? 0;
   const height = props.height ?? 0;
-  const ticker = props.payload?.ticker ?? props.name ?? "";
+  const idx = props.index ?? 0;
+  const fallbackName = props.name ?? "";
+  const parsedTicker = fallbackName.startsWith("stk|") ? (fallbackName.split("|")[1] ?? fallbackName) : fallbackName;
+  const ticker = props.payload?.ticker ?? parsedTicker;
   const nodeValue = props.payload?.value ?? props.value ?? 0;
   const rootValue = props.root?.value ?? 0;
   const weight = props.payload?.weight ?? (rootValue > 0 ? (nodeValue / rootValue) * 100 : 0);
   const changePct = props.payload?.changePct ?? 0;
-  const c = getTreemapColor(changePct);
+  const c = NEON_PALETTE[idx % NEON_PALETTE.length];
+  const changeColor = changePct > 0 ? "#ef4444" : changePct < 0 ? "#3b82f6" : "rgba(255,255,255,0.85)";
 
   if (width < 22 || height < 16) return null;
 
@@ -128,7 +126,7 @@ function NeonTreemapNode(props: {
         </text>
       )}
       {width > 90 && height > 42 && (
-        <text x={x + 5} y={y + 39} fill="rgba(255,255,255,0.85)" fontSize={10}>
+        <text x={x + 5} y={y + 39} fill={changeColor} fontSize={10} fontWeight={700}>
           {changePct > 0 ? "+" : ""}
           {changePct.toFixed(2)}%
         </text>
