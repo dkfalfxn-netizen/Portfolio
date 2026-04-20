@@ -1132,13 +1132,23 @@ export default function Home() {
         displayName: string;
         allEntries: { name: string; symbol: string }[];
         value: number;
+        weightedChangeSum: number;
       }>();
       for (const position of items) {
         const v = Math.max(0, Number.isFinite(position.valueKrw) ? position.valueKrw : 0);
+        const prevClose =
+          typeof position.previousClose === "number" && position.previousClose > 0
+            ? position.previousClose
+            : null;
+        const dailyChangePct =
+          prevClose !== null
+            ? ((position.currentPrice - prevClose) / prevClose) * 100
+            : position.pnl;
         const groupKey = position.chartGroup?.trim() || position.symbol;
         const existing = groupMap.get(groupKey);
         if (existing) {
           existing.value += v;
+          existing.weightedChangeSum += dailyChangePct * v;
           if (!existing.allEntries.some((e) => e.symbol === position.symbol && e.name === position.name)) {
             existing.allEntries.push({ name: position.name, symbol: position.symbol });
           }
@@ -1147,22 +1157,33 @@ export default function Home() {
             displayName: position.chartGroup?.trim() || position.name,
             allEntries: [{ name: position.name, symbol: position.symbol }],
             value: v,
+            weightedChangeSum: dailyChangePct * v,
           });
         }
       }
-      const stockSlices = Array.from(groupMap.entries()).map(([groupKey, { displayName, allEntries, value }]) => ({
-        name: `stk|${groupKey}|${ownerName}`,
-        displayName,
-        ticker: groupKey,
-        allEntries,
-        value,
-      }));
+      const stockSlices = Array.from(groupMap.entries()).map(
+        ([groupKey, { displayName, allEntries, value, weightedChangeSum }]) => ({
+          name: `stk|${groupKey}|${ownerName}`,
+          displayName,
+          ticker: groupKey,
+          allEntries,
+          value,
+          changePct: value > 0 ? weightedChangeSum / value : 0,
+        }),
+      );
 
       const c = cashByOwner[ownerName] ?? { usd: 0, krw: 0 };
       const usd = Number.isFinite(c.usd) ? Math.max(0, c.usd) : 0;
       const krw = Number.isFinite(c.krw) ? Math.max(0, c.krw) : 0;
       const usdCashKrw = usd * usdKrw;
-      const extra: { name: string; displayName: string; ticker: string; allEntries: { name: string; symbol: string }[]; value: number }[] = [];
+      const extra: {
+        name: string;
+        displayName: string;
+        ticker: string;
+        allEntries: { name: string; symbol: string }[];
+        value: number;
+        changePct: number;
+      }[] = [];
       if (usdCashKrw > 0) {
         extra.push({
           name: `cash-usd|${ownerName}`,
@@ -1170,6 +1191,7 @@ export default function Home() {
           ticker: "USD 현금",
           allEntries: [{ name: "USD 현금", symbol: "" }],
           value: usdCashKrw,
+          changePct: 0,
         });
       }
       if (krw > 0) {
@@ -1179,6 +1201,7 @@ export default function Home() {
           ticker: "KRW 현금",
           allEntries: [{ name: "KRW 현금", symbol: "" }],
           value: krw,
+          changePct: 0,
         });
       }
       const merged = [...stockSlices, ...extra];

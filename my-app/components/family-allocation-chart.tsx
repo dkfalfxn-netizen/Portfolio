@@ -28,6 +28,7 @@ export type AllocationSlice = {
   allEntries: { name: string; symbol: string }[];
   value: number;
   weight: number;
+  changePct: number;
 };
 
 function formatKrw(n: number) {
@@ -74,6 +75,12 @@ function NeonTooltip({
   );
 }
 
+function getTreemapColor(changePct: number) {
+  if (changePct > 0) return "#16A34A";
+  if (changePct < 0) return "#DC2626";
+  return "#334155";
+}
+
 function NeonTreemapNode(props: {
   x?: number;
   y?: number;
@@ -81,15 +88,20 @@ function NeonTreemapNode(props: {
   height?: number;
   index?: number;
   name?: string;
-  payload?: { weight?: number };
+  value?: number;
+  payload?: { ticker?: string; weight?: number; value?: number; changePct?: number };
+  root?: { value?: number };
 }) {
   const x = props.x ?? 0;
   const y = props.y ?? 0;
   const width = props.width ?? 0;
   const height = props.height ?? 0;
-  const idx = props.index ?? 0;
-  const c = NEON_PALETTE[idx % NEON_PALETTE.length];
-  const weight = props.payload?.weight ?? 0;
+  const ticker = props.payload?.ticker ?? props.name ?? "";
+  const nodeValue = props.payload?.value ?? props.value ?? 0;
+  const rootValue = props.root?.value ?? 0;
+  const weight = props.payload?.weight ?? (rootValue > 0 ? (nodeValue / rootValue) * 100 : 0);
+  const changePct = props.payload?.changePct ?? 0;
+  const c = getTreemapColor(changePct);
 
   if (width < 22 || height < 16) return null;
 
@@ -107,12 +119,18 @@ function NeonTreemapNode(props: {
       />
       {width > 40 && height > 22 && (
         <text x={x + 5} y={y + 13} fill="white" fontSize={11} fontWeight={700}>
-          {props.name}
+          {ticker}
         </text>
       )}
       {width > 68 && height > 30 && (
         <text x={x + 5} y={y + 26} fill="rgba(255,255,255,0.85)" fontSize={10}>
           {weight.toFixed(1)}%
+        </text>
+      )}
+      {width > 90 && height > 42 && (
+        <text x={x + 5} y={y + 39} fill="rgba(255,255,255,0.85)" fontSize={10}>
+          {changePct > 0 ? "+" : ""}
+          {changePct.toFixed(2)}%
         </text>
       )}
     </g>
