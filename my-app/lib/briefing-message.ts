@@ -153,6 +153,12 @@ function fmtPctPlain(p: number | null): string {
 function iconForGroupLabel(label: string): string {
   const s = label.trim().toLowerCase();
   if (!s) return "🧩";
+  if (s.includes("attack")) return "🎯";
+  if (s.includes("원자력") || s.includes("nuclear")) return "☢️";
+  if (s.includes("국내주식")) return "🇰🇷";
+  if (s.includes("s&p500") || s.includes("s&p 500") || s.includes("sp500")) return "🇺🇸";
+  if (s.includes("에르메스") || s.includes("hermes")) return "👜";
+  if (s === "xle" || s.includes("xle")) return "⛽";
   if (s.includes("에너지") || s.includes("energy")) return "⚡";
   if (s.includes("방산") || s.includes("defense")) return "🛡️";
   if (s.includes("반도체") || s.includes("semiconductor")) return "💾";
