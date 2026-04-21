@@ -115,7 +115,7 @@ const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
  */
 const SNAPSHOT_PUSHED_DATE_KEY = "portfolio_snapshot_pushed_date_v1";
 const SNAPSHOT_PUSHED_TOTAL_KEY = "portfolio_snapshot_pushed_total_v1";
-const REALIZED_PNL_BY_OWNER_KEY = "portfolio_realized_pnl_by_owner_v1";
+const SELL_LOG_KEY = "portfolio_sell_log_v1";
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
 
@@ -134,9 +134,20 @@ type DailyLiveChange = {
   compareNote?: string;
 };
 
-type OwnerRealizedPnl = {
+type SellLogEntry = {
+  id: string;
+  date: string;          // YYYY-MM-DD
+  symbol: string;
+  name: string;
+  qty: number;
+  sellPrice: number;
+  avgPrice: number;
+  currency: "USD" | "EUR" | "KRW";
+  /** 매도 시 적용 환율 (USD/EUR용) */
+  fxRate: number;
+  /** 실현손익 원화 */
   realizedKrw: number;
-  updatedAt: string;
+  note?: string;
 };
 
 function normalizeOwnerNames(raw: unknown): OwnerName[] {
@@ -229,24 +240,25 @@ function loadDailySnapshots(): DailySnapshot[] {
   }
 }
 
-function loadOwnerRealizedPnl(): Record<string, OwnerRealizedPnl> {
+function loadSellLog(): Record<string, SellLogEntry[]> {
   if (typeof window === "undefined") return {};
   try {
-    const raw = window.localStorage.getItem(REALIZED_PNL_BY_OWNER_KEY);
+    const raw = window.localStorage.getItem(SELL_LOG_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return {};
-    const out: Record<string, OwnerRealizedPnl> = {};
-    for (const [owner, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!v || typeof v !== "object") continue;
-      const o = v as { realizedKrw?: unknown; updatedAt?: unknown };
-      const realized = Number(o.realizedKrw ?? 0);
-      const updatedAt = typeof o.updatedAt === "string" ? o.updatedAt : "";
-      if (!Number.isFinite(realized)) continue;
-      out[owner] = {
-        realizedKrw: realized,
-        updatedAt,
-      };
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, SellLogEntry[]> = {};
+    for (const [owner, entries] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!Array.isArray(entries)) continue;
+      out[owner] = entries.filter(
+        (e): e is SellLogEntry =>
+          e !== null &&
+          typeof e === "object" &&
+          typeof (e as SellLogEntry).id === "string" &&
+          typeof (e as SellLogEntry).symbol === "string" &&
+          typeof (e as SellLogEntry).qty === "number" &&
+          typeof (e as SellLogEntry).realizedKrw === "number",
+      );
     }
     return out;
   } catch {
@@ -849,7 +861,12 @@ export default function Home() {
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
-  const [ownerRealizedPnl, setOwnerRealizedPnl] = useState<Record<string, OwnerRealizedPnl>>({});
+  const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
+  const [sellLogForm, setSellLogForm] = useState<Record<string, {
+    date: string; symbol: string; name: string; qty: string;
+    sellPrice: string; avgPrice: string; currency: "USD" | "EUR" | "KRW"; fxRate: string; note: string;
+    editingId: string | null;
+  }>>({});
   const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
   const [editSymbol, setEditSymbol] = useState("");
   const [editName, setEditName] = useState("");
@@ -1560,11 +1577,11 @@ export default function Home() {
   useEffect(() => {
     const pos = loadPositions();
     const cash = loadCashByOwner();
-    const realized = loadOwnerRealizedPnl();
+    const log = loadSellLog();
     skipMarkLocalChangedRef.current = 2; // 디스크→state 재적용은 "수정"이 아님
     setPositions(pos);
     setCashByOwner(cash);
-    setOwnerRealizedPnl(realized);
+    setSellLog(log);
     const savedKey = typeof window !== "undefined" ? window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "" : "";
     setCloudSyncKey(savedKey);
     setSyncKeyDraft(savedKey);
@@ -1614,8 +1631,8 @@ export default function Home() {
 
   useEffect(() => {
     if (!isHydrated) return;
-    window.localStorage.setItem(REALIZED_PNL_BY_OWNER_KEY, JSON.stringify(ownerRealizedPnl));
-  }, [ownerRealizedPnl, isHydrated]);
+    window.localStorage.setItem(SELL_LOG_KEY, JSON.stringify(sellLog));
+  }, [sellLog, isHydrated]);
 
   // 초기 로드 시 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
   useEffect(() => {
@@ -2356,28 +2373,6 @@ export default function Home() {
     if (!sym || !nm) return;
     if (!Number.isFinite(q) || q <= 0) return;
     if (!Number.isFinite(a) || a <= 0) return;
-    const prevRow = positions[editingRowIndex];
-    const soldQty =
-      prevRow && Number.isFinite(prevRow.quantity) && prevRow.quantity > q
-        ? prevRow.quantity - q
-        : 0;
-    let realizedDeltaKrw = 0;
-    if (prevRow && soldQty > 0) {
-      const sellUnitKrw =
-        prevRow.currency === "USD"
-          ? prevRow.currentPrice * usdKrw
-          : prevRow.currency === "EUR"
-            ? prevRow.currentPrice * eurKrw
-            : prevRow.currentPrice;
-      const buyUnitKrw =
-        prevRow.currency === "USD"
-          ? prevRow.avgPrice * (prevRow.purchaseUsdKrw ?? usdKrw)
-          : prevRow.currency === "EUR"
-            ? prevRow.avgPrice * (prevRow.purchaseEurKrw ?? eurKrw)
-            : prevRow.avgPrice;
-      realizedDeltaKrw = (sellUnitKrw - buyUnitKrw) * soldQty;
-    }
-
     setPositions((prev) =>
       prev.map((p, idx) => {
         if (idx !== editingRowIndex) return p;
@@ -2392,18 +2387,6 @@ export default function Home() {
         return { ...p, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a };
       }),
     );
-    if (prevRow && realizedDeltaKrw !== 0) {
-      setOwnerRealizedPnl((prev) => {
-        const cur = prev[prevRow.owner]?.realizedKrw ?? 0;
-        return {
-          ...prev,
-          [prevRow.owner]: {
-            realizedKrw: cur + realizedDeltaKrw,
-            updatedAt: new Date().toISOString(),
-          },
-        };
-      });
-    }
     cancelEditRow();
   }
 
@@ -2463,15 +2446,18 @@ export default function Home() {
     }));
     setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? renamed : prev.owner }));
     setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? renamed : r.owner })));
-    setOwnerRealizedPnl((prev) => {
-      const entry = prev[name];
-      if (!entry) return prev;
+    setSellLog((prev) => {
+      if (!prev[name]) return prev;
       const next = { ...prev };
+      next[renamed] = [...(next[renamed] ?? []), ...next[name]];
       delete next[name];
-      next[renamed] = {
-        realizedKrw: (next[renamed]?.realizedKrw ?? 0) + entry.realizedKrw,
-        updatedAt: new Date().toISOString(),
-      };
+      return next;
+    });
+    setSellLogForm((prev) => {
+      if (!prev[name]) return prev;
+      const next = { ...prev };
+      next[renamed] = next[name];
+      delete next[name];
       return next;
     });
     window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
@@ -2508,11 +2494,8 @@ export default function Home() {
     });
     setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? fallbackOwner : prev.owner }));
     setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? "전체" : r.owner })));
-    setOwnerRealizedPnl((prev) => {
-      const next = { ...prev };
-      delete next[name];
-      return next;
-    });
+    setSellLog((prev) => { const next = { ...prev }; delete next[name]; return next; });
+    setSellLogForm((prev) => { const next = { ...prev }; delete next[name]; return next; });
     window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
   }
 
@@ -3275,21 +3258,227 @@ export default function Home() {
                       )}
                     </TableBody>
                   </Table>
-                  <div className="mt-2 flex items-center justify-end border-t pt-2 text-xs">
-                    <span className="mr-2 text-muted-foreground">누적 실현손익</span>
-                    <span
-                      className={`font-semibold tabular-nums ${
-                        (ownerRealizedPnl[group.ownerName]?.realizedKrw ?? 0) > 0
-                          ? "text-red-500"
-                          : (ownerRealizedPnl[group.ownerName]?.realizedKrw ?? 0) < 0
-                            ? "text-blue-500"
-                            : "text-muted-foreground"
-                      }`}
-                    >
-                      {(ownerRealizedPnl[group.ownerName]?.realizedKrw ?? 0) >= 0 ? "+" : ""}₩
-                      {Math.round(ownerRealizedPnl[group.ownerName]?.realizedKrw ?? 0).toLocaleString()}
-                    </span>
-                  </div>
+                  {/* ── 매도 기록 섹션 ── */}
+                  {(() => {
+                    const owner = group.ownerName;
+                    const log = sellLog[owner] ?? [];
+                    const totalRealized = log.reduce((s, e) => s + e.realizedKrw, 0);
+                    const form = sellLogForm[owner] ?? {
+                      date: new Date().toISOString().slice(0, 10),
+                      symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
+                      currency: "USD" as const, fxRate: String(Math.round(usdKrw)),
+                      note: "", editingId: null,
+                    };
+                    const setForm2 = (patch: Partial<typeof form>) =>
+                      setSellLogForm((prev) => ({
+                        ...prev,
+                        [owner]: { ...(prev[owner] ?? form), ...patch },
+                      }));
+
+                    function calcRealized(entry: typeof form): number {
+                      const qty = Number(entry.qty);
+                      const sell = Number(entry.sellPrice);
+                      const avg = Number(entry.avgPrice);
+                      const fx = Number(entry.fxRate) || 1;
+                      if (!Number.isFinite(qty) || !Number.isFinite(sell) || !Number.isFinite(avg)) return 0;
+                      if (entry.currency === "KRW") return (sell - avg) * qty;
+                      return (sell - avg) * qty * fx;
+                    }
+
+                    function handleSellLogSave() {
+                      const qty = Number(form.qty);
+                      const sell = Number(form.sellPrice);
+                      const avg = Number(form.avgPrice);
+                      const fx = Number(form.fxRate) || 1;
+                      if (!form.symbol || !Number.isFinite(qty) || qty <= 0) return;
+                      if (!Number.isFinite(sell) || sell <= 0) return;
+                      if (!Number.isFinite(avg) || avg <= 0) return;
+                      const realized = calcRealized(form);
+                      const entry: SellLogEntry = {
+                        id: form.editingId ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                        date: form.date,
+                        symbol: form.symbol.trim().toUpperCase(),
+                        name: form.name.trim() || form.symbol.trim().toUpperCase(),
+                        qty, sellPrice: sell, avgPrice: avg,
+                        currency: form.currency, fxRate: fx,
+                        realizedKrw: realized,
+                        note: form.note.trim() || undefined,
+                      };
+                      setSellLog((prev) => {
+                        const existing = prev[owner] ?? [];
+                        if (form.editingId) {
+                          return { ...prev, [owner]: existing.map((e) => e.id === form.editingId ? entry : e) };
+                        }
+                        return { ...prev, [owner]: [...existing, entry] };
+                      });
+                      setForm2({ symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
+                        currency: "USD", fxRate: String(Math.round(usdKrw)), note: "", editingId: null });
+                    }
+
+                    function handleSellLogEdit(e: SellLogEntry) {
+                      setForm2({
+                        date: e.date, symbol: e.symbol, name: e.name,
+                        qty: String(e.qty), sellPrice: String(e.sellPrice),
+                        avgPrice: String(e.avgPrice), currency: e.currency,
+                        fxRate: String(e.fxRate), note: e.note ?? "", editingId: e.id,
+                      });
+                    }
+
+                    function handleSellLogDelete(id: string) {
+                      setSellLog((prev) => ({
+                        ...prev,
+                        [owner]: (prev[owner] ?? []).filter((e) => e.id !== id),
+                      }));
+                    }
+
+                    const previewRealized = calcRealized(form);
+
+                    return (
+                      <div className="mt-3 rounded-xl border bg-muted/20 p-3">
+                        {/* 헤더 */}
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-xs font-semibold">매도 기록</p>
+                          <span className={`text-xs font-bold tabular-nums ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                            누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{Math.round(totalRealized).toLocaleString()}
+                          </span>
+                        </div>
+
+                        {/* 입력 폼 */}
+                        <div className="mb-3 grid grid-cols-2 gap-1.5 rounded-lg border bg-background p-2 text-xs sm:grid-cols-4">
+                          <label className="flex flex-col gap-0.5">
+                            <span className="text-[10px] text-muted-foreground">날짜</span>
+                            <input type="date" className="rounded border bg-background px-1.5 py-1 text-xs"
+                              value={form.date} onChange={(e) => setForm2({ date: e.target.value })} />
+                          </label>
+                          <label className="flex flex-col gap-0.5">
+                            <span className="text-[10px] text-muted-foreground">티커</span>
+                            <input placeholder="XLE" className="rounded border bg-background px-1.5 py-1 text-xs uppercase"
+                              value={form.symbol} onChange={(e) => setForm2({ symbol: e.target.value })} />
+                          </label>
+                          <label className="flex flex-col gap-0.5">
+                            <span className="text-[10px] text-muted-foreground">종목명</span>
+                            <input placeholder="에너지" className="rounded border bg-background px-1.5 py-1 text-xs"
+                              value={form.name} onChange={(e) => setForm2({ name: e.target.value })} />
+                          </label>
+                          <label className="flex flex-col gap-0.5">
+                            <span className="text-[10px] text-muted-foreground">통화</span>
+                            <select className="rounded border bg-background px-1.5 py-1 text-xs"
+                              value={form.currency}
+                              onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW",
+                                fxRate: e.target.value === "KRW" ? "1" : e.target.value === "EUR" ? String(Math.round(eurKrw)) : String(Math.round(usdKrw)) })}>
+                              <option value="USD">USD</option>
+                              <option value="EUR">EUR</option>
+                              <option value="KRW">KRW</option>
+                            </select>
+                          </label>
+                          <label className="flex flex-col gap-0.5">
+                            <span className="text-[10px] text-muted-foreground">수량</span>
+                            <input type="number" min="0" step="any" placeholder="10"
+                              className="rounded border bg-background px-1.5 py-1 text-right text-xs"
+                              value={form.qty} onChange={(e) => setForm2({ qty: e.target.value })} />
+                          </label>
+                          <label className="flex flex-col gap-0.5">
+                            <span className="text-[10px] text-muted-foreground">매도가</span>
+                            <input type="number" min="0" step="any" placeholder="60.00"
+                              className="rounded border bg-background px-1.5 py-1 text-right text-xs"
+                              value={form.sellPrice} onChange={(e) => setForm2({ sellPrice: e.target.value })} />
+                          </label>
+                          <label className="flex flex-col gap-0.5">
+                            <span className="text-[10px] text-muted-foreground">매수평단가</span>
+                            <input type="number" min="0" step="any" placeholder="55.00"
+                              className="rounded border bg-background px-1.5 py-1 text-right text-xs"
+                              value={form.avgPrice} onChange={(e) => setForm2({ avgPrice: e.target.value })} />
+                          </label>
+                          {form.currency !== "KRW" && (
+                            <label className="flex flex-col gap-0.5">
+                              <span className="text-[10px] text-muted-foreground">적용환율(₩)</span>
+                              <input type="number" min="0" step="1"
+                                className="rounded border bg-background px-1.5 py-1 text-right text-xs"
+                                value={form.fxRate} onChange={(e) => setForm2({ fxRate: e.target.value })} />
+                            </label>
+                          )}
+                          <label className="col-span-2 flex flex-col gap-0.5 sm:col-span-4">
+                            <span className="text-[10px] text-muted-foreground">메모 (선택)</span>
+                            <input placeholder="예: 일부 매도, 수익 실현"
+                              className="rounded border bg-background px-1.5 py-1 text-xs"
+                              value={form.note} onChange={(e) => setForm2({ note: e.target.value })} />
+                          </label>
+                          <div className="col-span-2 flex items-center justify-between sm:col-span-4">
+                            <span className={`text-[11px] font-semibold tabular-nums ${previewRealized > 0 ? "text-red-500" : previewRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                              실현손익 예상: {previewRealized >= 0 ? "+" : ""}₩{Math.round(previewRealized).toLocaleString()}
+                            </span>
+                            <div className="flex gap-1.5">
+                              {form.editingId && (
+                                <button type="button"
+                                  className="rounded border px-2 py-1 text-xs hover:bg-muted"
+                                  onClick={() => setForm2({ symbol: "", name: "", qty: "", sellPrice: "",
+                                    avgPrice: "", currency: "USD", fxRate: String(Math.round(usdKrw)), note: "", editingId: null })}>
+                                  취소
+                                </button>
+                              )}
+                              <button type="button"
+                                className="rounded bg-primary px-3 py-1 text-xs text-primary-foreground hover:bg-primary/90"
+                                onClick={handleSellLogSave}>
+                                {form.editingId ? "수정 저장" : "+ 기록 추가"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 기록 목록 */}
+                        {log.length > 0 && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-[11px]">
+                              <thead>
+                                <tr className="border-b text-muted-foreground">
+                                  <th className="py-1 pr-2 text-left font-medium">날짜</th>
+                                  <th className="py-1 pr-2 text-left font-medium">종목</th>
+                                  <th className="py-1 pr-2 text-right font-medium">수량</th>
+                                  <th className="py-1 pr-2 text-right font-medium">매도가</th>
+                                  <th className="py-1 pr-2 text-right font-medium">평단가</th>
+                                  <th className="py-1 pr-2 text-right font-medium">실현손익</th>
+                                  <th className="py-1 text-left font-medium">메모</th>
+                                  <th className="py-1 text-right font-medium">관리</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[...log].sort((a, b) => b.date.localeCompare(a.date)).map((e) => (
+                                  <tr key={e.id} className="border-b border-border/30 last:border-0 hover:bg-muted/30">
+                                    <td className="py-1 pr-2 tabular-nums">{e.date}</td>
+                                    <td className="py-1 pr-2">
+                                      <span className="font-medium">{e.name}</span>
+                                      <span className="ml-1 text-muted-foreground">{e.symbol}</span>
+                                    </td>
+                                    <td className="py-1 pr-2 text-right tabular-nums">{e.qty}</td>
+                                    <td className="py-1 pr-2 text-right tabular-nums">
+                                      {e.currency !== "KRW" ? `$${e.sellPrice}` : `₩${e.sellPrice.toLocaleString()}`}
+                                    </td>
+                                    <td className="py-1 pr-2 text-right tabular-nums">
+                                      {e.currency !== "KRW" ? `$${e.avgPrice}` : `₩${e.avgPrice.toLocaleString()}`}
+                                    </td>
+                                    <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${e.realizedKrw > 0 ? "text-red-500" : e.realizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                                      {e.realizedKrw >= 0 ? "+" : ""}₩{Math.round(e.realizedKrw).toLocaleString()}
+                                    </td>
+                                    <td className="py-1 pr-2 text-muted-foreground">{e.note ?? "—"}</td>
+                                    <td className="py-1 text-right">
+                                      <div className="flex justify-end gap-1">
+                                        <button type="button"
+                                          className="rounded border px-1.5 py-0.5 text-[10px] hover:bg-muted"
+                                          onClick={() => handleSellLogEdit(e)}>수정</button>
+                                        <button type="button"
+                                          className="rounded border px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10"
+                                          onClick={() => handleSellLogDelete(e.id)}>삭제</button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
               })}
