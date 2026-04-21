@@ -199,7 +199,6 @@ export function buildTelegramBriefingHtml(opts: {
     portfolioChangeVsYesterdayPct,
     ownerDailyReturns,
     items,
-    miniTrends,
     holdTransitions,
   } = opts;
 
@@ -270,21 +269,18 @@ export function buildTelegramBriefingHtml(opts: {
       .sort((a, b) => a.label.localeCompare(b.label, "ko"));
   }
 
-  function renderTable(rows: BriefingItem[]): string {
-    const NAME_W = 8;
-    const lines: string[] = [];
-    lines.push(`${padDisplayEnd("종목", NAME_W)} | 가격 | 등락 | 차트`);
-    lines.push(`${"-".repeat(NAME_W)}-+------+------+-${"-".repeat(10)}`);
-    for (const r of rows) {
-      const name = padDisplayEnd(truncateDisplay((r.name || r.symbol).trim() || r.symbol, NAME_W), NAME_W);
-      const price = fmtPriceCompactForMobile(r);
-      const pct = fmtPctPlain(r.changePct);
-      const trendLine = (miniTrends?.[r.symbol] ?? "—").trim() || "—";
-      const dir = r.changePct === null || !Number.isFinite(r.changePct) ? "⚪" : r.changePct >= 0 ? "🟢" : "🔴";
-      const trend = `${dir}${trendLine}`;
-      lines.push(`${name} | ${price} | ${pct} | ${trend}`);
+  function renderGroupSummary(rows: BriefingItem[]): string[] {
+    const out: string[] = [];
+    for (const g of groupByChartLabel(rows)) {
+      const values = g.rows
+        .map((r) => r.changePct)
+        .filter((v): v is number => v !== null && Number.isFinite(v));
+      const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+      const arrow = avg === null ? "•" : avg >= 0 ? "▲" : "▼";
+      const pctText = avg === null ? "등락 데이터 없음" : `평균 ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%`;
+      out.push(`${iconForGroupLabel(g.label)} ${g.label} (${pctText} ${arrow})`);
     }
-    return lines.join("\n");
+    return out;
   }
 
   const tableParts: string[] = [];
@@ -292,11 +288,7 @@ export function buildTelegramBriefingHtml(opts: {
     tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
     for (const ownerGroup of groupByOwner(movers)) {
       tableParts.push(`👤 ${ownerGroup.owner}`);
-      for (const g of groupByChartLabel(ownerGroup.rows)) {
-        tableParts.push(`${iconForGroupLabel(g.label)} 그룹: ${g.label}`);
-        tableParts.push(renderTable(g.rows));
-        tableParts.push("");
-      }
+      tableParts.push(...renderGroupSummary(ownerGroup.rows));
       tableParts.push("");
     }
     while (tableParts.length > 0 && tableParts[tableParts.length - 1] === "") {
@@ -309,14 +301,10 @@ export function buildTelegramBriefingHtml(opts: {
 
   if (restSorted.length > 0) {
     tableParts.push("");
-    tableParts.push(`📋 기타 (${restSorted.length}종, ±2% 미만)`);
+    tableParts.push("📋 기타 그룹 (±2% 미만)");
     for (const ownerGroup of groupByOwner(restSorted)) {
       tableParts.push(`👤 ${ownerGroup.owner}`);
-      for (const g of groupByChartLabel(ownerGroup.rows)) {
-        tableParts.push(`${iconForGroupLabel(g.label)} 그룹: ${g.label}`);
-        tableParts.push(renderTable(g.rows));
-        tableParts.push("");
-      }
+      tableParts.push(...renderGroupSummary(ownerGroup.rows));
       tableParts.push("");
     }
     while (tableParts.length > 0 && tableParts[tableParts.length - 1] === "") {
@@ -327,15 +315,7 @@ export function buildTelegramBriefingHtml(opts: {
   const tablePlain = tableParts.join("\n");
   const preBlock = `<pre>${escapeHtml(tablePlain)}</pre>\n`;
 
-  let restSummary = "";
-  if (restSorted.length > 0) {
-    const valid = restSorted.map((i) => i.changePct).filter((v): v is number => v !== null && Number.isFinite(v));
-    const avg = valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
-    restSummary =
-      avg !== null
-        ? `<i>기타 종목 평균 등락: ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%</i>\n`
-        : "";
-  }
+  const restSummary = "";
 
   let holdBlock = "";
   if (holdTransitions.length > 0) {
