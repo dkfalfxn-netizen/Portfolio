@@ -4306,7 +4306,7 @@ export default function Home() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">보유자</span>
                       <select
-                        className="rounded border bg-background px-2 py-1 text-xs"
+                        className="cursor-pointer rounded border bg-background px-2 py-1 text-xs"
                         value={owner}
                         onChange={(e) => setSellLogOwnerForSection(e.target.value)}
                       >
@@ -4323,12 +4323,12 @@ export default function Home() {
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 rounded-lg border bg-muted/20 p-2 text-xs sm:grid-cols-4">
                     <input type="date" className="rounded border bg-background px-1.5 py-1" value={form.date} onChange={(e) => setForm2({ date: e.target.value })} />
-                    <select className="rounded border bg-background px-1.5 py-1" value={form.symbol} onChange={(e) => handleTickerChange(e.target.value)}>
+                    <select className="cursor-pointer rounded border bg-background px-1.5 py-1" value={form.symbol} onChange={(e) => handleTickerChange(e.target.value)}>
                       <option value="">티커 선택</option>
                       {ownerTickerOptions.map((opt) => <option key={opt.symbol} value={opt.symbol}>{opt.symbol}({opt.name})</option>)}
                     </select>
                     <input className="rounded border bg-background px-1.5 py-1" placeholder="종목명" value={form.name} onChange={(e) => setForm2({ name: e.target.value })} />
-                    <select className="rounded border bg-background px-1.5 py-1" value={form.currency} onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW" })}>
+                    <select className="cursor-pointer rounded border bg-background px-1.5 py-1" value={form.currency} onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW" })}>
                       <option value="USD">USD</option><option value="EUR">EUR</option><option value="KRW">KRW</option>
                     </select>
                     <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="수량" value={form.qty} onChange={(e) => setForm2({ qty: e.target.value })} />
@@ -4336,7 +4336,7 @@ export default function Home() {
                     <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="매수평단가" value={form.avgPrice} onChange={(e) => setForm2({ avgPrice: e.target.value })} />
                     <input type="number" min="0" step="1" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="적용환율" value={form.fxRate} onChange={(e) => setForm2({ fxRate: e.target.value })} />
                     <input className="col-span-2 rounded border bg-background px-1.5 py-1 sm:col-span-3" placeholder="메모" value={form.note} onChange={(e) => setForm2({ note: e.target.value })} />
-                    <button type="button" className="rounded bg-primary px-3 py-1 text-primary-foreground hover:bg-primary/90" onClick={handleSave}>
+                    <button type="button" className="cursor-pointer rounded bg-primary px-3 py-1 text-primary-foreground hover:bg-primary/90" onClick={handleSave}>
                       {form.editingId ? "수정 저장" : "+ 기록 추가"}
                     </button>
                     <div className="col-span-2 text-[11px] font-semibold sm:col-span-4">실현손익 예상: {preview >= 0 ? "+" : ""}₩{Math.round(preview).toLocaleString()}</div>
