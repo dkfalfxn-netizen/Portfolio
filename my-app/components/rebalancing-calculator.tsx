@@ -11,6 +11,7 @@ export type GroupAllocation = {
   repSymbol: string;
   repName: string;
   repPrice: number;       // KRW 환산 현재가
+  members: { symbol: string; name: string; valueKrw: number }[];
 };
 
 type Props = {
@@ -37,13 +38,29 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
   );
 
   const rows = useMemo(() => {
-    return groups.map((g) => {
+    return groups
+      .slice()
+      .sort((a, b) => b.currentPct - a.currentPct)
+      .map((g) => {
       const targetPct = parseFloat(targets[g.groupKey] ?? "0") || 0;
       const targetKrw = (targetPct / 100) * totalKrw;
       const diffKrw = targetKrw - g.valueKrw;          // + 매수, - 매도
       const shares =
         g.repPrice > 0 ? Math.round((diffKrw / g.repPrice) * 100) / 100 : null;
-      return { ...g, targetPct, targetKrw, diffKrw, shares };
+      const memberDiffs =
+        g.members.length === 0
+          ? []
+          : g.members.map((m) => {
+              const ratio =
+                g.valueKrw > 0
+                  ? m.valueKrw / g.valueKrw
+                  : 1 / g.members.length;
+              return {
+                ...m,
+                diffKrw: diffKrw * ratio,
+              };
+            });
+      return { ...g, targetPct, targetKrw, diffKrw, shares, memberDiffs };
     });
   }, [groups, targets, totalKrw]);
 
@@ -93,6 +110,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
               <th className="py-1.5 px-2 text-right font-medium">목표액</th>
               <th className="py-1.5 px-2 text-right font-medium">매수/매도</th>
               <th className="py-1.5 px-2 text-right font-medium">종목(주수)</th>
+              <th className="py-1.5 px-2 text-right font-medium">종목별 추가/제외 금액</th>
             </tr>
           </thead>
           <tbody>
@@ -152,6 +170,22 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
                     "—"
                   )}
                 </td>
+                <td className="py-1.5 px-2 text-right">
+                  {Math.abs(r.diffKrw) < 10000 || r.memberDiffs.length === 0 ? (
+                    <span className="text-muted-foreground">—</span>
+                  ) : (
+                    <div className="space-y-0.5 text-[11px]">
+                      {r.memberDiffs.map((m) => (
+                        <p key={`${r.groupKey}-${m.symbol}`} className="tabular-nums">
+                          <span className="text-muted-foreground">{m.symbol}</span>{" "}
+                          <span className={m.diffKrw >= 0 ? "text-red-400" : "text-blue-400"}>
+                            {m.diffKrw >= 0 ? "+" : "-"}{fmt(Math.abs(m.diffKrw))}
+                          </span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -167,7 +201,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
                   {targetSum.toFixed(1)}%
                 </span>
               </td>
-              <td colSpan={3} />
+              <td colSpan={4} />
             </tr>
           </tfoot>
         </table>
@@ -220,6 +254,9 @@ export function RebalancingCalculator({
         .filter((d) => !d.ticker.includes("현금"))
         .map((d) => {
           const rep = repMap.get(d.ticker);
+          const members = items
+            .filter((p) => (p.chartGroup?.trim() || p.symbol) === d.ticker)
+            .map((p) => ({ symbol: p.symbol, name: p.name, valueKrw: p.valueKrw }));
           return {
             groupKey: d.ticker,
             displayName: d.displayName,
@@ -228,6 +265,7 @@ export function RebalancingCalculator({
             repSymbol: rep?.symbol ?? d.ticker,
             repName: rep?.name ?? d.displayName,
             repPrice: rep?.priceKrw ?? 0,
+            members,
           };
         });
 
