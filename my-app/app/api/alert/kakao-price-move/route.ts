@@ -233,7 +233,7 @@ function computeOwnerLiveValuesKrw(
 /** Cron 쿼리 ?slot= 과 DB briefing_slot 값 (한국 시간 발송 시각) */
 const BRIEFING_SLOT_LABELS: Record<string, string> = {
   "0100": "01:00 KST",
-  "0930": "09:30 KST",
+  "0930": "09:00 KST",
   "1200": "12:00 KST",
   "1540": "15:40 KST",
   "2300": "23:00 KST",
@@ -254,6 +254,14 @@ function toBriefingItems(items: AlertItem[]): BriefingItem[] {
 }
 
 type WatchlistRow = { symbol: string; name?: string };
+type LiquidityBriefingRow = {
+  report_date: string;
+  net_liquidity_pct: number | null;
+  dxy_pct: number | null;
+  us10y_pct: number | null;
+  vix_pct: number | null;
+  ai_summary: string | null;
+};
 
 function parseWatchlist(raw: unknown): WatchlistRow[] {
   if (!Array.isArray(raw)) return [];
@@ -267,6 +275,38 @@ function parseWatchlist(raw: unknown): WatchlistRow[] {
     out.push({ symbol: sym, ...(name ? { name } : {}) });
   }
   return out;
+}
+
+function fmtSignedPct(v: number | null | undefined, digits = 2): string {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "N/A";
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${v.toFixed(digits)}%`;
+}
+
+async function buildLiquidityAddonBlock(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdmin>>,
+): Promise<string> {
+  const date = todayKST();
+  const { data } = await admin
+    .from("liquidity_briefings")
+    .select("report_date, net_liquidity_pct, dxy_pct, us10y_pct, vix_pct, ai_summary")
+    .lte("report_date", date)
+    .order("report_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const row = data as LiquidityBriefingRow | null;
+  if (!row) return "";
+  return [
+    "",
+    "🌊 <b>유동성 지표 요약</b>",
+    `기준일: ${row.report_date}`,
+    `순유동성: ${fmtSignedPct(row.net_liquidity_pct)}`,
+    `DXY: ${fmtSignedPct(row.dxy_pct)} · 미10년물: ${fmtSignedPct(row.us10y_pct)} · VIX: ${fmtSignedPct(row.vix_pct)}`,
+    row.ai_summary ? `코멘트: ${row.ai_summary}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function overallLabelKo(o: FourSignalsResult["overall"]): string {
@@ -501,8 +541,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const domesticItems = items.filter((item) => marketGroupOfSymbol(item.symbol) === "DOMESTIC");
-  const overseasItems = items.filter((item) => marketGroupOfSymbol(item.symbol) === "OVERSEAS");
   const domesticWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "DOMESTIC");
   const overseasWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "OVERSEAS");
 
@@ -520,13 +558,13 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  async function sendHoldingsByMarket(itemsForMarket: AlertItem[], label: string): Promise<Response | null> {
-    if (itemsForMarket.length === 0) return null;
-    const briefingItems = toBriefingItems(itemsForMarket);
+  async function sendHoldings(itemsForMessage: AlertItem[]): Promise<Response | null> {
+    if (itemsForMessage.length === 0) return null;
+    const briefingItems = toBriefingItems(itemsForMessage);
     const miniTrends = await collectMiniTrends(briefingItems);
     const holdTransitions = await collectHoldTransitions(briefingItems);
-    const text = buildTelegramBriefingHtml({
-      slotLabel: `${slotLabel} · ${label}`,
+    let text = buildTelegramBriefingHtml({
+      slotLabel,
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,
       ownerDailyReturns,
@@ -534,9 +572,12 @@ export async function GET(req: NextRequest) {
       miniTrends,
       holdTransitions,
     });
+    if (briefingSlot === "0930") {
+      text += await buildLiquidityAddonBlock(admin!);
+    }
     const send = await sendTelegramMessage(text);
     if (!send.ok) {
-      return NextResponse.json({ error: send.error ?? `${label} 텔레그램 전송 실패` }, { status: 500 });
+      return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
     }
     return null;
   }
@@ -549,10 +590,8 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const domesticSendError = await sendHoldingsByMarket(domesticItems, "국내주식");
-  if (domesticSendError) return domesticSendError;
-  const overseasSendError = await sendHoldingsByMarket(overseasItems, "해외주식");
-  if (overseasSendError) return overseasSendError;
+  const holdingsSendError = await sendHoldings(items);
+  if (holdingsSendError) return holdingsSendError;
 
   async function sendWatchlistByMarket(entries: WatchlistRow[], label: string): Promise<Response | null> {
     if (entries.length === 0) return null;
@@ -578,8 +617,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     sentHoldings: items.length,
-    sentHoldingsDomestic: domesticItems.length,
-    sentHoldingsOverseas: overseasItems.length,
+    sentHoldingsDomestic: items.filter((item) => marketGroupOfSymbol(item.symbol) === "DOMESTIC").length,
+    sentHoldingsOverseas: items.filter((item) => marketGroupOfSymbol(item.symbol) === "OVERSEAS").length,
     sentWatchlist: eligibleWatchCount,
     sentWatchlistDomestic: marketOpen.DOMESTIC ? domesticWatchEntries.length : 0,
     sentWatchlistOverseas: marketOpen.OVERSEAS ? overseasWatchEntries.length : 0,
@@ -769,8 +808,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, dry_run: false, message: "발송할 내용 없음 (영업일/보유·관심 기준)", count: 0, marketOpen });
   }
 
-  const domesticItems = items.filter((item) => marketGroupOfSymbol(item.symbol) === "DOMESTIC");
-  const overseasItems = items.filter((item) => marketGroupOfSymbol(item.symbol) === "OVERSEAS");
   const domesticWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "DOMESTIC");
   const overseasWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "OVERSEAS");
 
@@ -808,13 +845,13 @@ export async function POST(req: NextRequest) {
       })
       .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
 
-    async function sendHoldingsByMarket(itemsForMarket: AlertItem[], label: string): Promise<Response | null> {
-      if (itemsForMarket.length === 0) return null;
-      const briefingItems = toBriefingItems(itemsForMarket);
+    async function sendHoldings(itemsForMessage: AlertItem[]): Promise<Response | null> {
+      if (itemsForMessage.length === 0) return null;
+      const briefingItems = toBriefingItems(itemsForMessage);
       const miniTrends = await collectMiniTrends(briefingItems);
       const holdTransitions = await collectHoldTransitions(briefingItems);
-      const text = buildTelegramBriefingHtml({
-        slotLabel: `${BRIEFING_SLOT_LABELS.manual} · ${label}`,
+      let text = buildTelegramBriefingHtml({
+        slotLabel: BRIEFING_SLOT_LABELS.manual,
         dateLabel: mmddKST(),
         portfolioChangeVsYesterdayPct,
         ownerDailyReturns,
@@ -822,15 +859,14 @@ export async function POST(req: NextRequest) {
         miniTrends,
         holdTransitions,
       });
+      text += await buildLiquidityAddonBlock(admin!);
       const send = await sendTelegramMessage(text);
       if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
       return null;
     }
 
-    const domesticSendError = await sendHoldingsByMarket(domesticItems, "국내주식");
-    if (domesticSendError) return domesticSendError;
-    const overseasSendError = await sendHoldingsByMarket(overseasItems, "해외주식");
-    if (overseasSendError) return overseasSendError;
+    const holdingsSendError = await sendHoldings(items);
+    if (holdingsSendError) return holdingsSendError;
 
     await admin.from("price_move_alert_logs").upsert(logRows, {
       onConflict: "sync_key,symbol,date,briefing_slot",
@@ -860,8 +896,8 @@ export async function POST(req: NextRequest) {
     ok: true,
     dry_run: false,
     sentHoldings: items.length,
-    sentHoldingsDomestic: domesticItems.length,
-    sentHoldingsOverseas: overseasItems.length,
+    sentHoldingsDomestic: items.filter((item) => marketGroupOfSymbol(item.symbol) === "DOMESTIC").length,
+    sentHoldingsOverseas: items.filter((item) => marketGroupOfSymbol(item.symbol) === "OVERSEAS").length,
     sentWatchlist: (marketOpen.DOMESTIC ? domesticWatchEntries.length : 0) + (marketOpen.OVERSEAS ? overseasWatchEntries.length : 0),
     sentWatchlistDomestic: marketOpen.DOMESTIC ? domesticWatchEntries.length : 0,
     sentWatchlistOverseas: marketOpen.OVERSEAS ? overseasWatchEntries.length : 0,
