@@ -2819,7 +2819,7 @@ export default function Home() {
           />
 
           {/* 리밸런싱 계산기 */}
-          <section id="section-rebalance" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
+          <section id="section-rebalance-old" className="hidden rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">리밸런싱 계산기</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               그룹별 목표 비중(%)을 입력하면 필요한 매수/매도 금액과 주수를 자동으로 계산합니다.
@@ -4261,16 +4261,18 @@ export default function Home() {
               };
               const handleSave = () => {
                 const symbol = form.symbol.trim().toUpperCase();
-                const qty = Number(form.qty);
                 const sell = Number(form.sellPrice);
-                const avg = Number(form.avgPrice);
-                const fx = Number(form.fxRate) || 1;
-                if (!symbol || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(sell) || sell <= 0 || !Number.isFinite(avg) || avg <= 0) return;
-                const hasHolding = positions.some((p) => p.owner === owner && p.symbol === symbol);
-                if (!hasHolding) {
-                  setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: `오류: ${owner} 보유자에게 ${symbol} 보유 내역이 없습니다.` }));
+                if (!symbol || !Number.isFinite(sell) || sell <= 0) return;
+                const selectedOwners = form.selectedOwners.length > 0 ? form.selectedOwners : [owner];
+                const hasHolding = (ownerName: string) => positions.some((p) => p.owner === ownerName && p.symbol === symbol);
+                const invalidOwners = selectedOwners.filter((n) => !hasHolding(n));
+                if (invalidOwners.length > 0) {
+                  setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: `오류: ${invalidOwners.join(", ")} 보유자에게 ${symbol} 보유 내역이 없습니다.` }));
                   return;
                 }
+                const qty = Number(form.qty);
+                const avg = Number(form.avgPrice);
+                const fx = Number(form.fxRate) || 1;
                 const entry: SellLogEntry = {
                   id: form.editingId ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
                   date: form.date,
@@ -4290,16 +4292,68 @@ export default function Home() {
                   }),
                   note: form.note.trim() || undefined,
                 };
-                setSellLog((prev) => {
-                  const existing = prev[owner] ?? [];
-                  if (form.editingId) return { ...prev, [owner]: existing.map((e) => (e.id === form.editingId ? entry : e)) };
-                  return { ...prev, [owner]: [...existing, entry] };
-                });
+                if (!form.editingId) {
+                  setSellLog((prev) => {
+                    let next = { ...prev };
+                    for (const targetOwner of selectedOwners) {
+                      const ovr = form.ownerOverrides[targetOwner] ?? { qty: "", avgPrice: "", fxRate: "" };
+                      const qtyRaw = targetOwner === owner ? form.qty : ovr.qty;
+                      const avgRaw = targetOwner === owner ? form.avgPrice : ovr.avgPrice;
+                      const fxRaw = targetOwner === owner ? form.fxRate : ovr.fxRate;
+                      const q = Number(qtyRaw);
+                      const a = Number(avgRaw);
+                      const f = Number(fxRaw) || 1;
+                      if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(a) || a <= 0) continue;
+                      const e2: SellLogEntry = {
+                        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                        date: form.date,
+                        symbol,
+                        name: form.name.trim() || symbol,
+                        qty: q,
+                        sellPrice: sell,
+                        avgPrice: a,
+                        currency: form.currency,
+                        fxRate: f,
+                        realizedKrw: calcSellRealizedKrw({ qty: q, sellPrice: sell, avgPrice: a, currency: form.currency, fxRate: f }),
+                        note: form.note.trim() || undefined,
+                      };
+                      next = { ...next, [targetOwner]: [...(next[targetOwner] ?? []), e2] };
+                    }
+                    return next;
+                  });
+                } else {
+                  if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(avg) || avg <= 0) return;
+                  setSellLog((prev) => {
+                    const existing = prev[owner] ?? [];
+                    return { ...prev, [owner]: existing.map((e) => (e.id === form.editingId ? entry : e)) };
+                  });
+                }
                 setForm2({
                   symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
                   currency: "USD", fxRate: String(Math.round(usdKrw)),
                   note: "", selectedOwners: [owner], ownerOverrides: {}, editingId: null,
                 });
+              };
+              const handleToggleSellOwner = (targetOwner: string, checked: boolean) => {
+                const nextOwners = checked
+                  ? [...new Set([...form.selectedOwners, targetOwner])]
+                  : form.selectedOwners.filter((n) => n !== targetOwner);
+                const overrides = { ...form.ownerOverrides };
+                if (checked && !overrides[targetOwner]) {
+                  const match = positions.find((p) => p.owner === targetOwner && p.symbol === form.symbol);
+                  overrides[targetOwner] = {
+                    qty: "",
+                    avgPrice: match ? String(match.avgPrice) : "",
+                    fxRate:
+                      form.currency === "KRW"
+                        ? "1"
+                        : form.currency === "EUR"
+                          ? String(Math.round(eurKrw))
+                          : String(Math.round(usdKrw)),
+                  };
+                }
+                if (!checked) delete overrides[targetOwner];
+                setForm2({ selectedOwners: nextOwners, ownerOverrides: overrides });
               };
               const handleEdit = (e: SellLogEntry) => {
                 setForm2({
@@ -4354,10 +4408,41 @@ export default function Home() {
                     <select className="cursor-pointer rounded border bg-background px-1.5 py-1" value={form.currency} onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW" })}>
                       <option value="USD">USD</option><option value="EUR">EUR</option><option value="KRW">KRW</option>
                     </select>
+                    <div className="col-span-2 rounded border bg-muted/30 p-1.5 sm:col-span-4">
+                      <p className="mb-1 text-[10px] text-muted-foreground">보유자 복수 선택</p>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                        {ownerNames.map((name) => (
+                          <label key={name} className="flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              className="accent-primary"
+                              checked={form.selectedOwners.includes(name)}
+                              disabled={form.editingId != null}
+                              onChange={(e) => handleToggleSellOwner(name, e.target.checked)}
+                            />
+                            <span>{name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                     <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right sm:col-start-1" placeholder="수량" value={form.qty} onChange={(e) => setForm2({ qty: e.target.value })} />
                     <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="매도가" value={form.sellPrice} onChange={(e) => setForm2({ sellPrice: e.target.value })} />
                     <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="매수평단가" value={form.avgPrice} onChange={(e) => setForm2({ avgPrice: e.target.value })} />
                     <input type="number" min="0" step="1" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="적용환율" value={form.fxRate} onChange={(e) => setForm2({ fxRate: e.target.value })} />
+                    {form.selectedOwners.filter((n) => n !== owner).map((targetOwner) => {
+                      const override = form.ownerOverrides[targetOwner] ?? { qty: "", avgPrice: "", fxRate: "" };
+                      return (
+                        <div key={targetOwner} className="col-span-2 grid grid-cols-2 gap-1.5 rounded border bg-muted/20 p-1.5 sm:col-span-4 sm:grid-cols-4">
+                          <p className="col-span-2 text-[10px] font-semibold text-muted-foreground sm:col-span-4">{targetOwner} 입력</p>
+                          <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="수량" value={override.qty}
+                            onChange={(e) => setForm2({ ownerOverrides: { ...form.ownerOverrides, [targetOwner]: { ...override, qty: e.target.value } } })} />
+                          <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="매수평단가" value={override.avgPrice}
+                            onChange={(e) => setForm2({ ownerOverrides: { ...form.ownerOverrides, [targetOwner]: { ...override, avgPrice: e.target.value } } })} />
+                          <input type="number" min="0" step="1" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="적용환율" value={override.fxRate}
+                            onChange={(e) => setForm2({ ownerOverrides: { ...form.ownerOverrides, [targetOwner]: { ...override, fxRate: e.target.value } } })} />
+                        </div>
+                      );
+                    })}
                     <input className="col-span-2 rounded border bg-background px-1.5 py-1 sm:col-span-3" placeholder="메모" value={form.note} onChange={(e) => setForm2({ note: e.target.value })} />
                     <button type="button" className="cursor-pointer rounded bg-primary px-3 py-1 text-primary-foreground hover:bg-primary/90" onClick={handleSave}>
                       {form.editingId ? "수정 저장" : "+ 기록 추가"}
@@ -4453,6 +4538,19 @@ export default function Home() {
                 </div>
               );
             })()}
+          </section>
+
+          {/* 리밸런싱 계산기 */}
+          <section id="section-rebalance" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
+            <h2 className="mb-1 font-semibold">리밸런싱 계산기</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              그룹별 목표 비중(%)을 입력하면 필요한 매수/매도 금액과 주수를 자동으로 계산합니다.
+            </p>
+            <RebalancingCalculator
+              allocationByOwner={allocationByOwner}
+              enrichedPositions={enrichedPositions}
+              usdKrw={usdKrw}
+            />
           </section>
 
           {/* 알림 설정 섹션 */}
