@@ -116,6 +116,8 @@ const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
 const SNAPSHOT_PUSHED_DATE_KEY = "portfolio_snapshot_pushed_date_v1";
 const SNAPSHOT_PUSHED_TOTAL_KEY = "portfolio_snapshot_pushed_total_v1";
 const SELL_LOG_KEY = "portfolio_sell_log_v1";
+const LAST_SELL_LOG_SYNC_TS_KEY = "portfolio_last_sell_log_sync_ts_v1";
+const SELL_LOG_DIRTY_KEY = "portfolio_sell_log_dirty_v1";
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
 
@@ -922,6 +924,8 @@ export default function Home() {
   const restoreBackupFileInputRef = useRef<HTMLInputElement>(null);
   const [syncMessage, setSyncMessage] = useState("");
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [lastSellLogSyncedAt, setLastSellLogSyncedAt] = useState<string | null>(null);
+  const [sellLogDirty, setSellLogDirty] = useState(false);
   const [latestBackupAt, setLatestBackupAt] = useState<string | null>(null);
   const [hasLoadedLatestBackup, setHasLoadedLatestBackup] = useState(false);
   const [serverHealth, setServerHealth] = useState<"loading" | "ok" | "error">("loading");
@@ -1530,8 +1534,12 @@ export default function Home() {
           setOwnerNames(pulledOwners);
           const clockToStore = serverTs.length > 0 ? serverTs : new Date().toISOString();
           window.localStorage.setItem(LAST_SYNC_TS_KEY, clockToStore);
+          window.localStorage.setItem(LAST_SELL_LOG_SYNC_TS_KEY, clockToStore);
+          window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setLastSyncedAt(clockToStore);
+          setLastSellLogSyncedAt(clockToStore);
+          setSellLogDirty(false);
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
           // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
@@ -1554,9 +1562,13 @@ export default function Home() {
           } else {
             const pushedTs = jPush.updated_at ?? new Date().toISOString();
             window.localStorage.setItem(LAST_SYNC_TS_KEY, pushedTs);
+            window.localStorage.setItem(LAST_SELL_LOG_SYNC_TS_KEY, pushedTs);
+            window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
             window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
             setSyncMessage("이 기기의 변경 데이터를 서버에 올렸습니다.");
             setLastSyncedAt(pushedTs);
+            setLastSellLogSyncedAt(pushedTs);
+            setSellLogDirty(false);
           }
         } else {
           // ─ 이미 동기화된 상태
@@ -1593,9 +1605,13 @@ export default function Home() {
         } else {
           const pushedTs = j2.updated_at ?? new Date().toISOString();
           window.localStorage.setItem(LAST_SYNC_TS_KEY, pushedTs);
+          window.localStorage.setItem(LAST_SELL_LOG_SYNC_TS_KEY, pushedTs);
+          window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setSyncMessage("서버에 기존 데이터가 없어 이 기기 내용을 올렸습니다.");
           setLastSyncedAt(pushedTs);
+          setLastSellLogSyncedAt(pushedTs);
+          setSellLogDirty(false);
         }
       }
     } catch {
@@ -1626,8 +1642,14 @@ export default function Home() {
     setCashByOwner(cash);
     setSellLog(log);
     const savedKey = typeof window !== "undefined" ? window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "" : "";
+    const savedSellLogSyncTs =
+      typeof window !== "undefined" ? window.localStorage.getItem(LAST_SELL_LOG_SYNC_TS_KEY) ?? "" : "";
+    const savedSellLogDirty =
+      typeof window !== "undefined" ? window.localStorage.getItem(SELL_LOG_DIRTY_KEY) === "1" : false;
     setCloudSyncKey(savedKey);
     setSyncKeyDraft(savedKey);
+    setLastSellLogSyncedAt(savedSellLogSyncTs.trim() || null);
+    setSellLogDirty(savedSellLogDirty);
     const storedAuto = typeof window !== "undefined" ? window.localStorage.getItem(AUTO_SYNC_STORAGE) : null;
     const auto = storedAuto !== "0"; // 명시적으로 끈 경우(0)만 false, 나머지는 기본 true
     setAutoSync(auto);
@@ -1679,6 +1701,8 @@ export default function Home() {
       skipSellLogLocalChangedRef.current -= 1;
     } else {
       window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+      window.localStorage.setItem(SELL_LOG_DIRTY_KEY, "1");
+      setSellLogDirty(true);
     }
   }, [sellLog, isHydrated]);
 
@@ -1753,8 +1777,12 @@ export default function Home() {
           const j = (await r.json().catch(() => ({}))) as { updated_at?: string };
           const pushedTs = j.updated_at ?? new Date().toISOString();
           window.localStorage.setItem(LAST_SYNC_TS_KEY, pushedTs);
+          window.localStorage.setItem(LAST_SELL_LOG_SYNC_TS_KEY, pushedTs);
+          window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setLastSyncedAt(pushedTs);
+          setLastSellLogSyncedAt(pushedTs);
+          setSellLogDirty(false);
           setSyncMessage("서버에 자동 저장했습니다.");
         } else {
           const j = (await r.json().catch(() => ({}))) as { error?: string };
@@ -1811,10 +1839,14 @@ export default function Home() {
         setOwnerNames(pulledOwners);
         if (typeof j.updated_at === "string") {
           window.localStorage.setItem(LAST_SYNC_TS_KEY, j.updated_at);
+          window.localStorage.setItem(LAST_SELL_LOG_SYNC_TS_KEY, j.updated_at);
+          window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
         }
         setSyncMessage("서버에서 불러왔습니다.");
         setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
+        setLastSellLogSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
+        setSellLogDirty(false);
       } else {
         setSyncMessage("서버에 아직 데이터가 없습니다. 먼저 이 기기에서 올리기를 해 보세요.");
       }
@@ -1852,9 +1884,13 @@ export default function Home() {
       } else {
         const pushedTs = (j as { updated_at?: string }).updated_at ?? new Date().toISOString();
         window.localStorage.setItem(LAST_SYNC_TS_KEY, pushedTs);
+        window.localStorage.setItem(LAST_SELL_LOG_SYNC_TS_KEY, pushedTs);
+        window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
         window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
         setSyncMessage("서버에 올렸습니다.");
         setLastSyncedAt(pushedTs);
+        setLastSellLogSyncedAt(pushedTs);
+        setSellLogDirty(false);
       }
     } catch {
       setSyncMessage("네트워크 오류입니다.");
@@ -4332,6 +4368,21 @@ export default function Home() {
               {syncMessage ? (
                 <p className="text-xs text-muted-foreground">{syncMessage}</p>
               ) : null}
+              <p className="text-xs text-muted-foreground">
+                매도 기록 동기화:{" "}
+                {sellLogDirty ? (
+                  <span className="text-amber-600">로컬 변경 있음 (서버 반영 대기)</span>
+                ) : lastSellLogSyncedAt ? (
+                  <span>
+                    최신 반영{" "}
+                    {new Date(lastSellLogSyncedAt).toLocaleString("ko-KR", {
+                      hour12: false,
+                    })}
+                  </span>
+                ) : (
+                  <span>아직 반영 이력 없음</span>
+                )}
+              </p>
               {syncBusy ? <p className="text-xs text-amber-600">동기화 중…</p> : null}
               {lastSyncedAt ? (
                 <p className="text-xs text-muted-foreground">
