@@ -899,6 +899,7 @@ export default function Home() {
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
   const [showSymbolPnl, setShowSymbolPnl] = useState<Record<string, boolean>>({});
+  const [sellLogErrorByOwner, setSellLogErrorByOwner] = useState<Record<string, string>>({});
   const [sellLogForm, setSellLogForm] = useState<Record<string, {
     date: string; symbol: string; name: string; qty: string;
     sellPrice: string; avgPrice: string; currency: "USD" | "EUR" | "KRW"; fxRate: string; note: string;
@@ -3379,7 +3380,7 @@ export default function Home() {
                     const symPnlList = [...symMap.values()].sort((a, b) => b.realizedKrw - a.realizedKrw);
                     const ownerTickerOptions = Array.from(
                       new Map(
-                        displayItems
+                        positions
                           .map((p) => [
                             p.symbol,
                             { symbol: p.symbol, name: p.name, avgPrice: p.avgPrice, currency: p.currency },
@@ -3393,11 +3394,13 @@ export default function Home() {
                       currency: "USD" as const, fxRate: String(Math.round(usdKrw)),
                       note: "", selectedOwners: [owner], ownerOverrides: {}, editingId: null,
                     };
-                    const setForm2 = (patch: Partial<typeof form>) =>
+                    const setForm2 = (patch: Partial<typeof form>) => {
                       setSellLogForm((prev) => ({
                         ...prev,
                         [owner]: { ...(prev[owner] ?? form), ...patch },
                       }));
+                      setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
+                    };
 
                     function calcRealized(entry: typeof form): number {
                       const qty = Number(entry.qty);
@@ -3420,15 +3423,26 @@ export default function Home() {
                     }
 
                     function handleSellLogSave() {
+                      setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
                       const sell = Number(form.sellPrice);
                       if (!form.symbol) return;
                       if (!Number.isFinite(sell) || sell <= 0) return;
                       const selectedOwners = form.selectedOwners.length > 0 ? form.selectedOwners : [owner];
                       const symbol = form.symbol.trim().toUpperCase();
                       const name = form.name.trim() || symbol;
+                      const hasHolding = (ownerName: string) =>
+                        positions.some((p) => p.owner === ownerName && p.symbol === symbol);
 
                       // 수정 모드는 기존처럼 단일 보유자만 수정
                       if (form.editingId) {
+                        if (!hasHolding(owner)) {
+                          setSellLogErrorByOwner((prev) => ({
+                            ...prev,
+                            [owner]:
+                              "오류: 현재 보유 종목에 없는 티커입니다. 실제 보유분 매도 기록만 허용합니다.",
+                          }));
+                          return;
+                        }
                         const qty = Number(form.qty);
                         const avg = Number(form.avgPrice);
                         const fx = Number(form.fxRate) || 1;
@@ -3457,6 +3471,15 @@ export default function Home() {
                           currency: "USD", fxRate: String(Math.round(usdKrw)), note: "",
                           selectedOwners: [owner], ownerOverrides: {}, editingId: null,
                         });
+                        return;
+                      }
+                      const invalidOwners = selectedOwners.filter((name2) => !hasHolding(name2));
+                      if (invalidOwners.length > 0) {
+                        setSellLogErrorByOwner((prev) => ({
+                          ...prev,
+                          [owner]:
+                            `오류: ${invalidOwners.join(", ")} 보유자에게 ${symbol} 보유 내역이 없어 매도 기록을 저장할 수 없습니다.`,
+                        }));
                         return;
                       }
 
@@ -3490,6 +3513,7 @@ export default function Home() {
                         }
                         return next;
                       });
+                      setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
                       setForm2({ symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
                         currency: "USD", fxRate: String(Math.round(usdKrw)), note: "",
                         selectedOwners: [owner], ownerOverrides: {}, editingId: null });
@@ -3844,6 +3868,11 @@ export default function Home() {
                               </button>
                             </div>
                           </div>
+                          {sellLogErrorByOwner[owner] ? (
+                            <p className="col-span-2 text-[11px] font-medium text-destructive sm:col-span-4">
+                              {sellLogErrorByOwner[owner]}
+                            </p>
+                          ) : null}
                         </div>
 
                         {/* 기록 목록 */}
