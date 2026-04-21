@@ -154,7 +154,9 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
                     : "—"}
                 </td>
                 <td className="py-1.5 px-2 text-right tabular-nums text-muted-foreground">
-                  {r.shares !== null && Math.abs(r.diffKrw) >= 10000 ? (
+                  {r.groupKey.includes("현금") ? (
+                    "현금"
+                  ) : r.shares !== null && Math.abs(r.diffKrw) >= 10000 ? (
                     <span>
                       {r.repSymbol}{" "}
                       <span
@@ -251,7 +253,6 @@ export function RebalancingCalculator({
       }
 
       const groups: GroupAllocation[] = data
-        .filter((d) => !d.ticker.includes("현금"))
         .map((d) => {
           const rep = repMap.get(d.ticker);
           const members = items
