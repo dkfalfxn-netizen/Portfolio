@@ -240,12 +240,8 @@ export function buildTelegramBriefingHtml(opts: {
     `📊 <b>포트폴리오 브리핑</b> (${escapeHtml(dateLabel)})\n` +
     `${portfolioPctLine}${ownerSummaryBlock}`;
 
-  const movers = items
-    .filter((i) => i.changePct !== null && Math.abs(i.changePct) >= 2)
-    .sort(sortByChangePctDesc);
-  const rest = items.filter((i) => i.changePct === null || Math.abs(i.changePct) < 2);
-  const restSorted = [...rest].sort(sortByChangePctDesc);
-
+  // 보유자별로 그룹화한 뒤, 각 그룹의 평균 등락률 기준으로 주요변동/기타 분류
+  // (종목 단위 분류 시 동일 그룹이 두 섹션에 중복 노출되는 문제 방지)
   function groupByOwner(rows: BriefingItem[]): Array<{ owner: string; rows: BriefingItem[] }> {
     const map = new Map<string, BriefingItem[]>();
     for (const row of rows) {
@@ -280,61 +276,70 @@ export function buildTelegramBriefingHtml(opts: {
       .sort((a, b) => a.label.localeCompare(b.label, "ko"));
   }
 
-  function renderGroupSummary(rows: BriefingItem[]): string[] {
-    const out: string[] = [];
-    const groupsWithAvg = groupByChartLabel(rows).map((g) => {
+  type GroupWithAvg = { label: string; rows: BriefingItem[]; avg: number | null };
+
+  function computeGroupsWithAvg(rows: BriefingItem[]): GroupWithAvg[] {
+    return groupByChartLabel(rows).map((g) => {
       const values = g.rows
         .map((r) => r.changePct)
         .filter((v): v is number => v !== null && Number.isFinite(v));
       const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
       return { ...g, avg };
     });
-    groupsWithAvg.sort((a, b) => {
-      const av = a.avg;
-      const bv = b.avg;
-      const af = av !== null && Number.isFinite(av);
-      const bf = bv !== null && Number.isFinite(bv);
+  }
+
+  function sortGroupsDesc(groups: GroupWithAvg[]): GroupWithAvg[] {
+    return [...groups].sort((a, b) => {
+      const af = a.avg !== null && Number.isFinite(a.avg);
+      const bf = b.avg !== null && Number.isFinite(b.avg);
       if (!af && !bf) return 0;
       if (!af) return 1;
       if (!bf) return -1;
-      return bv - av; // 수익률 높은 순(내림차순)
+      return b.avg! - a.avg!;
     });
-    for (const g of groupsWithAvg) {
-      const avg = g.avg;
-      const arrow = avg === null ? "•" : avg >= 0 ? "▲" : "▼";
-      const pctText = avg === null ? "등락 데이터 없음" : `평균 ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%`;
-      out.push(`${iconForGroupLabel(g.label)} ${g.label} (${pctText} ${arrow})`);
-    }
-    return out;
   }
 
+  function fmtGroupLine(g: GroupWithAvg): string {
+    const arrow = g.avg === null ? "•" : g.avg >= 0 ? "▲" : "▼";
+    const pctText = g.avg === null ? "등락 데이터 없음" : `평균 ${g.avg >= 0 ? "+" : ""}${g.avg.toFixed(2)}%`;
+    return `${iconForGroupLabel(g.label)} ${g.label} (${pctText} ${arrow})`;
+  }
+
+  // 그룹 평균 ±2% 기준으로 주요변동/기타 분리 (그룹 단위 분류)
+  const moverLines: string[] = [];
+  const restLines: string[] = [];
+
+  for (const ownerGroup of groupByOwner(items)) {
+    const allGroups = computeGroupsWithAvg(ownerGroup.rows);
+    const moverGroups = sortGroupsDesc(allGroups.filter((g) => g.avg !== null && Math.abs(g.avg) >= 2));
+    const restGroups = sortGroupsDesc(allGroups.filter((g) => g.avg === null || Math.abs(g.avg) < 2));
+
+    if (moverGroups.length > 0) {
+      moverLines.push(`👤 ${ownerGroup.owner}`);
+      moverLines.push(...moverGroups.map(fmtGroupLine));
+      moverLines.push("");
+    }
+    if (restGroups.length > 0) {
+      restLines.push(`👤 ${ownerGroup.owner}`);
+      restLines.push(...restGroups.map(fmtGroupLine));
+      restLines.push("");
+    }
+  }
+  while (moverLines.length > 0 && moverLines[moverLines.length - 1] === "") moverLines.pop();
+  while (restLines.length > 0 && restLines[restLines.length - 1] === "") restLines.pop();
+
   const tableParts: string[] = [];
-  if (movers.length > 0) {
-    tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
-    for (const ownerGroup of groupByOwner(movers)) {
-      tableParts.push(`👤 ${ownerGroup.owner}`);
-      tableParts.push(...renderGroupSummary(ownerGroup.rows));
-      tableParts.push("");
-    }
-    while (tableParts.length > 0 && tableParts[tableParts.length - 1] === "") {
-      tableParts.pop();
-    }
+  tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
+  if (moverLines.length > 0) {
+    tableParts.push(...moverLines);
   } else {
-    tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
     tableParts.push("(해당 없음)");
   }
 
-  if (restSorted.length > 0) {
+  if (restLines.length > 0) {
     tableParts.push("");
     tableParts.push("📋 기타 그룹 (±2% 미만)");
-    for (const ownerGroup of groupByOwner(restSorted)) {
-      tableParts.push(`👤 ${ownerGroup.owner}`);
-      tableParts.push(...renderGroupSummary(ownerGroup.rows));
-      tableParts.push("");
-    }
-    while (tableParts.length > 0 && tableParts[tableParts.length - 1] === "") {
-      tableParts.pop();
-    }
+    tableParts.push(...restLines);
   }
 
   // 텔레그램 <pre> 마지막 줄이 하단 경계에 붙어 잘려 보이는 현상 방지용 여백 1줄
