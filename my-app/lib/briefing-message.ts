@@ -323,7 +323,8 @@ export function buildTelegramBriefingHtml(opts: {
     }
   }
 
-  const tablePlain = tableParts.join("\n");
+  // 텔레그램 <pre> 마지막 줄이 하단 경계에 붙어 잘려 보이는 현상 방지용 여백 1줄
+  const tablePlain = `${tableParts.join("\n")}\n`;
   const preBlock = `<pre>${escapeHtml(tablePlain)}</pre>\n`;
 
   const restSummary = "";
@@ -350,7 +351,7 @@ export function buildTelegramBriefingHtml(opts: {
     holdBlock = `\n\n${lines.join("\n")}`;
   }
 
-  return `${header}<b>보유 종목</b>\n${preBlock}${restSummary}${holdBlock}`.trim();
+  return `${header}<b>보유 종목</b>\n${preBlock}${restSummary}${holdBlock}`;
 }
 
 /** Yahoo 6개월 일봉 — 시그널용 */
