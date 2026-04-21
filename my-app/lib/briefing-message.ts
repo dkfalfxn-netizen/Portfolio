@@ -12,6 +12,8 @@ export type BriefingItem = {
   symbol: string;
   name: string;
   sector: string;
+  groupLabel?: string;
+  ownerLabel?: string;
   price: number | null;
   changePct: number | null;
 };
@@ -148,6 +150,19 @@ function fmtPctPlain(p: number | null): string {
   return `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
 }
 
+function iconForGroupLabel(label: string): string {
+  const s = label.trim().toLowerCase();
+  if (!s) return "🧩";
+  if (s.includes("에너지") || s.includes("energy")) return "⚡";
+  if (s.includes("방산") || s.includes("defense")) return "🛡️";
+  if (s.includes("반도체") || s.includes("semiconductor")) return "💾";
+  if (s.includes("ai") || s.includes("tech") || s.includes("기술")) return "🤖";
+  if (s.includes("금") || s.includes("gold")) return "🥇";
+  if (s.includes("채권") || s.includes("bond")) return "💵";
+  if (s.includes("현금") || s.includes("cash")) return "💰";
+  return "🧩";
+}
+
 /** 가격 표기 (원화는 전액·쉼표) */
 function fmtPriceCompactForMobile(item: BriefingItem): string {
   if (item.price === null || !Number.isFinite(item.price)) return "—";
@@ -226,6 +241,35 @@ export function buildTelegramBriefingHtml(opts: {
   const rest = items.filter((i) => i.changePct === null || Math.abs(i.changePct) < 2);
   const restSorted = [...rest].sort(sortByChangePctDesc);
 
+  function groupByOwner(rows: BriefingItem[]): Array<{ owner: string; rows: BriefingItem[] }> {
+    const map = new Map<string, BriefingItem[]>();
+    for (const row of rows) {
+      const owner = (row.ownerLabel ?? "").trim() || "기타";
+      const prev = map.get(owner);
+      if (prev) prev.push(row);
+      else map.set(owner, [row]);
+    }
+    return [...map.entries()]
+      .map(([owner, ownerRows]) => ({ owner, rows: ownerRows }))
+      .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
+  }
+
+  function groupByChartLabel(rows: BriefingItem[]): Array<{ label: string; rows: BriefingItem[] }> {
+    const map = new Map<string, BriefingItem[]>();
+    for (const row of rows) {
+      const key = (row.groupLabel ?? "").trim() || row.symbol;
+      const prev = map.get(key);
+      if (prev) prev.push(row);
+      else map.set(key, [row]);
+    }
+    return [...map.entries()]
+      .map(([label, gRows]) => ({
+        label,
+        rows: gRows.sort(sortByChangePctDesc),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "ko"));
+  }
+
   function renderTable(rows: BriefingItem[]): string {
     const NAME_W = 8;
     const lines: string[] = [];
@@ -246,7 +290,18 @@ export function buildTelegramBriefingHtml(opts: {
   const tableParts: string[] = [];
   if (movers.length > 0) {
     tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
-    tableParts.push(renderTable(movers));
+    for (const ownerGroup of groupByOwner(movers)) {
+      tableParts.push(`👤 ${ownerGroup.owner}`);
+      for (const g of groupByChartLabel(ownerGroup.rows)) {
+        tableParts.push(`${iconForGroupLabel(g.label)} 그룹: ${g.label}`);
+        tableParts.push(renderTable(g.rows));
+        tableParts.push("");
+      }
+      tableParts.push("");
+    }
+    while (tableParts.length > 0 && tableParts[tableParts.length - 1] === "") {
+      tableParts.pop();
+    }
   } else {
     tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
     tableParts.push("(해당 없음)");
@@ -255,7 +310,18 @@ export function buildTelegramBriefingHtml(opts: {
   if (restSorted.length > 0) {
     tableParts.push("");
     tableParts.push(`📋 기타 (${restSorted.length}종, ±2% 미만)`);
-    tableParts.push(renderTable(restSorted));
+    for (const ownerGroup of groupByOwner(restSorted)) {
+      tableParts.push(`👤 ${ownerGroup.owner}`);
+      for (const g of groupByChartLabel(ownerGroup.rows)) {
+        tableParts.push(`${iconForGroupLabel(g.label)} 그룹: ${g.label}`);
+        tableParts.push(renderTable(g.rows));
+        tableParts.push("");
+      }
+      tableParts.push("");
+    }
+    while (tableParts.length > 0 && tableParts[tableParts.length - 1] === "") {
+      tableParts.pop();
+    }
   }
 
   const tablePlain = tableParts.join("\n");

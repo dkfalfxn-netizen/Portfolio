@@ -22,6 +22,7 @@ type Position = {
   currency?: "USD" | "EUR" | "KRW";
   sector?: string;
   accountType?: string;
+  chartGroup?: string;
 };
 type CashByOwner = Record<string, { usd: number; krw: number }>;
 
@@ -37,6 +38,8 @@ type AlertItem = {
   symbol: string;
   name: string;
   sector: string;
+  groupLabel: string;
+  ownerLabel: string;
   price: number | null;
   changePct: number | null;
 };
@@ -59,6 +62,7 @@ function isMarketTradingDay(group: MarketGroup, at: Date): boolean {
   if (group === "DOMESTIC") return isKrEquityTradingSessionDay(at);
   return isUsEquityTradingSessionDay(at);
 }
+const TARGET_OWNERS = new Set(["김승주", "강희진"]);
 
 async function fetchYahooQuote(symbol: string): Promise<Quote> {
   try {
@@ -242,6 +246,8 @@ function toBriefingItems(items: AlertItem[]): BriefingItem[] {
     symbol: i.symbol,
     name: i.name,
     sector: i.sector,
+    groupLabel: i.groupLabel,
+    ownerLabel: i.ownerLabel,
     price: i.price,
     changePct: i.changePct,
   }));
@@ -439,7 +445,7 @@ export async function GET(req: NextRequest) {
     sync_key: string;
     symbol: string;
     date: string;
-    change_pct: number;
+    change_pct: number | null;
     briefing_slot: string;
   }> = [];
 
@@ -447,20 +453,27 @@ export async function GET(req: NextRequest) {
     const syncKey = String(snap.sync_key);
     const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
 
-    const symbolMap = new Map<string, { name: string; sector: string }>();
+    const symbolMap = new Map<string, { ownerLabel: string; name: string; sector: string; groupLabel: string }>();
     for (const p of positions) {
-      if (p.symbol && !symbolMap.has(p.symbol)) {
-        symbolMap.set(p.symbol, {
+      const owner = typeof p.owner === "string" ? p.owner.trim() : "";
+      if (!TARGET_OWNERS.has(owner)) continue;
+      const keyedSymbol = `${owner}::${p.symbol}`;
+      if (p.symbol && !symbolMap.has(keyedSymbol)) {
+        symbolMap.set(keyedSymbol, {
+          ownerLabel: owner,
           name: p.name || p.symbol,
           sector: p.sector || p.accountType || "기타",
+          groupLabel: p.chartGroup?.trim() || p.sector || p.accountType || p.symbol,
         });
       }
     }
 
-    for (const [symbol, info] of symbolMap) {
+    const loggedSymbols = new Set<string>();
+    for (const [ownerSymbol, info] of symbolMap) {
+      const symbol = ownerSymbol.split("::")[1] ?? "";
+      if (!symbol) continue;
       const marketGroup = marketGroupOfSymbol(symbol);
       if (!isMarketTradingDay(marketGroup, now)) continue;
-
       const dedupeKey = `${syncKey}:${symbol}:${dateKst}:${briefingSlot}`;
       if (sentSet.has(dedupeKey)) continue;
 
@@ -474,16 +487,21 @@ export async function GET(req: NextRequest) {
         symbol,
         name: info.name,
         sector: info.sector,
+        groupLabel: info.groupLabel,
+        ownerLabel: info.ownerLabel,
         price: q.price,
         changePct: pct,
       });
-      logRows.push({
-        sync_key: syncKey,
-        symbol,
-        date: dateKst,
-        change_pct: pct ?? null,  // null = 시세 조회 실패
-        briefing_slot: briefingSlot,
-      });
+      if (!loggedSymbols.has(symbol)) {
+        logRows.push({
+          sync_key: syncKey,
+          symbol,
+          date: dateKst,
+          change_pct: pct ?? null, // null = 시세 조회 실패
+          briefing_slot: briefingSlot,
+        });
+        loggedSymbols.add(symbol);
+      }
     }
   }
 
@@ -641,12 +659,17 @@ export async function POST(req: NextRequest) {
   const positions = (Array.isArray(snap.positions) ? snap.positions : []) as Position[];
 
   // 종목별 대표 정보 추출
-  const symbolMap = new Map<string, { name: string; sector: string }>();
+  const symbolMap = new Map<string, { ownerLabel: string; name: string; sector: string; groupLabel: string }>();
   for (const p of positions) {
-    if (p.symbol && !symbolMap.has(p.symbol)) {
-      symbolMap.set(p.symbol, {
+    const owner = typeof p.owner === "string" ? p.owner.trim() : "";
+    if (!TARGET_OWNERS.has(owner)) continue;
+    const keyedSymbol = `${owner}::${p.symbol}`;
+    if (p.symbol && !symbolMap.has(keyedSymbol)) {
+      symbolMap.set(keyedSymbol, {
+        ownerLabel: owner,
         name: p.name || p.symbol,
         sector: p.sector || p.accountType || "기타",
+        groupLabel: p.chartGroup?.trim() || p.sector || p.accountType || p.symbol,
       });
     }
   }
@@ -659,7 +682,7 @@ export async function POST(req: NextRequest) {
     sync_key: string;
     symbol: string;
     date: string;
-    change_pct: number;
+    change_pct: number | null;
     briefing_slot: string;
   }> = [];
 
@@ -675,7 +698,10 @@ export async function POST(req: NextRequest) {
     alreadySent = new Set((logs ?? []).map((l) => l.symbol));
   }
 
-  for (const [symbol, info] of symbolMap) {
+  const loggedSymbols = new Set<string>();
+  for (const [ownerSymbol, info] of symbolMap) {
+    const symbol = ownerSymbol.split("::")[1] ?? "";
+    if (!symbol) continue;
     const marketGroup = marketGroupOfSymbol(symbol);
     if (!isMarketTradingDay(marketGroup, now)) {
       results.push({
@@ -689,7 +715,6 @@ export async function POST(req: NextRequest) {
       });
       continue;
     }
-
     const q = await fetchQuoteForSymbol(symbol);
     const pct = (q.price && q.previousClose && q.previousClose > 0)
       ? ((q.price - q.previousClose) / q.previousClose) * 100
@@ -702,16 +727,21 @@ export async function POST(req: NextRequest) {
         symbol,
         name: info.name,
         sector: info.sector,
+        groupLabel: info.groupLabel,
+        ownerLabel: info.ownerLabel,
         price: q.price,
         changePct: pct,
       });
-      logRows.push({
-        sync_key: syncKey,
-        symbol,
-        date: dateKst,
-        change_pct: pct ?? null,  // null = 시세 조회 실패
-        briefing_slot: manualSlot,
-      });
+      if (!loggedSymbols.has(symbol)) {
+        logRows.push({
+          sync_key: syncKey,
+          symbol,
+          date: dateKst,
+          change_pct: pct ?? null, // null = 시세 조회 실패
+          briefing_slot: manualSlot,
+        });
+        loggedSymbols.add(symbol);
+      }
     }
   }
 
@@ -753,7 +783,7 @@ export async function POST(req: NextRequest) {
   const overseasWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "OVERSEAS");
 
   if (items.length > 0) {
-    const syms = [...symbolMap.keys()];
+    const syms = [...new Set([...symbolMap.keys()].map((k) => k.split("::")[1]).filter(Boolean))];
     const { quotes, usdKrw: pUsd, eurKrw: pEur } = await fetchPrices(syms);
     const usdK = pUsd ?? 1400;
     const eurK = pEur ?? 1500;
