@@ -282,11 +282,25 @@ export function buildTelegramBriefingHtml(opts: {
 
   function renderGroupSummary(rows: BriefingItem[]): string[] {
     const out: string[] = [];
-    for (const g of groupByChartLabel(rows)) {
+    const groupsWithAvg = groupByChartLabel(rows).map((g) => {
       const values = g.rows
         .map((r) => r.changePct)
         .filter((v): v is number => v !== null && Number.isFinite(v));
       const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+      return { ...g, avg };
+    });
+    groupsWithAvg.sort((a, b) => {
+      const av = a.avg;
+      const bv = b.avg;
+      const af = av !== null && Number.isFinite(av);
+      const bf = bv !== null && Number.isFinite(bv);
+      if (!af && !bf) return 0;
+      if (!af) return 1;
+      if (!bf) return -1;
+      return bv - av; // 수익률 높은 순(내림차순)
+    });
+    for (const g of groupsWithAvg) {
+      const avg = g.avg;
       const arrow = avg === null ? "•" : avg >= 0 ? "▲" : "▼";
       const pctText = avg === null ? "등락 데이터 없음" : `평균 ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%`;
       out.push(`${iconForGroupLabel(g.label)} ${g.label} (${pctText} ${arrow})`);
