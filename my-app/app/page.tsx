@@ -3280,6 +3280,15 @@ export default function Home() {
                       });
                     }
                     const symPnlList = [...symMap.values()].sort((a, b) => b.realizedKrw - a.realizedKrw);
+                    const ownerTickerOptions = Array.from(
+                      new Map(
+                        displayItems
+                          .map((p) => [
+                            p.symbol,
+                            { symbol: p.symbol, name: p.name, avgPrice: p.avgPrice },
+                          ]),
+                      ).values(),
+                    ).sort((a, b) => a.symbol.localeCompare(b.symbol));
 
                     const form = sellLogForm[owner] ?? {
                       date: new Date().toISOString().slice(0, 10),
@@ -3347,6 +3356,19 @@ export default function Home() {
                         ...prev,
                         [owner]: (prev[owner] ?? []).filter((e) => e.id !== id),
                       }));
+                    }
+
+                    function handleTickerChange(nextSymbol: string) {
+                      const selected = ownerTickerOptions.find((x) => x.symbol === nextSymbol);
+                      if (!selected) {
+                        setForm2({ symbol: nextSymbol });
+                        return;
+                      }
+                      setForm2({
+                        symbol: selected.symbol,
+                        name: selected.name,
+                        avgPrice: String(selected.avgPrice),
+                      });
                     }
 
                     const previewRealized = calcRealized(form);
@@ -3435,8 +3457,25 @@ export default function Home() {
                           </label>
                           <label className="flex flex-col gap-0.5">
                             <span className="text-[10px] text-muted-foreground">티커</span>
-                            <input placeholder="XLE" className="rounded border bg-background px-1.5 py-1 text-xs uppercase"
-                              value={form.symbol} onChange={(e) => setForm2({ symbol: e.target.value })} />
+                            <select
+                              className="rounded border bg-background px-1.5 py-1 text-xs"
+                              value={form.symbol}
+                              onChange={(e) => handleTickerChange(e.target.value)}
+                            >
+                              <option value="">티커 선택</option>
+                              {ownerTickerOptions.map((opt) => (
+                                <option key={opt.symbol} value={opt.symbol}>
+                                  {opt.symbol}({opt.name})
+                                </option>
+                              ))}
+                              {form.symbol &&
+                                !ownerTickerOptions.some((opt) => opt.symbol === form.symbol) && (
+                                  <option value={form.symbol}>
+                                    {form.symbol}
+                                    {form.name ? `(${form.name})` : ""}
+                                  </option>
+                                )}
+                            </select>
                           </label>
                           <label className="flex flex-col gap-0.5">
                             <span className="text-[10px] text-muted-foreground">종목명</span>
