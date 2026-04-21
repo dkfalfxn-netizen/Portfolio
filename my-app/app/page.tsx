@@ -900,6 +900,7 @@ export default function Home() {
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
   const [showSymbolPnl, setShowSymbolPnl] = useState<Record<string, boolean>>({});
   const [sellLogErrorByOwner, setSellLogErrorByOwner] = useState<Record<string, string>>({});
+  const [sellLogOwnerForSection, setSellLogOwnerForSection] = useState<string>("김승주");
   const [sellLogForm, setSellLogForm] = useState<Record<string, {
     date: string; symbol: string; name: string; qty: string;
     sellPrice: string; avgPrice: string; currency: "USD" | "EUR" | "KRW"; fxRate: string; note: string;
@@ -1136,6 +1137,12 @@ export default function Home() {
     () => [...new Set([...ownerNames, ...Object.keys(sellLog)])],
     [ownerNames, sellLog],
   );
+  useEffect(() => {
+    if (ownerNames.length === 0) return;
+    if (!ownerNames.includes(sellLogOwnerForSection)) {
+      setSellLogOwnerForSection(ownerNames[0]);
+    }
+  }, [ownerNames, sellLogOwnerForSection]);
 
   const usdKrw = marketQuery.data?.usdKrw ?? 1350;
   const eurKrw = marketQuery.data?.eurKrw ?? 1450;
@@ -2642,6 +2649,7 @@ export default function Home() {
               </div>
               {([
                 { id: "section-add",       icon: "➕", label: "종목 추가" },
+                { id: "section-realized",  icon: "💰", label: "실현손익 입력" },
                 { id: "section-alert",     icon: "🔔", label: "이메일 알림" },
                 { id: "section-liquidity", icon: "🌊", label: "유동성 브리핑" },
                 { id: "section-watchlist", icon: "⭐", label: "관심종목" },
@@ -2687,6 +2695,7 @@ export default function Home() {
                     { id: "section-rebalance", icon: "⚖️", label: "리밸런싱" },
                     { id: "section-holdings", icon: "📋", label: "보유 종목" },
                     { id: "section-add", icon: "➕", label: "종목 추가" },
+                    { id: "section-realized", icon: "💰", label: "실현손익 입력" },
                     { id: "section-alert", icon: "🔔", label: "이메일 알림" },
                     { id: "section-liquidity", icon: "🌊", label: "유동성 브리핑" },
                     { id: "section-watchlist", icon: "⭐", label: "관심종목" },
@@ -3358,7 +3367,7 @@ export default function Home() {
                     </TableBody>
                   </Table>
                   {/* ── 매도 기록 섹션 ── */}
-                  {(() => {
+                  {false && (() => {
                     const owner = group.ownerName;
                     const log = sellLog[owner] ?? [];
                     const totalRealized = log.reduce((s, e) => s + e.realizedKrw, 0);
@@ -4171,6 +4180,132 @@ export default function Home() {
               현금(USD·KRW)은 아래 각 보유 종목 표 상단에서 입력합니다. 전체 현금
               합계(원화): ₩{Math.round(totalCashKrw).toLocaleString()}
             </p>
+          </section>
+
+          <section id="section-realized" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
+            <h2 className="mb-2 font-semibold">실현손익 입력</h2>
+            <p className="mb-3 text-xs text-muted-foreground">종목 추가 아래에서 보유자별 매도 기록을 입력합니다.</p>
+            {(() => {
+              const owner = sellLogOwnerForSection;
+              const log = sellLog[owner] ?? [];
+              const totalRealized = log.reduce((s, e) => s + e.realizedKrw, 0);
+              const ownerTickerOptions = Array.from(
+                new Map(
+                  positions.map((p) => [
+                    p.symbol,
+                    { symbol: p.symbol, name: p.name, avgPrice: p.avgPrice, currency: p.currency },
+                  ]),
+                ).values(),
+              ).sort((a, b) => a.symbol.localeCompare(b.symbol));
+              const form = sellLogForm[owner] ?? {
+                date: new Date().toISOString().slice(0, 10),
+                symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
+                currency: "USD" as const, fxRate: String(Math.round(usdKrw)),
+                note: "", selectedOwners: [owner], ownerOverrides: {}, editingId: null,
+              };
+              const setForm2 = (patch: Partial<typeof form>) => {
+                setSellLogForm((prev) => ({ ...prev, [owner]: { ...(prev[owner] ?? form), ...patch } }));
+                setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
+              };
+              const calcRealized = (entry: typeof form) => {
+                const qty = Number(entry.qty);
+                const sell = Number(entry.sellPrice);
+                const avg = Number(entry.avgPrice);
+                const fx = Number(entry.fxRate) || 1;
+                if (!Number.isFinite(qty) || !Number.isFinite(sell) || !Number.isFinite(avg)) return 0;
+                return entry.currency === "KRW" ? (sell - avg) * qty : (sell - avg) * qty * fx;
+              };
+              const handleTickerChange = (nextSymbol: string) => {
+                const selected = ownerTickerOptions.find((x) => x.symbol === nextSymbol);
+                if (!selected) return setForm2({ symbol: nextSymbol });
+                const nextFxRate =
+                  selected.currency === "KRW" ? "1" : selected.currency === "EUR" ? String(Math.round(eurKrw)) : String(Math.round(usdKrw));
+                setForm2({
+                  symbol: selected.symbol,
+                  name: selected.name,
+                  avgPrice: String(selected.avgPrice),
+                  currency: selected.currency,
+                  fxRate: nextFxRate,
+                });
+              };
+              const handleSave = () => {
+                const symbol = form.symbol.trim().toUpperCase();
+                const qty = Number(form.qty);
+                const sell = Number(form.sellPrice);
+                const avg = Number(form.avgPrice);
+                const fx = Number(form.fxRate) || 1;
+                if (!symbol || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(sell) || sell <= 0 || !Number.isFinite(avg) || avg <= 0) return;
+                const hasHolding = positions.some((p) => p.owner === owner && p.symbol === symbol);
+                if (!hasHolding) {
+                  setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: `오류: ${owner} 보유자에게 ${symbol} 보유 내역이 없습니다.` }));
+                  return;
+                }
+                const entry: SellLogEntry = {
+                  id: form.editingId ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                  date: form.date,
+                  symbol,
+                  name: form.name.trim() || symbol,
+                  qty,
+                  sellPrice: sell,
+                  avgPrice: avg,
+                  currency: form.currency,
+                  fxRate: fx,
+                  realizedKrw: calcRealized(form),
+                  note: form.note.trim() || undefined,
+                };
+                setSellLog((prev) => {
+                  const existing = prev[owner] ?? [];
+                  if (form.editingId) return { ...prev, [owner]: existing.map((e) => (e.id === form.editingId ? entry : e)) };
+                  return { ...prev, [owner]: [...existing, entry] };
+                });
+                setForm2({
+                  symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
+                  currency: "USD", fxRate: String(Math.round(usdKrw)),
+                  note: "", selectedOwners: [owner], ownerOverrides: {}, editingId: null,
+                });
+              };
+              const preview = calcRealized(form);
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">보유자</span>
+                      <select
+                        className="rounded border bg-background px-2 py-1 text-xs"
+                        value={owner}
+                        onChange={(e) => setSellLogOwnerForSection(e.target.value)}
+                      >
+                        {ownerNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </div>
+                    <button type="button" className={`text-xs font-bold ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                      누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{Math.round(totalRealized).toLocaleString()}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 rounded-lg border bg-muted/20 p-2 text-xs sm:grid-cols-4">
+                    <input type="date" className="rounded border bg-background px-1.5 py-1" value={form.date} onChange={(e) => setForm2({ date: e.target.value })} />
+                    <select className="rounded border bg-background px-1.5 py-1" value={form.symbol} onChange={(e) => handleTickerChange(e.target.value)}>
+                      <option value="">티커 선택</option>
+                      {ownerTickerOptions.map((opt) => <option key={opt.symbol} value={opt.symbol}>{opt.symbol}({opt.name})</option>)}
+                    </select>
+                    <input className="rounded border bg-background px-1.5 py-1" placeholder="종목명" value={form.name} onChange={(e) => setForm2({ name: e.target.value })} />
+                    <select className="rounded border bg-background px-1.5 py-1" value={form.currency} onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW" })}>
+                      <option value="USD">USD</option><option value="EUR">EUR</option><option value="KRW">KRW</option>
+                    </select>
+                    <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="수량" value={form.qty} onChange={(e) => setForm2({ qty: e.target.value })} />
+                    <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="매도가" value={form.sellPrice} onChange={(e) => setForm2({ sellPrice: e.target.value })} />
+                    <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="매수평단가" value={form.avgPrice} onChange={(e) => setForm2({ avgPrice: e.target.value })} />
+                    <input type="number" min="0" step="1" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="적용환율" value={form.fxRate} onChange={(e) => setForm2({ fxRate: e.target.value })} />
+                    <input className="col-span-2 rounded border bg-background px-1.5 py-1 sm:col-span-3" placeholder="메모" value={form.note} onChange={(e) => setForm2({ note: e.target.value })} />
+                    <button type="button" className="rounded bg-primary px-3 py-1 text-primary-foreground hover:bg-primary/90" onClick={handleSave}>
+                      {form.editingId ? "수정 저장" : "+ 기록 추가"}
+                    </button>
+                    <div className="col-span-2 text-[11px] font-semibold sm:col-span-4">실현손익 예상: {preview >= 0 ? "+" : ""}₩{Math.round(preview).toLocaleString()}</div>
+                    {sellLogErrorByOwner[owner] ? <p className="col-span-2 text-[11px] font-medium text-destructive sm:col-span-4">{sellLogErrorByOwner[owner]}</p> : null}
+                  </div>
+                </div>
+              );
+            })()}
           </section>
 
           {/* 알림 설정 섹션 */}
