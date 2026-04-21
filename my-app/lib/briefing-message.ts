@@ -163,6 +163,12 @@ function iconForGroupLabel(label: string): string {
   return "🧩";
 }
 
+const OWNER_DISPLAY_ORDER = ["김승주", "강희진"] as const;
+function ownerOrderIndex(owner: string): number {
+  const idx = OWNER_DISPLAY_ORDER.indexOf(owner as (typeof OWNER_DISPLAY_ORDER)[number]);
+  return idx >= 0 ? idx : Number.MAX_SAFE_INTEGER;
+}
+
 /** 가격 표기 (원화는 전액·쉼표) */
 function fmtPriceCompactForMobile(item: BriefingItem): string {
   if (item.price === null || !Number.isFinite(item.price)) return "—";
@@ -250,7 +256,12 @@ export function buildTelegramBriefingHtml(opts: {
     }
     return [...map.entries()]
       .map(([owner, ownerRows]) => ({ owner, rows: ownerRows }))
-      .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
+      .sort((a, b) => {
+        const ao = ownerOrderIndex(a.owner);
+        const bo = ownerOrderIndex(b.owner);
+        if (ao !== bo) return ao - bo;
+        return a.owner.localeCompare(b.owner, "ko");
+      });
   }
 
   function groupByChartLabel(rows: BriefingItem[]): Array<{ label: string; rows: BriefingItem[] }> {
