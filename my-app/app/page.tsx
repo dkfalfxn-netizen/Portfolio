@@ -4238,6 +4238,12 @@ export default function Home() {
                 setSellLogForm((prev) => ({ ...prev, [owner]: { ...(prev[owner] ?? form), ...patch } }));
                 setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
               };
+              const selectedSymbol = form.symbol.trim().toUpperCase();
+              const ownersWithTicker = selectedSymbol
+                ? ownerNames.filter((name) =>
+                    positions.some((p) => p.owner === name && p.symbol === selectedSymbol),
+                  )
+                : [];
               const calcRealized = (entry: typeof form) => {
                 const qty = Number(entry.qty);
                 const sell = Number(entry.sellPrice);
@@ -4249,21 +4255,28 @@ export default function Home() {
               const handleTickerChange = (nextSymbol: string) => {
                 const selected = ownerTickerOptions.find((x) => x.symbol === nextSymbol);
                 if (!selected) return setForm2({ symbol: nextSymbol });
+                const ownersForSymbol = ownerNames.filter((name) =>
+                  positions.some((p) => p.owner === name && p.symbol === selected.symbol),
+                );
+                const nextOwner = ownersForSymbol[0] ?? owner;
                 const nextFxRate =
                   selected.currency === "KRW" ? "1" : selected.currency === "EUR" ? String(Math.round(eurKrw)) : String(Math.round(usdKrw));
-                const ownerPos = positions.find((p) => p.owner === owner && p.symbol === selected.symbol);
+                const ownerPos = positions.find((p) => p.owner === nextOwner && p.symbol === selected.symbol);
                 const ownerFxRate =
                   selected.currency === "KRW"
                     ? "1"
                     : selected.currency === "EUR"
                       ? String(Math.round(ownerPos?.purchaseEurKrw ?? eurKrw))
                       : String(Math.round(ownerPos?.purchaseUsdKrw ?? usdKrw));
+                setSellLogOwnerForSection(nextOwner);
                 setForm2({
                   symbol: selected.symbol,
                   name: selected.name,
                   avgPrice: ownerPos ? String(ownerPos.avgPrice) : String(selected.avgPrice),
                   currency: selected.currency,
                   fxRate: ownerFxRate || nextFxRate,
+                  selectedOwners: ownersForSymbol.length > 0 ? [ownersForSymbol[0]] : [],
+                  ownerOverrides: {},
                 });
               };
               const handleSave = () => {
@@ -4382,6 +4395,8 @@ export default function Home() {
                 });
               };
               const handleToggleSellOwner = (targetOwner: string, checked: boolean) => {
+                if (!selectedSymbol) return;
+                if (!positions.some((p) => p.owner === targetOwner && p.symbol === selectedSymbol)) return;
                 const nextOwners = checked
                   ? [...new Set([...form.selectedOwners, targetOwner])]
                   : form.selectedOwners.filter((n) => n !== targetOwner);
@@ -4441,7 +4456,9 @@ export default function Home() {
               return (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">기준 보유자: {owner} (아래 체크박스로 변경)</span>
+                    <span className="text-xs text-muted-foreground">
+                      티커 보유자만 선택 가능
+                    </span>
                     <button
                       type="button"
                       className={`text-xs font-bold underline-offset-2 hover:underline ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}
@@ -4468,13 +4485,20 @@ export default function Home() {
                               type="checkbox"
                               className="accent-primary"
                               checked={form.selectedOwners.includes(name)}
-                              disabled={form.editingId != null}
+                              disabled={
+                                form.editingId != null ||
+                                !selectedSymbol ||
+                                !ownersWithTicker.includes(name)
+                              }
                               onChange={(e) => handleToggleSellOwner(name, e.target.checked)}
                             />
                             <span>{name}</span>
                           </label>
                         ))}
                       </div>
+                      {!selectedSymbol ? (
+                        <p className="mt-1 text-[10px] text-muted-foreground">먼저 티커를 선택해 주세요.</p>
+                      ) : null}
                     </div>
                     <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right sm:col-start-1" placeholder="수량" value={form.qty} onChange={(e) => setForm2({ qty: e.target.value })} />
                     <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="매도가" value={form.sellPrice} onChange={(e) => setForm2({ sellPrice: e.target.value })} />
