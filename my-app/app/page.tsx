@@ -115,6 +115,7 @@ const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
  */
 const SNAPSHOT_PUSHED_DATE_KEY = "portfolio_snapshot_pushed_date_v1";
 const SNAPSHOT_PUSHED_TOTAL_KEY = "portfolio_snapshot_pushed_total_v1";
+const REALIZED_PNL_BY_OWNER_KEY = "portfolio_realized_pnl_by_owner_v1";
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
 
@@ -131,6 +132,11 @@ type DailyLiveChange = {
   changePct: number | null;
   ownerChanges: Array<{ name: string; changeKrw: number; changePct: number | null }>;
   compareNote?: string;
+};
+
+type OwnerRealizedPnl = {
+  realizedKrw: number;
+  updatedAt: string;
 };
 
 function normalizeOwnerNames(raw: unknown): OwnerName[] {
@@ -220,6 +226,31 @@ function loadDailySnapshots(): DailySnapshot[] {
     );
   } catch {
     return [];
+  }
+}
+
+function loadOwnerRealizedPnl(): Record<string, OwnerRealizedPnl> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(REALIZED_PNL_BY_OWNER_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, OwnerRealizedPnl> = {};
+    for (const [owner, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!v || typeof v !== "object") continue;
+      const o = v as { realizedKrw?: unknown; updatedAt?: unknown };
+      const realized = Number(o.realizedKrw ?? 0);
+      const updatedAt = typeof o.updatedAt === "string" ? o.updatedAt : "";
+      if (!Number.isFinite(realized)) continue;
+      out[owner] = {
+        realizedKrw: realized,
+        updatedAt,
+      };
+    }
+    return out;
+  } catch {
+    return {};
   }
 }
 
@@ -818,6 +849,7 @@ export default function Home() {
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
+  const [ownerRealizedPnl, setOwnerRealizedPnl] = useState<Record<string, OwnerRealizedPnl>>({});
   const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
   const [editSymbol, setEditSymbol] = useState("");
   const [editName, setEditName] = useState("");
@@ -1528,9 +1560,11 @@ export default function Home() {
   useEffect(() => {
     const pos = loadPositions();
     const cash = loadCashByOwner();
+    const realized = loadOwnerRealizedPnl();
     skipMarkLocalChangedRef.current = 2; // 디스크→state 재적용은 "수정"이 아님
     setPositions(pos);
     setCashByOwner(cash);
+    setOwnerRealizedPnl(realized);
     const savedKey = typeof window !== "undefined" ? window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "" : "";
     setCloudSyncKey(savedKey);
     setSyncKeyDraft(savedKey);
@@ -1577,6 +1611,11 @@ export default function Home() {
       window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
     }
   }, [cashByOwner, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    window.localStorage.setItem(REALIZED_PNL_BY_OWNER_KEY, JSON.stringify(ownerRealizedPnl));
+  }, [ownerRealizedPnl, isHydrated]);
 
   // 초기 로드 시 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
   useEffect(() => {
@@ -2317,6 +2356,28 @@ export default function Home() {
     if (!sym || !nm) return;
     if (!Number.isFinite(q) || q <= 0) return;
     if (!Number.isFinite(a) || a <= 0) return;
+    const prevRow = positions[editingRowIndex];
+    const soldQty =
+      prevRow && Number.isFinite(prevRow.quantity) && prevRow.quantity > q
+        ? prevRow.quantity - q
+        : 0;
+    let realizedDeltaKrw = 0;
+    if (prevRow && soldQty > 0) {
+      const sellUnitKrw =
+        prevRow.currency === "USD"
+          ? prevRow.currentPrice * usdKrw
+          : prevRow.currency === "EUR"
+            ? prevRow.currentPrice * eurKrw
+            : prevRow.currentPrice;
+      const buyUnitKrw =
+        prevRow.currency === "USD"
+          ? prevRow.avgPrice * (prevRow.purchaseUsdKrw ?? usdKrw)
+          : prevRow.currency === "EUR"
+            ? prevRow.avgPrice * (prevRow.purchaseEurKrw ?? eurKrw)
+            : prevRow.avgPrice;
+      realizedDeltaKrw = (sellUnitKrw - buyUnitKrw) * soldQty;
+    }
+
     setPositions((prev) =>
       prev.map((p, idx) => {
         if (idx !== editingRowIndex) return p;
@@ -2331,6 +2392,18 @@ export default function Home() {
         return { ...p, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a };
       }),
     );
+    if (prevRow && realizedDeltaKrw !== 0) {
+      setOwnerRealizedPnl((prev) => {
+        const cur = prev[prevRow.owner]?.realizedKrw ?? 0;
+        return {
+          ...prev,
+          [prevRow.owner]: {
+            realizedKrw: cur + realizedDeltaKrw,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+      });
+    }
     cancelEditRow();
   }
 
@@ -2390,6 +2463,17 @@ export default function Home() {
     }));
     setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? renamed : prev.owner }));
     setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? renamed : r.owner })));
+    setOwnerRealizedPnl((prev) => {
+      const entry = prev[name];
+      if (!entry) return prev;
+      const next = { ...prev };
+      delete next[name];
+      next[renamed] = {
+        realizedKrw: (next[renamed]?.realizedKrw ?? 0) + entry.realizedKrw,
+        updatedAt: new Date().toISOString(),
+      };
+      return next;
+    });
     window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
   }
 
@@ -2424,6 +2508,11 @@ export default function Home() {
     });
     setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? fallbackOwner : prev.owner }));
     setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? "전체" : r.owner })));
+    setOwnerRealizedPnl((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
     window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
   }
 
@@ -2666,7 +2755,7 @@ export default function Home() {
                 <div key={group.ownerName} id={`owner-${group.ownerName}`} className="rounded-xl border-2 border-border/70 shadow-sm">
                   <div className="flex flex-col gap-2 border-b bg-muted/30 px-4 py-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 space-y-2">
-                      <p className="font-semibold">보유 종목({group.ownerName})</p>
+                      <p className="font-semibold">보유자({group.ownerName})</p>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-[10px] font-medium text-muted-foreground">정렬</span>
                         {sortBtn("manual", "입력 순")}
@@ -3186,6 +3275,21 @@ export default function Home() {
                       )}
                     </TableBody>
                   </Table>
+                  <div className="mt-2 flex items-center justify-end border-t pt-2 text-xs">
+                    <span className="mr-2 text-muted-foreground">누적 실현손익</span>
+                    <span
+                      className={`font-semibold tabular-nums ${
+                        (ownerRealizedPnl[group.ownerName]?.realizedKrw ?? 0) > 0
+                          ? "text-red-500"
+                          : (ownerRealizedPnl[group.ownerName]?.realizedKrw ?? 0) < 0
+                            ? "text-blue-500"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      {(ownerRealizedPnl[group.ownerName]?.realizedKrw ?? 0) >= 0 ? "+" : ""}₩
+                      {Math.round(ownerRealizedPnl[group.ownerName]?.realizedKrw ?? 0).toLocaleString()}
+                    </span>
+                  </div>
                 </div>
               );
               })}
