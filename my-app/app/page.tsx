@@ -827,6 +827,40 @@ function normalizeHoldingsSortStrict(
   return base;
 }
 
+/** 서버 pull 전용: owner_names 기준으로만 매도 로그 복원 */
+function normalizeSellLogStrict(
+  raw: unknown,
+  owners: OwnerName[],
+): Record<string, SellLogEntry[]> {
+  const obj =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const base: Record<string, SellLogEntry[]> = {};
+  for (const name of owners) {
+    const entries = obj[name];
+    if (!Array.isArray(entries)) {
+      base[name] = [];
+      continue;
+    }
+    base[name] = entries.filter(
+      (e): e is SellLogEntry =>
+        e !== null &&
+        typeof e === "object" &&
+        typeof (e as SellLogEntry).id === "string" &&
+        typeof (e as SellLogEntry).symbol === "string" &&
+        typeof (e as SellLogEntry).name === "string" &&
+        typeof (e as SellLogEntry).qty === "number" &&
+        typeof (e as SellLogEntry).sellPrice === "number" &&
+        typeof (e as SellLogEntry).avgPrice === "number" &&
+        ((e as SellLogEntry).currency === "USD" ||
+          (e as SellLogEntry).currency === "EUR" ||
+          (e as SellLogEntry).currency === "KRW") &&
+        typeof (e as SellLogEntry).fxRate === "number" &&
+        typeof (e as SellLogEntry).realizedKrw === "number",
+    );
+  }
+  return base;
+}
+
 /**
  * 서버 `updated_at`이 로컬 `portfolio_last_sync_ts_v1`보다 새로운지.
  * 로컬 시각이 비어 있으면(저장소 삭제·최초) 항상 true → 서버 스냅샷을 반영해야 함.
@@ -900,6 +934,7 @@ export default function Home() {
    */
   const skipMarkLocalChangedRef = useRef(0);
   const skipOwnerLocalChangedRef = useRef(0);
+  const skipSellLogLocalChangedRef = useRef(0);
   const [holdingsSortByOwner, setHoldingsSortByOwner] =
     useState<Record<OwnerName, HoldingsSortMode>>(defaultHoldingsSort);
 
@@ -1438,6 +1473,7 @@ export default function Home() {
       pos: Position[],
       cash: CashByOwner,
       holdingsSort: Record<OwnerName, HoldingsSortMode>,
+      sellLogByOwner: Record<string, SellLogEntry[]>,
       owners: OwnerName[],
       /** true이면 로컬 변경 여부와 무관하게 항상 pull 우선 */
       forcePull = false,
@@ -1455,6 +1491,7 @@ export default function Home() {
         positions?: unknown;
         cash_by_owner?: unknown;
         holdings_sort_by_owner?: unknown;
+        sell_log_by_owner?: unknown;
         owner_names?: unknown;
         updated_at?: string | null;
       };
@@ -1479,6 +1516,7 @@ export default function Home() {
           setSyncMessage("서버에서 최신 잔고를 불러왔습니다.");
           skipMarkLocalChangedRef.current = 2;
           skipOwnerLocalChangedRef.current = 1;
+          skipSellLogLocalChangedRef.current = 1;
           const valid = Array.isArray(j.positions)
             ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
             : [];
@@ -1488,6 +1526,7 @@ export default function Home() {
           setPositions(mergeDuplicatePositions(filtered));
           setCashByOwner(normalizeCashStrict(j.cash_by_owner, pulledOwners));
           setHoldingsSortByOwner(normalizeHoldingsSortStrict(j.holdings_sort_by_owner, pulledOwners));
+          setSellLog(normalizeSellLogStrict(j.sell_log_by_owner, pulledOwners));
           setOwnerNames(pulledOwners);
           const clockToStore = serverTs.length > 0 ? serverTs : new Date().toISOString();
           window.localStorage.setItem(LAST_SYNC_TS_KEY, clockToStore);
@@ -1505,6 +1544,7 @@ export default function Home() {
               positions: pos,
               cashByOwner: cash,
               holdingsSortByOwner: holdingsSort,
+              sellLogByOwner,
               ownerNames: owners,
             }),
           });
@@ -1543,6 +1583,7 @@ export default function Home() {
             positions: pos,
             cashByOwner: cash,
             holdingsSortByOwner: holdingsSort,
+            sellLogByOwner,
             ownerNames: owners,
           }),
         });
@@ -1580,6 +1621,7 @@ export default function Home() {
     const cash = loadCashByOwner();
     const log = loadSellLog();
     skipMarkLocalChangedRef.current = 2; // 디스크→state 재적용은 "수정"이 아님
+    skipSellLogLocalChangedRef.current = 1;
     setPositions(pos);
     setCashByOwner(cash);
     setSellLog(log);
@@ -1599,7 +1641,7 @@ export default function Home() {
     }
 
     void (async () => {
-      await syncWithServerForKey(savedKey, pos, cash, holdSort, loadOwnerNames());
+      await syncWithServerForKey(savedKey, pos, cash, holdSort, log, loadOwnerNames());
       setSyncReady(true);
     })();
   }, [syncWithServerForKey]);
@@ -1633,6 +1675,11 @@ export default function Home() {
   useEffect(() => {
     if (!isHydrated) return;
     window.localStorage.setItem(SELL_LOG_KEY, JSON.stringify(sellLog));
+    if (skipSellLogLocalChangedRef.current > 0) {
+      skipSellLogLocalChangedRef.current -= 1;
+    } else {
+      window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    }
   }, [sellLog, isHydrated]);
 
   // 초기 로드 시 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
@@ -1698,6 +1745,7 @@ export default function Home() {
           positions,
           cashByOwner,
           holdingsSortByOwner,
+          sellLogByOwner: sellLog,
           ownerNames,
         }),
       }).then(async (r) => {
@@ -1717,7 +1765,7 @@ export default function Home() {
     return () => {
       if (pushDebounceRef.current) clearTimeout(pushDebounceRef.current);
     };
-  }, [positions, cashByOwner, holdingsSortByOwner, ownerNames, isHydrated, syncReady, autoSync, cloudSyncKey]);
+  }, [positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames, isHydrated, syncReady, autoSync, cloudSyncKey]);
 
   async function handlePullCloud() {
     const key = cloudSyncKey.trim();
@@ -1738,6 +1786,7 @@ export default function Home() {
         positions?: unknown;
         cash_by_owner?: unknown;
         holdings_sort_by_owner?: unknown;
+        sell_log_by_owner?: unknown;
         owner_names?: unknown;
         updated_at?: string | null;
       };
@@ -1748,6 +1797,7 @@ export default function Home() {
       if (j.found) {
         skipMarkLocalChangedRef.current = 2;
         skipOwnerLocalChangedRef.current = 1;
+        skipSellLogLocalChangedRef.current = 1;
         const valid = Array.isArray(j.positions)
           ? (j.positions as unknown[]).filter((x): x is Position => isValidPosition(x))
           : [];
@@ -1757,6 +1807,7 @@ export default function Home() {
         setPositions(mergeDuplicatePositions(filtered));
         setCashByOwner(normalizeCashStrict(j.cash_by_owner, pulledOwners));
         setHoldingsSortByOwner(normalizeHoldingsSortStrict(j.holdings_sort_by_owner, pulledOwners));
+        setSellLog(normalizeSellLogStrict(j.sell_log_by_owner, pulledOwners));
         setOwnerNames(pulledOwners);
         if (typeof j.updated_at === "string") {
           window.localStorage.setItem(LAST_SYNC_TS_KEY, j.updated_at);
@@ -1791,6 +1842,7 @@ export default function Home() {
           positions,
           cashByOwner,
           holdingsSortByOwner,
+          sellLogByOwner: sellLog,
           ownerNames,
         }),
       });
@@ -2013,6 +2065,7 @@ export default function Home() {
           positions: s.positions ?? [],
           cashByOwner: s.cash_by_owner ?? {},
           holdingsSortByOwner: s.holdings_sort_by_owner ?? {},
+          sellLogByOwner: s.sell_log_by_owner ?? {},
           ownerNames: s.owner_names ?? [],
         }),
       });
@@ -2057,6 +2110,7 @@ export default function Home() {
       positions,
       cashByOwner,
       holdingsSortByOwner,
+      sellLog,
       ownerNames,
       isKeyChange || isFirstValidKeySave,
     );

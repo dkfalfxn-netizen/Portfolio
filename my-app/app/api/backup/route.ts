@@ -32,16 +32,35 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { data: row, error: selErr } = await admin
+  const withSellLog = await admin
     .from("portfolio_snapshots")
-    .select("positions, cash_by_owner, holdings_sort_by_owner, owner_names, updated_at")
+    .select("positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, updated_at")
     .eq("sync_key", key)
     .maybeSingle();
+  const fallback = withSellLog.error
+    ? await admin
+        .from("portfolio_snapshots")
+        .select("positions, cash_by_owner, holdings_sort_by_owner, owner_names, updated_at")
+        .eq("sync_key", key)
+        .maybeSingle()
+    : null;
+  const row = withSellLog.data ?? fallback?.data;
+  const selErr = fallback?.error ?? withSellLog.error;
+  const snapshotRow = (row ?? null) as
+    | {
+        positions?: unknown;
+        cash_by_owner?: unknown;
+        holdings_sort_by_owner?: unknown;
+        owner_names?: unknown;
+        sell_log_by_owner?: unknown;
+        updated_at?: string | null;
+      }
+    | null;
 
   if (selErr) {
     return NextResponse.json({ error: selErr.message }, { status: 500 });
   }
-  if (!row) {
+  if (!snapshotRow) {
     return NextResponse.json(
       { error: "서버에 해당 키의 데이터가 없습니다. 먼저 이 기기에서 동기화해 주세요." },
       { status: 404 },
@@ -49,11 +68,12 @@ export async function POST(req: NextRequest) {
   }
 
   const snapshot = {
-    positions: row.positions ?? [],
-    cash_by_owner: row.cash_by_owner ?? {},
-    holdings_sort_by_owner: row.holdings_sort_by_owner ?? {},
-    owner_names: row.owner_names ?? [],
-    source_updated_at: row.updated_at ?? null,
+    positions: snapshotRow.positions ?? [],
+    cash_by_owner: snapshotRow.cash_by_owner ?? {},
+    holdings_sort_by_owner: snapshotRow.holdings_sort_by_owner ?? {},
+    owner_names: snapshotRow.owner_names ?? [],
+    sell_log_by_owner: snapshotRow.sell_log_by_owner ?? {},
+    source_updated_at: snapshotRow.updated_at ?? null,
   };
 
   const { error: insErr } = await admin.from("portfolio_snapshot_backups").insert({

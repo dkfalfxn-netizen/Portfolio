@@ -73,7 +73,79 @@ type PushBody = {
   cashByOwner: unknown;
   holdingsSortByOwner?: unknown;
   ownerNames?: unknown;
+  sellLogByOwner?: unknown;
 };
+
+type SellLogCurrency = "USD" | "EUR" | "KRW";
+type SellLogEntry = {
+  id: string;
+  date: string;
+  symbol: string;
+  name: string;
+  qty: number;
+  sellPrice: number;
+  avgPrice: number;
+  currency: SellLogCurrency;
+  fxRate: number;
+  realizedKrw: number;
+  note?: string;
+};
+
+function parseSellLogCurrency(raw: unknown): SellLogCurrency | null {
+  return raw === "USD" || raw === "EUR" || raw === "KRW" ? raw : null;
+}
+
+function sanitizeSellLogForOwners(
+  raw: unknown,
+  allowed: Set<string>,
+): Record<string, SellLogEntry[]> {
+  const out: Record<string, SellLogEntry[]> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [owner, entries] of Object.entries(raw as Record<string, unknown>)) {
+    if (!allowed.has(owner) || !Array.isArray(entries)) continue;
+    const cleaned: SellLogEntry[] = [];
+    for (const item of entries) {
+      if (!item || typeof item !== "object") continue;
+      const e = item as Record<string, unknown>;
+      const currency = parseSellLogCurrency(e.currency);
+      const id = typeof e.id === "string" ? e.id.trim() : "";
+      const date = typeof e.date === "string" ? e.date.trim() : "";
+      const symbol = typeof e.symbol === "string" ? e.symbol.trim() : "";
+      const name = typeof e.name === "string" ? e.name.trim() : "";
+      const qty = Number(e.qty);
+      const sellPrice = Number(e.sellPrice);
+      const avgPrice = Number(e.avgPrice);
+      const fxRate = Number(e.fxRate);
+      const realizedKrw = Number(e.realizedKrw);
+      if (!currency || !id || !date || !symbol || !name) continue;
+      if (
+        !Number.isFinite(qty) ||
+        !Number.isFinite(sellPrice) ||
+        !Number.isFinite(avgPrice) ||
+        !Number.isFinite(fxRate) ||
+        !Number.isFinite(realizedKrw)
+      ) {
+        continue;
+      }
+      const note = typeof e.note === "string" && e.note.trim() ? e.note.trim() : undefined;
+      cleaned.push({
+        id,
+        date,
+        symbol,
+        name,
+        qty,
+        sellPrice,
+        avgPrice,
+        currency,
+        fxRate,
+        realizedKrw,
+        note,
+      });
+    }
+    out[owner] = cleaned;
+  }
+  return out;
+}
 
 function parseOwnerNames(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -105,6 +177,7 @@ function inferOwnerNamesFromSnapshot(row: {
   positions?: unknown;
   cash_by_owner?: unknown;
   holdings_sort_by_owner?: unknown;
+  sell_log_by_owner?: unknown;
 }): string[] {
   const explicit = parseOwnerNames(row.owner_names);
   if (explicit.length > 0) {
@@ -124,7 +197,14 @@ function inferOwnerNamesFromSnapshot(row: {
       if (usd > 0 || krw > 0) fromCash.push(name);
     }
   }
-  return parseOwnerNames([...fromPositions, ...fromCash]);
+  const fromSellLog: string[] = [];
+  if (row.sell_log_by_owner && typeof row.sell_log_by_owner === "object") {
+    for (const [name, entries] of Object.entries(row.sell_log_by_owner as Record<string, unknown>)) {
+      if (typeof name !== "string" || !name.trim()) continue;
+      if (Array.isArray(entries) && entries.length > 0) fromSellLog.push(name);
+    }
+  }
+  return parseOwnerNames([...fromPositions, ...fromCash, ...fromSellLog]);
 }
 
 function sanitizePositionsForOwners(positions: unknown, allowed: Set<string>): unknown[] {
@@ -192,29 +272,30 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "pull") {
-    const withOwnerNames = await admin
+    const withSellLog = await admin
       .from("portfolio_snapshots")
-      .select("positions, cash_by_owner, holdings_sort_by_owner, owner_names, updated_at")
+      .select("positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, updated_at")
       .eq("sync_key", key)
       .maybeSingle();
-    const fallback = withOwnerNames.error
+    const fallback = withSellLog.error
       ? await admin
           .from("portfolio_snapshots")
           .select("positions, cash_by_owner, holdings_sort_by_owner, updated_at")
           .eq("sync_key", key)
           .maybeSingle()
       : null;
-    const data = (withOwnerNames.data ??
+    const data = (withSellLog.data ??
       fallback?.data) as
       | {
           positions?: unknown;
           cash_by_owner?: unknown;
           holdings_sort_by_owner?: unknown;
           owner_names?: unknown;
+          sell_log_by_owner?: unknown;
           updated_at?: string | null;
         }
       | null;
-    const error = fallback?.error ?? withOwnerNames.error;
+    const error = fallback?.error ?? withSellLog.error;
 
     if (error) {
       return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });
@@ -225,6 +306,7 @@ export async function POST(req: NextRequest) {
         positions: [],
         cash_by_owner: {},
         holdings_sort_by_owner: {},
+        sell_log_by_owner: {},
         owner_names: [],
         updated_at: null,
       });
@@ -237,6 +319,7 @@ export async function POST(req: NextRequest) {
       positions: sanitizePositionsForOwners(data.positions, allowed),
       cash_by_owner: sanitizeCashForOwners(data.cash_by_owner, allowed),
       holdings_sort_by_owner: sanitizeHoldingsSortForOwners(sortParsed, allowed),
+      sell_log_by_owner: sanitizeSellLogForOwners(data.sell_log_by_owner, allowed),
       owner_names: ownerList,
       updated_at: data.updated_at,
     });
@@ -292,6 +375,17 @@ export async function POST(req: NextRequest) {
     const positionsOut = sanitizePositionsForOwners(b.positions, allowed);
     const cashOut = sanitizeCashForOwners(b.cashByOwner, allowed);
     const holdingsSortOut = sanitizeHoldingsSortForOwners(holdingsSort, allowed);
+    let sellLogOut: Record<string, SellLogEntry[]>;
+    if ("sellLogByOwner" in b) {
+      sellLogOut = sanitizeSellLogForOwners(b.sellLogByOwner, allowed);
+    } else {
+      const { data: existing } = await admin
+        .from("portfolio_snapshots")
+        .select("sell_log_by_owner")
+        .eq("sync_key", key)
+        .maybeSingle();
+      sellLogOut = sanitizeSellLogForOwners(existing?.sell_log_by_owner ?? {}, allowed);
+    }
 
     const updatedAt = new Date().toISOString();
     const payload = {
@@ -300,6 +394,7 @@ export async function POST(req: NextRequest) {
       cash_by_owner: cashOut,
       holdings_sort_by_owner: holdingsSortOut,
       owner_names: ownerNames,
+      sell_log_by_owner: sellLogOut,
       updated_at: updatedAt,
     };
     const withOwnerNames = await admin
