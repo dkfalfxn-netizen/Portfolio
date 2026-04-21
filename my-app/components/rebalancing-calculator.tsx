@@ -11,7 +11,7 @@ export type GroupAllocation = {
   repSymbol: string;
   repName: string;
   repPrice: number;       // KRW 환산 현재가
-  members: { symbol: string; name: string; valueKrw: number }[];
+  members: { symbol: string; name: string; valueKrw: number; priceKrw: number }[];
 };
 
 type Props = {
@@ -47,7 +47,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
       const diffKrw = targetKrw - g.valueKrw;          // + 매수, - 매도
       const shares =
         g.repPrice > 0 ? Math.round((diffKrw / g.repPrice) * 100) / 100 : null;
-      const memberDiffs =
+      const memberAdjustments =
         g.members.length === 0
           ? []
           : g.members.map((m) => {
@@ -55,12 +55,17 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
                 g.valueKrw > 0
                   ? m.valueKrw / g.valueKrw
                   : 1 / g.members.length;
+              const memberDiffKrw = diffKrw * ratio;
               return {
                 ...m,
-                diffKrw: diffKrw * ratio,
+                diffKrw: memberDiffKrw,
+                shares:
+                  m.priceKrw > 0
+                    ? Math.round((memberDiffKrw / m.priceKrw) * 100) / 100
+                    : null,
               };
             });
-      return { ...g, targetPct, targetKrw, diffKrw, shares, memberDiffs };
+      return { ...g, targetPct, targetKrw, diffKrw, shares, memberAdjustments };
     });
   }, [groups, targets, totalKrw]);
 
@@ -110,7 +115,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
               <th className="py-1.5 px-2 text-right font-medium">목표액</th>
               <th className="py-1.5 px-2 text-right font-medium">매수/매도</th>
               <th className="py-1.5 px-2 text-right font-medium">종목(주수)</th>
-              <th className="py-1.5 px-2 text-right font-medium">종목별 추가/제외 금액</th>
+              <th className="py-1.5 px-2 text-right font-medium">종목별 추가/제외 주수</th>
             </tr>
           </thead>
           <tbody>
@@ -158,7 +163,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
                     "현금"
                   ) : r.shares !== null && Math.abs(r.diffKrw) >= 10000 ? (
                     <span>
-                      {r.repSymbol}{" "}
+                      {r.repName}{" "}
                       <span
                         className={
                           r.diffKrw > 0 ? "font-semibold text-red-400" : "font-semibold text-blue-400"
@@ -173,15 +178,17 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
                   )}
                 </td>
                 <td className="py-1.5 px-2 text-right">
-                  {Math.abs(r.diffKrw) < 10000 || r.memberDiffs.length === 0 ? (
+                  {Math.abs(r.diffKrw) < 10000 || r.memberAdjustments.length === 0 ? (
                     <span className="text-muted-foreground">—</span>
                   ) : (
                     <div className="space-y-0.5 text-[11px]">
-                      {r.memberDiffs.map((m) => (
+                      {r.memberAdjustments.map((m) => (
                         <p key={`${r.groupKey}-${m.symbol}`} className="tabular-nums">
-                          <span className="text-muted-foreground">{m.symbol}</span>{" "}
+                          <span className="text-muted-foreground">{m.name}</span>{" "}
                           <span className={m.diffKrw >= 0 ? "text-red-400" : "text-blue-400"}>
-                            {m.diffKrw >= 0 ? "+" : "-"}{fmt(Math.abs(m.diffKrw))}
+                            {m.shares !== null
+                              ? `${m.diffKrw >= 0 ? "+" : ""}${m.shares}주`
+                              : "—"}
                           </span>
                         </p>
                       ))}
@@ -257,7 +264,12 @@ export function RebalancingCalculator({
           const rep = repMap.get(d.ticker);
           const members = items
             .filter((p) => (p.chartGroup?.trim() || p.symbol) === d.ticker)
-            .map((p) => ({ symbol: p.symbol, name: p.name, valueKrw: p.valueKrw }));
+            .map((p) => ({
+              symbol: p.symbol,
+              name: p.name,
+              valueKrw: p.valueKrw,
+              priceKrw: p.currency === "USD" ? p.currentPrice * usdKrw : p.currentPrice,
+            }));
           return {
             groupKey: d.ticker,
             displayName: d.displayName,
