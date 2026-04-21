@@ -468,13 +468,12 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const loggedSymbols = new Set<string>();
     for (const [ownerSymbol, info] of symbolMap) {
       const symbol = ownerSymbol.split("::")[1] ?? "";
       if (!symbol) continue;
       const marketGroup = marketGroupOfSymbol(symbol);
       if (!isMarketTradingDay(marketGroup, now)) continue;
-      const dedupeKey = `${syncKey}:${symbol}:${dateKst}:${briefingSlot}`;
+      const dedupeKey = `${syncKey}:${ownerSymbol}:${dateKst}:${briefingSlot}`;
       if (sentSet.has(dedupeKey)) continue;
 
       const q = await fetchQuoteForSymbol(symbol);
@@ -492,16 +491,13 @@ export async function GET(req: NextRequest) {
         price: q.price,
         changePct: pct,
       });
-      if (!loggedSymbols.has(symbol)) {
-        logRows.push({
-          sync_key: syncKey,
-          symbol,
-          date: dateKst,
-          change_pct: pct ?? null, // null = 시세 조회 실패
-          briefing_slot: briefingSlot,
-        });
-        loggedSymbols.add(symbol);
-      }
+      logRows.push({
+        sync_key: syncKey,
+        symbol: ownerSymbol,
+        date: dateKst,
+        change_pct: pct ?? null, // null = 시세 조회 실패
+        briefing_slot: briefingSlot,
+      });
     }
   }
 
@@ -698,7 +694,6 @@ export async function POST(req: NextRequest) {
     alreadySent = new Set((logs ?? []).map((l) => l.symbol));
   }
 
-  const loggedSymbols = new Set<string>();
   for (const [ownerSymbol, info] of symbolMap) {
     const symbol = ownerSymbol.split("::")[1] ?? "";
     if (!symbol) continue;
@@ -719,7 +714,7 @@ export async function POST(req: NextRequest) {
     const pct = (q.price && q.previousClose && q.previousClose > 0)
       ? ((q.price - q.previousClose) / q.previousClose) * 100
       : null;
-    const willAlert = !alreadySent.has(symbol); // 모든 종목 발송 (중복 방지만, force_resend 시 무시)
+    const willAlert = !alreadySent.has(ownerSymbol); // 보유자+종목 단위 중복 방지
     results.push({ symbol, name: info.name, price: q.price, previousClose: q.previousClose, changePct: pct, willAlert, sector: info.sector });
     if (willAlert) {
       items.push({
@@ -732,16 +727,13 @@ export async function POST(req: NextRequest) {
         price: q.price,
         changePct: pct,
       });
-      if (!loggedSymbols.has(symbol)) {
-        logRows.push({
-          sync_key: syncKey,
-          symbol,
-          date: dateKst,
-          change_pct: pct ?? null, // null = 시세 조회 실패
-          briefing_slot: manualSlot,
-        });
-        loggedSymbols.add(symbol);
-      }
+      logRows.push({
+        sync_key: syncKey,
+        symbol: ownerSymbol,
+        date: dateKst,
+        change_pct: pct ?? null, // null = 시세 조회 실패
+        briefing_slot: manualSlot,
+      });
     }
   }
 
