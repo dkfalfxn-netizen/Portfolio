@@ -3801,6 +3801,17 @@ export default function Home() {
                                   />
                                 </label>
                                 <label className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-muted-foreground">매도가</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    className="rounded border bg-background px-1.5 py-1 text-right text-xs"
+                                    value={form.sellPrice}
+                                    onChange={(e) => setForm2({ sellPrice: e.target.value })}
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-0.5">
                                   <span className="text-[10px] text-muted-foreground">매수평단가</span>
                                   <input
                                     type="number"
