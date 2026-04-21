@@ -46,6 +46,12 @@ type AlertItem = {
 
 type MarketGroup = "DOMESTIC" | "OVERSEAS";
 
+function resolveAlertGroupLabel(p: Position): string {
+  const chartGroup = typeof p.chartGroup === "string" ? p.chartGroup.trim() : "";
+  if (chartGroup) return chartGroup;
+  return (p.name || p.symbol || "").trim() || "기타";
+}
+
 function normalizeSymbol(symbol: string): string {
   return symbol.trim().toUpperCase();
 }
@@ -503,7 +509,7 @@ export async function GET(req: NextRequest) {
           ownerLabel: owner,
           name: p.name || p.symbol,
           sector: p.sector || p.accountType || "기타",
-          groupLabel: p.chartGroup?.trim() || p.sector || p.accountType || p.symbol,
+          groupLabel: resolveAlertGroupLabel(p),
         });
       }
     }
@@ -704,7 +710,7 @@ export async function POST(req: NextRequest) {
         ownerLabel: owner,
         name: p.name || p.symbol,
         sector: p.sector || p.accountType || "기타",
-        groupLabel: p.chartGroup?.trim() || p.sector || p.accountType || p.symbol,
+        groupLabel: resolveAlertGroupLabel(p),
       });
     }
   }
