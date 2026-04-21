@@ -3285,7 +3285,7 @@ export default function Home() {
                         displayItems
                           .map((p) => [
                             p.symbol,
-                            { symbol: p.symbol, name: p.name, avgPrice: p.avgPrice },
+                            { symbol: p.symbol, name: p.name, avgPrice: p.avgPrice, currency: p.currency },
                           ]),
                       ).values(),
                     ).sort((a, b) => a.symbol.localeCompare(b.symbol));
@@ -3364,10 +3364,18 @@ export default function Home() {
                         setForm2({ symbol: nextSymbol });
                         return;
                       }
+                      const nextFxRate =
+                        selected.currency === "KRW"
+                          ? "1"
+                          : selected.currency === "EUR"
+                            ? String(Math.round(eurKrw))
+                            : String(Math.round(usdKrw));
                       setForm2({
                         symbol: selected.symbol,
                         name: selected.name,
                         avgPrice: String(selected.avgPrice),
+                        currency: selected.currency,
+                        fxRate: nextFxRate,
                       });
                     }
 
