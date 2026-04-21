@@ -2620,7 +2620,7 @@ export default function Home() {
                   key={id}
                   type="button"
                   onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
+                  className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
                 >
                   <span className="leading-none">{icon}</span>
                   <span>{label}</span>
@@ -2630,7 +2630,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => document.getElementById("section-holdings")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted"
+                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted"
               >
                 <span>📋</span>
                 <span>보유 종목</span>
@@ -2641,7 +2641,7 @@ export default function Home() {
                     key={name}
                     type="button"
                     onClick={() => document.getElementById(`owner-${name}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                    className="flex w-full items-center rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    className="flex w-full cursor-pointer items-center rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
                     {name}
                   </button>
@@ -2661,7 +2661,7 @@ export default function Home() {
                   key={id}
                   type="button"
                   onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
+                  className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
                 >
                   <span className="leading-none">{icon}</span>
                   <span>{label}</span>
