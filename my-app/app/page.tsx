@@ -862,6 +862,7 @@ export default function Home() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
+  const [showSymbolPnl, setShowSymbolPnl] = useState<Record<string, boolean>>({});
   const [sellLogForm, setSellLogForm] = useState<Record<string, {
     date: string; symbol: string; name: string; qty: string;
     sellPrice: string; avgPrice: string; currency: "USD" | "EUR" | "KRW"; fxRate: string; note: string;
@@ -3263,6 +3264,23 @@ export default function Home() {
                     const owner = group.ownerName;
                     const log = sellLog[owner] ?? [];
                     const totalRealized = log.reduce((s, e) => s + e.realizedKrw, 0);
+
+                    // 종목별 집계
+                    type SymPnl = { symbol: string; name: string; qty: number; costKrw: number; realizedKrw: number };
+                    const symMap = new Map<string, SymPnl>();
+                    for (const e of log) {
+                      const prev = symMap.get(e.symbol) ?? { symbol: e.symbol, name: e.name, qty: 0, costKrw: 0, realizedKrw: 0 };
+                      const fx = e.fxRate ?? 1;
+                      const costKrwEntry = e.currency === "KRW" ? e.avgPrice * e.qty : e.avgPrice * e.qty * fx;
+                      symMap.set(e.symbol, {
+                        ...prev,
+                        qty: prev.qty + e.qty,
+                        costKrw: prev.costKrw + costKrwEntry,
+                        realizedKrw: prev.realizedKrw + e.realizedKrw,
+                      });
+                    }
+                    const symPnlList = [...symMap.values()].sort((a, b) => b.realizedKrw - a.realizedKrw);
+
                     const form = sellLogForm[owner] ?? {
                       date: new Date().toISOString().slice(0, 10),
                       symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
@@ -3338,10 +3356,75 @@ export default function Home() {
                         {/* 헤더 */}
                         <div className="mb-2 flex items-center justify-between">
                           <p className="text-xs font-semibold">매도 기록</p>
-                          <span className={`text-xs font-bold tabular-nums ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                            누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{Math.round(totalRealized).toLocaleString()}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {symPnlList.length > 0 && (
+                              <button
+                                type="button"
+                                className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
+                                onClick={() => setShowSymbolPnl((prev) => ({ ...prev, [owner]: !prev[owner] }))}>
+                                {showSymbolPnl[owner] ? "종목별 접기 ▲" : "종목별 손익 ▼"}
+                              </button>
+                            )}
+                            <span className={`text-xs font-bold tabular-nums ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                              누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{Math.round(totalRealized).toLocaleString()}
+                            </span>
+                          </div>
                         </div>
+
+                        {/* 종목별 실현손익 (토글) */}
+                        {showSymbolPnl[owner] && symPnlList.length > 0 && (
+                          <div className="mb-3 overflow-x-auto rounded-lg border bg-background p-2">
+                            <table className="w-full text-[11px]">
+                              <thead>
+                                <tr className="border-b text-muted-foreground">
+                                  <th className="py-1 pr-2 text-left font-medium">종목</th>
+                                  <th className="py-1 pr-2 text-right font-medium">총매도량</th>
+                                  <th className="py-1 pr-2 text-right font-medium">매수원가(₩)</th>
+                                  <th className="py-1 pr-2 text-right font-medium">실현손익(₩)</th>
+                                  <th className="py-1 text-right font-medium">수익률</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {symPnlList.map((s) => {
+                                  const pct = s.costKrw > 0 ? (s.realizedKrw / s.costKrw) * 100 : 0;
+                                  return (
+                                    <tr key={s.symbol} className="border-b border-border/30 last:border-0 hover:bg-muted/30">
+                                      <td className="py-1 pr-2">
+                                        <span className="font-medium">{s.name}</span>
+                                        <span className="ml-1 text-muted-foreground">{s.symbol}</span>
+                                      </td>
+                                      <td className="py-1 pr-2 text-right tabular-nums">{s.qty}</td>
+                                      <td className="py-1 pr-2 text-right tabular-nums">₩{Math.round(s.costKrw).toLocaleString()}</td>
+                                      <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${s.realizedKrw > 0 ? "text-red-500" : s.realizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                                        {s.realizedKrw >= 0 ? "+" : ""}₩{Math.round(s.realizedKrw).toLocaleString()}
+                                      </td>
+                                      <td className={`py-1 text-right tabular-nums font-semibold ${pct > 0 ? "text-red-500" : pct < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                                        {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                              <tfoot>
+                                <tr className="border-t-2 border-border font-semibold">
+                                  <td className="py-1 pr-2 text-[10px] text-muted-foreground">합계</td>
+                                  <td className="py-1 pr-2 text-right tabular-nums">
+                                    {symPnlList.reduce((s, x) => s + x.qty, 0)}
+                                  </td>
+                                  <td className="py-1 pr-2 text-right tabular-nums">
+                                    ₩{Math.round(symPnlList.reduce((s, x) => s + x.costKrw, 0)).toLocaleString()}
+                                  </td>
+                                  <td className={`py-1 pr-2 text-right tabular-nums ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                                    {totalRealized >= 0 ? "+" : ""}₩{Math.round(totalRealized).toLocaleString()}
+                                  </td>
+                                  <td className={`py-1 text-right tabular-nums ${(() => { const tc = symPnlList.reduce((s, x) => s + x.costKrw, 0); const p = tc > 0 ? (totalRealized / tc) * 100 : 0; return p > 0 ? "text-red-500" : p < 0 ? "text-blue-500" : "text-muted-foreground"; })()}`}>
+                                    {(() => { const tc = symPnlList.reduce((s, x) => s + x.costKrw, 0); const p = tc > 0 ? (totalRealized / tc) * 100 : 0; return `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`; })()}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )}
 
                         {/* 입력 폼 */}
                         <div className="mb-3 grid grid-cols-2 gap-1.5 rounded-lg border bg-background p-2 text-xs sm:grid-cols-4">
