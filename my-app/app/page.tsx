@@ -3380,6 +3380,8 @@ export default function Home() {
                     }
 
                     const previewRealized = calcRealized(form);
+                    const pricePlaceholder = form.currency === "KRW" ? "60000" : "60.00";
+                    const avgPricePlaceholder = form.currency === "KRW" ? "55000" : "55.00";
 
                     return (
                       <div className="mt-3 rounded-xl border bg-muted/20 p-3">
@@ -3509,13 +3511,13 @@ export default function Home() {
                           </label>
                           <label className="flex flex-col gap-0.5">
                             <span className="text-[10px] text-muted-foreground">매도가</span>
-                            <input type="number" min="0" step="any" placeholder="60.00"
+                            <input type="number" min="0" step="any" placeholder={pricePlaceholder}
                               className="rounded border bg-background px-1.5 py-1 text-right text-xs"
                               value={form.sellPrice} onChange={(e) => setForm2({ sellPrice: e.target.value })} />
                           </label>
                           <label className="flex flex-col gap-0.5">
                             <span className="text-[10px] text-muted-foreground">매수평단가</span>
-                            <input type="number" min="0" step="any" placeholder="55.00"
+                            <input type="number" min="0" step="any" placeholder={avgPricePlaceholder}
                               className="rounded border bg-background px-1.5 py-1 text-right text-xs"
                               value={form.avgPrice} onChange={(e) => setForm2({ avgPrice: e.target.value })} />
                           </label>
