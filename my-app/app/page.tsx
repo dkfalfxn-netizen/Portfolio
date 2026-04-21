@@ -4367,6 +4367,42 @@ export default function Home() {
                     }
                     return next;
                   });
+                  // 매도대금 현금 자동 반영
+                  setCashByOwner((prev) => {
+                    let next = { ...prev };
+                    for (const [targetOwner, q] of reduceByOwner) {
+                      const currentCash = next[targetOwner] ?? { usd: 0, krw: 0 };
+                      const grossProceeds = q * sell;
+                      if (form.currency === "KRW") {
+                        next = {
+                          ...next,
+                          [targetOwner]: {
+                            ...currentCash,
+                            krw: currentCash.krw + grossProceeds,
+                          },
+                        };
+                      } else if (form.currency === "USD") {
+                        next = {
+                          ...next,
+                          [targetOwner]: {
+                            ...currentCash,
+                            usd: currentCash.usd + grossProceeds,
+                          },
+                        };
+                      } else {
+                        // EUR 현금 필드는 없어 원화로 환산 반영
+                        const fxApplied = Number(form.fxRate) || eurKrw;
+                        next = {
+                          ...next,
+                          [targetOwner]: {
+                            ...currentCash,
+                            krw: currentCash.krw + grossProceeds * fxApplied,
+                          },
+                        };
+                      }
+                    }
+                    return next;
+                  });
                   setPositions((prev) => {
                     let next = [...prev];
                     for (const [targetOwner, q] of reduceByOwner) {
