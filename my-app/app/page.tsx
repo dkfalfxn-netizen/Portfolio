@@ -2931,40 +2931,6 @@ export default function Home() {
                               }
                             />
                           </TableCell>
-                          <TableCell className="px-3 py-1.5 text-center">
-                            {group.ownerName === "김승주" ? (
-                              (() => {
-                                const s = signalBySymbol.get(position.symbol);
-                                const color =
-                                  s?.final === "BUY"
-                                    ? "text-red-500"
-                                    : s?.final === "SELL"
-                                      ? "text-blue-500"
-                                      : "text-muted-foreground";
-                                return (
-                                  <div className={`text-xs font-semibold ${color}`}>
-                                    {historyQuery.isLoading ? "..." : s?.final ?? "HOLD"}
-                                    {s ? (
-                                      <p className="mt-0.5 text-[10px] font-normal text-muted-foreground">
-                                        MA:{s.ma} RSI:{s.rsi} BB:{s.bb} VOL:{s.vol}
-                                      </p>
-                                    ) : null}
-                                    <button
-                                      type="button"
-                                      className="mt-1 block w-full text-[10px] font-medium text-primary underline-offset-2 hover:underline"
-                                      onClick={() =>
-                                        setSignalDetailTarget({ symbol: position.symbol, name: position.name })
-                                      }
-                                    >
-                                      차트·근거 보기
-                                    </button>
-                                  </div>
-                                );
-                              })()
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
                           <TableCell className="px-3 py-1.5 text-right">
                             {isEditing ? (
                               <input
@@ -3023,6 +2989,40 @@ export default function Home() {
                                   {Math.round(position.valueKrw - position.costKrw).toLocaleString()}
                                 </span>
                               </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="px-3 py-1.5 text-center">
+                            {group.ownerName === "김승주" ? (
+                              (() => {
+                                const s = signalBySymbol.get(position.symbol);
+                                const color =
+                                  s?.final === "BUY"
+                                    ? "text-red-500"
+                                    : s?.final === "SELL"
+                                      ? "text-blue-500"
+                                      : "text-muted-foreground";
+                                return (
+                                  <div className={`text-xs font-semibold ${color}`}>
+                                    {historyQuery.isLoading ? "..." : s?.final ?? "HOLD"}
+                                    {s ? (
+                                      <p className="mt-0.5 text-[10px] font-normal text-muted-foreground">
+                                        MA:{s.ma} RSI:{s.rsi} BB:{s.bb} VOL:{s.vol}
+                                      </p>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      className="mt-1 block w-full text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                                      onClick={() =>
+                                        setSignalDetailTarget({ symbol: position.symbol, name: position.name })
+                                      }
+                                    >
+                                      차트·근거 보기
+                                    </button>
+                                  </div>
+                                );
+                              })()
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
                             )}
                           </TableCell>
                           <TableCell className="px-3 py-1.5 text-right">
