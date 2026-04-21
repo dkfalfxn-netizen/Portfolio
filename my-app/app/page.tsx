@@ -902,6 +902,8 @@ export default function Home() {
   const [sellLogForm, setSellLogForm] = useState<Record<string, {
     date: string; symbol: string; name: string; qty: string;
     sellPrice: string; avgPrice: string; currency: "USD" | "EUR" | "KRW"; fxRate: string; note: string;
+    selectedOwners: string[];
+    ownerOverrides: Record<string, { qty: string; avgPrice: string; fxRate: string }>;
     editingId: string | null;
   }>>({});
   const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
@@ -3384,7 +3386,7 @@ export default function Home() {
                       date: new Date().toISOString().slice(0, 10),
                       symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
                       currency: "USD" as const, fxRate: String(Math.round(usdKrw)),
-                      note: "", editingId: null,
+                      note: "", selectedOwners: [owner], ownerOverrides: {}, editingId: null,
                     };
                     const setForm2 = (patch: Partial<typeof form>) =>
                       setSellLogForm((prev) => ({
@@ -3402,34 +3404,90 @@ export default function Home() {
                       return (sell - avg) * qty * fx;
                     }
 
+                    function calcRealizedByValues(qtyRaw: string, avgRaw: string, fxRaw: string, sellRaw: string): number {
+                      const qty = Number(qtyRaw);
+                      const sell = Number(sellRaw);
+                      const avg = Number(avgRaw);
+                      const fx = Number(fxRaw) || 1;
+                      if (!Number.isFinite(qty) || !Number.isFinite(sell) || !Number.isFinite(avg)) return 0;
+                      if (form.currency === "KRW") return (sell - avg) * qty;
+                      return (sell - avg) * qty * fx;
+                    }
+
                     function handleSellLogSave() {
-                      const qty = Number(form.qty);
                       const sell = Number(form.sellPrice);
-                      const avg = Number(form.avgPrice);
-                      const fx = Number(form.fxRate) || 1;
-                      if (!form.symbol || !Number.isFinite(qty) || qty <= 0) return;
+                      if (!form.symbol) return;
                       if (!Number.isFinite(sell) || sell <= 0) return;
-                      if (!Number.isFinite(avg) || avg <= 0) return;
-                      const realized = calcRealized(form);
-                      const entry: SellLogEntry = {
-                        id: form.editingId ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                        date: form.date,
-                        symbol: form.symbol.trim().toUpperCase(),
-                        name: form.name.trim() || form.symbol.trim().toUpperCase(),
-                        qty, sellPrice: sell, avgPrice: avg,
-                        currency: form.currency, fxRate: fx,
-                        realizedKrw: realized,
-                        note: form.note.trim() || undefined,
-                      };
+                      const selectedOwners = form.selectedOwners.length > 0 ? form.selectedOwners : [owner];
+                      const symbol = form.symbol.trim().toUpperCase();
+                      const name = form.name.trim() || symbol;
+
+                      // 수정 모드는 기존처럼 단일 보유자만 수정
+                      if (form.editingId) {
+                        const qty = Number(form.qty);
+                        const avg = Number(form.avgPrice);
+                        const fx = Number(form.fxRate) || 1;
+                        if (!Number.isFinite(qty) || qty <= 0) return;
+                        if (!Number.isFinite(avg) || avg <= 0) return;
+                        const realized = calcRealized(form);
+                        const entry: SellLogEntry = {
+                          id: form.editingId,
+                          date: form.date,
+                          symbol,
+                          name,
+                          qty,
+                          sellPrice: sell,
+                          avgPrice: avg,
+                          currency: form.currency,
+                          fxRate: fx,
+                          realizedKrw: realized,
+                          note: form.note.trim() || undefined,
+                        };
+                        setSellLog((prev) => {
+                          const existing = prev[owner] ?? [];
+                          return { ...prev, [owner]: existing.map((e) => (e.id === form.editingId ? entry : e)) };
+                        });
+                        setForm2({
+                          symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
+                          currency: "USD", fxRate: String(Math.round(usdKrw)), note: "",
+                          selectedOwners: [owner], ownerOverrides: {}, editingId: null,
+                        });
+                        return;
+                      }
+
                       setSellLog((prev) => {
-                        const existing = prev[owner] ?? [];
-                        if (form.editingId) {
-                          return { ...prev, [owner]: existing.map((e) => e.id === form.editingId ? entry : e) };
+                        let next = { ...prev };
+                        for (const targetOwner of selectedOwners) {
+                          const ovr = form.ownerOverrides[targetOwner] ?? { qty: "", avgPrice: "", fxRate: "" };
+                          const qtyRaw = targetOwner === owner ? form.qty : ovr.qty;
+                          const avgRaw = targetOwner === owner ? form.avgPrice : ovr.avgPrice;
+                          const fxRaw = targetOwner === owner ? form.fxRate : ovr.fxRate;
+                          const qty = Number(qtyRaw);
+                          const avg = Number(avgRaw);
+                          const fx = Number(fxRaw) || 1;
+                          if (!Number.isFinite(qty) || qty <= 0) continue;
+                          if (!Number.isFinite(avg) || avg <= 0) continue;
+                          const entry: SellLogEntry = {
+                            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                            date: form.date,
+                            symbol,
+                            name,
+                            qty,
+                            sellPrice: sell,
+                            avgPrice: avg,
+                            currency: form.currency,
+                            fxRate: fx,
+                            realizedKrw: calcRealizedByValues(String(qty), String(avg), String(fx), String(sell)),
+                            note: form.note.trim() || undefined,
+                          };
+                          const existing = next[targetOwner] ?? [];
+                          next = { ...next, [targetOwner]: [...existing, entry] };
                         }
-                        return { ...prev, [owner]: [...existing, entry] };
+                        return next;
                       });
                       setForm2({ symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
-                        currency: "USD", fxRate: String(Math.round(usdKrw)), note: "", editingId: null });
+                        currency: "USD", fxRate: String(Math.round(usdKrw)), note: "",
+                        selectedOwners: [owner], ownerOverrides: {}, editingId: null });
                     }
 
                     function handleSellLogEdit(e: SellLogEntry) {
@@ -3437,7 +3495,8 @@ export default function Home() {
                         date: e.date, symbol: e.symbol, name: e.name,
                         qty: String(e.qty), sellPrice: String(e.sellPrice),
                         avgPrice: String(e.avgPrice), currency: e.currency,
-                        fxRate: String(e.fxRate), note: e.note ?? "", editingId: e.id,
+                        fxRate: String(e.fxRate), note: e.note ?? "",
+                        selectedOwners: [owner], ownerOverrides: {}, editingId: e.id,
                       });
                     }
 
@@ -3460,16 +3519,60 @@ export default function Home() {
                           : selected.currency === "EUR"
                             ? String(Math.round(eurKrw))
                             : String(Math.round(usdKrw));
+                      const nextOverrides = { ...form.ownerOverrides };
+                      for (const targetOwner of form.selectedOwners) {
+                        if (targetOwner === owner) continue;
+                        const match = positions.find((p) => p.owner === targetOwner && p.symbol === selected.symbol);
+                        nextOverrides[targetOwner] = {
+                          qty: nextOverrides[targetOwner]?.qty ?? "",
+                          avgPrice: nextOverrides[targetOwner]?.avgPrice || (match ? String(match.avgPrice) : ""),
+                          fxRate:
+                            selected.currency === "KRW"
+                              ? "1"
+                              : selected.currency === "EUR"
+                                ? String(Math.round(eurKrw))
+                                : String(Math.round(usdKrw)),
+                        };
+                      }
                       setForm2({
                         symbol: selected.symbol,
                         name: selected.name,
                         avgPrice: String(selected.avgPrice),
                         currency: selected.currency,
                         fxRate: nextFxRate,
+                        ownerOverrides: nextOverrides,
                       });
                     }
 
-                    const previewRealized = calcRealized(form);
+                    function handleToggleSellOwner(targetOwner: string, checked: boolean) {
+                      const nextOwners = checked
+                        ? [...new Set([...form.selectedOwners, targetOwner])]
+                        : form.selectedOwners.filter((n) => n !== targetOwner);
+                      const overrides = { ...form.ownerOverrides };
+                      if (checked && !overrides[targetOwner]) {
+                        const match = positions.find((p) => p.owner === targetOwner && p.symbol === form.symbol);
+                        overrides[targetOwner] = {
+                          qty: "",
+                          avgPrice: match ? String(match.avgPrice) : "",
+                          fxRate:
+                            form.currency === "KRW"
+                              ? "1"
+                              : form.currency === "EUR"
+                                ? String(Math.round(eurKrw))
+                                : String(Math.round(usdKrw)),
+                        };
+                      }
+                      if (!checked) delete overrides[targetOwner];
+                      setForm2({ selectedOwners: nextOwners, ownerOverrides: overrides });
+                    }
+
+                    const previewRealizedTotal = form.selectedOwners.reduce((sum, targetOwner) => {
+                      const ovr = form.ownerOverrides[targetOwner] ?? { qty: "", avgPrice: "", fxRate: "" };
+                      const qtyRaw = targetOwner === owner ? form.qty : ovr.qty;
+                      const avgRaw = targetOwner === owner ? form.avgPrice : ovr.avgPrice;
+                      const fxRaw = targetOwner === owner ? form.fxRate : ovr.fxRate;
+                      return sum + calcRealizedByValues(qtyRaw, avgRaw, fxRaw, form.sellPrice);
+                    }, 0);
                     const pricePlaceholder = form.currency === "KRW" ? "60000" : "60.00";
                     const avgPricePlaceholder = form.currency === "KRW" ? "55000" : "55.00";
 
@@ -3593,6 +3696,26 @@ export default function Home() {
                               <option value="KRW">KRW</option>
                             </select>
                           </label>
+                          <div className="col-span-2 rounded border bg-muted/30 p-1.5 text-[11px] sm:col-span-4">
+                            <p className="mb-1 text-[10px] text-muted-foreground">보유자(복수 선택)</p>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1">
+                              {ownerNames.map((name) => (
+                                <label key={name} className="flex items-center gap-1">
+                                  <input
+                                    type="checkbox"
+                                    className="accent-primary"
+                                    checked={form.selectedOwners.includes(name)}
+                                    disabled={form.editingId != null}
+                                    onChange={(e) => handleToggleSellOwner(name, e.target.checked)}
+                                  />
+                                  <span>{name}</span>
+                                </label>
+                              ))}
+                            </div>
+                            {form.editingId && (
+                              <p className="mt-1 text-[10px] text-muted-foreground">수정 모드에서는 단일 보유자만 변경됩니다.</p>
+                            )}
+                          </div>
                           <label className="flex flex-col gap-0.5">
                             <span className="text-[10px] text-muted-foreground">수량</span>
                             <input type="number" min="0" step="any" placeholder="10"
@@ -3619,6 +3742,72 @@ export default function Home() {
                                 value={form.fxRate} onChange={(e) => setForm2({ fxRate: e.target.value })} />
                             </label>
                           )}
+                          {form.selectedOwners.filter((n) => n !== owner).map((targetOwner) => {
+                            const override = form.ownerOverrides[targetOwner] ?? { qty: "", avgPrice: "", fxRate: "" };
+                            return (
+                              <div key={targetOwner} className="col-span-2 grid grid-cols-2 gap-1.5 rounded border bg-muted/20 p-1.5 sm:col-span-4 sm:grid-cols-4">
+                                <p className="col-span-2 text-[10px] font-semibold text-muted-foreground sm:col-span-4">
+                                  {targetOwner} 입력 (수량/평단가/환율)
+                                </p>
+                                <label className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-muted-foreground">수량</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    className="rounded border bg-background px-1.5 py-1 text-right text-xs"
+                                    value={override.qty}
+                                    onChange={(e) =>
+                                      setForm2({
+                                        ownerOverrides: {
+                                          ...form.ownerOverrides,
+                                          [targetOwner]: { ...override, qty: e.target.value },
+                                        },
+                                      })
+                                    }
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-muted-foreground">매수평단가</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    className="rounded border bg-background px-1.5 py-1 text-right text-xs"
+                                    value={override.avgPrice}
+                                    onChange={(e) =>
+                                      setForm2({
+                                        ownerOverrides: {
+                                          ...form.ownerOverrides,
+                                          [targetOwner]: { ...override, avgPrice: e.target.value },
+                                        },
+                                      })
+                                    }
+                                  />
+                                </label>
+                                {form.currency !== "KRW" && (
+                                  <label className="flex flex-col gap-0.5">
+                                    <span className="text-[10px] text-muted-foreground">적용환율(₩)</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      className="rounded border bg-background px-1.5 py-1 text-right text-xs"
+                                      value={override.fxRate}
+                                      onChange={(e) =>
+                                        setForm2({
+                                          ownerOverrides: {
+                                            ...form.ownerOverrides,
+                                            [targetOwner]: { ...override, fxRate: e.target.value },
+                                          },
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                            );
+                          })}
                           <label className="col-span-2 flex flex-col gap-0.5 sm:col-span-4">
                             <span className="text-[10px] text-muted-foreground">메모 (선택)</span>
                             <input placeholder="예: 일부 매도, 수익 실현"
@@ -3626,15 +3815,16 @@ export default function Home() {
                               value={form.note} onChange={(e) => setForm2({ note: e.target.value })} />
                           </label>
                           <div className="col-span-2 flex items-center justify-between sm:col-span-4">
-                            <span className={`text-[11px] font-semibold tabular-nums ${previewRealized > 0 ? "text-red-500" : previewRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                              실현손익 예상: {previewRealized >= 0 ? "+" : ""}₩{Math.round(previewRealized).toLocaleString()}
+                            <span className={`text-[11px] font-semibold tabular-nums ${previewRealizedTotal > 0 ? "text-red-500" : previewRealizedTotal < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                              실현손익 예상: {previewRealizedTotal >= 0 ? "+" : ""}₩{Math.round(previewRealizedTotal).toLocaleString()}
                             </span>
                             <div className="flex gap-1.5">
                               {form.editingId && (
                                 <button type="button"
                                   className="rounded border px-2 py-1 text-xs hover:bg-muted"
                                   onClick={() => setForm2({ symbol: "", name: "", qty: "", sellPrice: "",
-                                    avgPrice: "", currency: "USD", fxRate: String(Math.round(usdKrw)), note: "", editingId: null })}>
+                                    avgPrice: "", currency: "USD", fxRate: String(Math.round(usdKrw)), note: "",
+                                    selectedOwners: [owner], ownerOverrides: {}, editingId: null })}>
                                   취소
                                 </button>
                               )}
