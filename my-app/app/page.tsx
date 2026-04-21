@@ -4338,6 +4338,11 @@ export default function Home() {
                 const nextOwners = checked
                   ? [...new Set([...form.selectedOwners, targetOwner])]
                   : form.selectedOwners.filter((n) => n !== targetOwner);
+                if (checked) {
+                  setSellLogOwnerForSection(targetOwner);
+                } else if (targetOwner === owner && nextOwners.length > 0) {
+                  setSellLogOwnerForSection(nextOwners[0]);
+                }
                 const overrides = { ...form.ownerOverrides };
                 if (checked && !overrides[targetOwner]) {
                   const match = positions.find((p) => p.owner === targetOwner && p.symbol === form.symbol);
@@ -4381,16 +4386,7 @@ export default function Home() {
               return (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">보유자</span>
-                      <select
-                        className="cursor-pointer rounded border bg-background px-2 py-1 text-xs"
-                        value={owner}
-                        onChange={(e) => setSellLogOwnerForSection(e.target.value)}
-                      >
-                        {ownerNames.map((name) => <option key={name} value={name}>{name}</option>)}
-                      </select>
-                    </div>
+                    <span className="text-xs text-muted-foreground">기준 보유자: {owner} (아래 체크박스로 변경)</span>
                     <button
                       type="button"
                       className={`text-xs font-bold underline-offset-2 hover:underline ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}
