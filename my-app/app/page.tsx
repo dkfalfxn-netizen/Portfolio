@@ -2632,7 +2632,6 @@ export default function Home() {
             <nav className="space-y-0.5 text-sm">
               {([
                 { id: "section-trend",     icon: "📈", label: "일별 자산 추이" },
-                { id: "section-rebalance", icon: "⚖️", label: "리밸런싱 계산기" },
               ] as const).map(({ id, icon, label }) => (
                 <button
                   key={id}
@@ -2668,6 +2667,7 @@ export default function Home() {
               {([
                 { id: "section-add",       icon: "➕", label: "종목 추가" },
                 { id: "section-realized",  icon: "💰", label: "실현손익 입력" },
+                { id: "section-rebalance", icon: "⚖️", label: "리밸런싱 계산기" },
                 { id: "section-alert",     icon: "🔔", label: "이메일 알림" },
                 { id: "section-liquidity", icon: "🌊", label: "유동성 브리핑" },
                 { id: "section-watchlist", icon: "⭐", label: "관심종목" },
@@ -2710,10 +2710,10 @@ export default function Home() {
                 <div className="flex min-w-max items-center gap-1.5">
                   {([
                     { id: "section-trend", icon: "📈", label: "일별 자산 추이" },
-                    { id: "section-rebalance", icon: "⚖️", label: "리밸런싱" },
                     { id: "section-holdings", icon: "📋", label: "보유 종목" },
                     { id: "section-add", icon: "➕", label: "종목 추가" },
                     { id: "section-realized", icon: "💰", label: "실현손익 입력" },
+                    { id: "section-rebalance", icon: "⚖️", label: "리밸런싱" },
                     { id: "section-alert", icon: "🔔", label: "이메일 알림" },
                     { id: "section-liquidity", icon: "🌊", label: "유동성 브리핑" },
                     { id: "section-watchlist", icon: "⭐", label: "관심종목" },
