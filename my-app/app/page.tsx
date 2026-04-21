@@ -118,6 +118,7 @@ const SNAPSHOT_PUSHED_TOTAL_KEY = "portfolio_snapshot_pushed_total_v1";
 const SELL_LOG_KEY = "portfolio_sell_log_v1";
 const LAST_SELL_LOG_SYNC_TS_KEY = "portfolio_last_sell_log_sync_ts_v1";
 const SELL_LOG_DIRTY_KEY = "portfolio_sell_log_dirty_v1";
+const TRADING_FEE_RATE = 0.002; // 0.2%
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
 
@@ -151,6 +152,22 @@ type SellLogEntry = {
   realizedKrw: number;
   note?: string;
 };
+
+function calcSellRealizedKrw(entry: Pick<SellLogEntry, "qty" | "sellPrice" | "avgPrice" | "currency" | "fxRate">): number {
+  const qty = Number(entry.qty);
+  const sell = Number(entry.sellPrice);
+  const avg = Number(entry.avgPrice);
+  const fx = Number(entry.fxRate) || 1;
+  if (!Number.isFinite(qty) || !Number.isFinite(sell) || !Number.isFinite(avg)) return 0;
+  const gross =
+    entry.currency === "KRW"
+      ? (sell - avg) * qty
+      : (sell - avg) * qty * fx;
+  // 종목 추가 직후 -0.2%가 반영되도록 매입 원가 기준 수수료를 차감
+  const buyNotionalKrw =
+    entry.currency === "KRW" ? avg * qty : avg * qty * fx;
+  return gross - buyNotionalKrw * TRADING_FEE_RATE;
+}
 
 function normalizeOwnerNames(raw: unknown): OwnerName[] {
   if (!Array.isArray(raw)) return [...DEFAULT_OWNER_NAMES];
@@ -1166,7 +1183,8 @@ export default function Home() {
           ? rawPreviousClose
           : null;
       const currentPrice = livePrice ?? position.currentPrice;
-      const pnl = ((currentPrice - position.avgPrice) / position.avgPrice) * 100;
+      const effectiveAvgPrice = position.avgPrice * (1 + TRADING_FEE_RATE);
+      const pnl = ((currentPrice - effectiveAvgPrice) / effectiveAvgPrice) * 100;
       /** 매입 시 환율 없으면 현재 환율로 원가 추정(기존 데이터 호환) */
       const purchaseFx =
         position.currency === "USD"
@@ -1180,7 +1198,7 @@ export default function Home() {
           : position.currency === "EUR"
             ? position.quantity * currentPrice * eurKrw
             : position.quantity * currentPrice;
-      const costKrw = position.quantity * position.avgPrice * purchaseFx;
+      const costKrw = position.quantity * effectiveAvgPrice * purchaseFx;
       /** 해외(USD/EUR): 종목 통화 기준 주가 수익률 */
       const pnlUsdPct = position.currency === "USD" ? pnl : null;
       const pnlEurPct = position.currency === "EUR" ? pnl : null;
@@ -4188,7 +4206,7 @@ export default function Home() {
             {(() => {
               const owner = sellLogOwnerForSection;
               const log = sellLog[owner] ?? [];
-              const totalRealized = log.reduce((s, e) => s + e.realizedKrw, 0);
+              const totalRealized = log.reduce((s, e) => s + calcSellRealizedKrw(e), 0);
               const symMap = new Map<string, { symbol: string; name: string; qty: number; costKrw: number; realizedKrw: number }>();
               for (const e of log) {
                 const prev = symMap.get(e.symbol) ?? { symbol: e.symbol, name: e.name, qty: 0, costKrw: 0, realizedKrw: 0 };
@@ -4198,7 +4216,7 @@ export default function Home() {
                   ...prev,
                   qty: prev.qty + e.qty,
                   costKrw: prev.costKrw + costKrw,
-                  realizedKrw: prev.realizedKrw + e.realizedKrw,
+                  realizedKrw: prev.realizedKrw + calcSellRealizedKrw(e),
                 });
               }
               const symPnlList = [...symMap.values()].sort((a, b) => b.realizedKrw - a.realizedKrw);
@@ -4263,7 +4281,13 @@ export default function Home() {
                   avgPrice: avg,
                   currency: form.currency,
                   fxRate: fx,
-                  realizedKrw: calcRealized(form),
+                  realizedKrw: calcSellRealizedKrw({
+                    qty,
+                    sellPrice: sell,
+                    avgPrice: avg,
+                    currency: form.currency,
+                    fxRate: fx,
+                  }),
                   note: form.note.trim() || undefined,
                 };
                 setSellLog((prev) => {
@@ -4327,7 +4351,6 @@ export default function Home() {
                       <option value="">티커 선택</option>
                       {ownerTickerOptions.map((opt) => <option key={opt.symbol} value={opt.symbol}>{opt.symbol}({opt.name})</option>)}
                     </select>
-                    <input className="rounded border bg-background px-1.5 py-1" placeholder="종목명" value={form.name} onChange={(e) => setForm2({ name: e.target.value })} />
                     <select className="cursor-pointer rounded border bg-background px-1.5 py-1" value={form.currency} onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW" })}>
                       <option value="USD">USD</option><option value="EUR">EUR</option><option value="KRW">KRW</option>
                     </select>
@@ -4412,8 +4435,8 @@ export default function Home() {
                               <td className="py-1 pr-2 text-right tabular-nums">{e.qty}</td>
                               <td className="py-1 pr-2 text-right tabular-nums">{e.sellPrice}</td>
                               <td className="py-1 pr-2 text-right tabular-nums">{e.avgPrice}</td>
-                              <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${e.realizedKrw > 0 ? "text-red-500" : e.realizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                                {e.realizedKrw >= 0 ? "+" : ""}₩{Math.round(e.realizedKrw).toLocaleString()}
+                              <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${calcSellRealizedKrw(e) > 0 ? "text-red-500" : calcSellRealizedKrw(e) < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                                {calcSellRealizedKrw(e) >= 0 ? "+" : ""}₩{Math.round(calcSellRealizedKrw(e)).toLocaleString()}
                               </td>
                               <td className="py-1 text-right">
                                 <div className="flex justify-end gap-1">
@@ -4932,7 +4955,7 @@ export default function Home() {
             <div className="max-h-[75vh] space-y-3 overflow-y-auto p-4">
               {sellLogOwnersForModal.map((name) => {
                 const rows = [...(sellLog[name] ?? [])].sort((a, b) => b.date.localeCompare(a.date));
-                const ownerTotal = rows.reduce((s, r) => s + r.realizedKrw, 0);
+                const ownerTotal = rows.reduce((s, r) => s + calcSellRealizedKrw(r), 0);
                 return (
                   <div
                     key={name}
@@ -4970,8 +4993,8 @@ export default function Home() {
                                 <td className="py-1 pr-2 text-right tabular-nums">{e.sellPrice}</td>
                                 <td className="py-1 pr-2 text-right tabular-nums">{e.avgPrice}</td>
                                 <td className="py-1 pr-2 text-right tabular-nums">{e.currency === "KRW" ? "1" : e.fxRate}</td>
-                                <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${e.realizedKrw > 0 ? "text-red-500" : e.realizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                                  {e.realizedKrw >= 0 ? "+" : ""}₩{Math.round(e.realizedKrw).toLocaleString()}
+                                <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${calcSellRealizedKrw(e) > 0 ? "text-red-500" : calcSellRealizedKrw(e) < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                                  {calcSellRealizedKrw(e) >= 0 ? "+" : ""}₩{Math.round(calcSellRealizedKrw(e)).toLocaleString()}
                                 </td>
                                 <td className="py-1 text-muted-foreground">{e.note ?? "—"}</td>
                               </tr>
