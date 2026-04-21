@@ -48,7 +48,13 @@ type MarketGroup = "DOMESTIC" | "OVERSEAS";
 
 function resolveAlertGroupLabel(p: Position): string {
   const chartGroup = typeof p.chartGroup === "string" ? p.chartGroup.trim() : "";
-  if (chartGroup) return chartGroup;
+  const lower = chartGroup.toLowerCase();
+  const isMarketBucket =
+    lower === "국내주식" ||
+    lower === "해외주식" ||
+    lower === "domestic" ||
+    lower === "overseas";
+  if (chartGroup && !isMarketBucket) return chartGroup;
   return (p.name || p.symbol || "").trim() || "기타";
 }
 
