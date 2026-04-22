@@ -1022,6 +1022,11 @@ export default function Home() {
     /** 종목 추가 시 한 번에 넣을 담당자(복수) */
     selectedOwners: ["김승주"] as OwnerName[],
   });
+  const [addPositionError, setAddPositionError] = useState("");
+
+  useEffect(() => {
+    setAddPositionError("");
+  }, [form.symbol, form.name, form.currency, form.selectedOwners]);
 
   const refreshLatestBackupAt = useCallback(async () => {
     const key = cloudSyncKey.trim();
@@ -2421,12 +2426,27 @@ export default function Home() {
     if (ownersOrdered.length === 0) return;
 
     const symbol = form.symbol.trim().toUpperCase();
+    const nameTrimmed = form.name.trim();
     const accountType: "해외주식" | "국내주식" =
       form.currency === "KRW" ? "국내주식" : "해외주식";
     const accountName = accountType === "국내주식" ? "국내주식-주계좌" : "미국주식-주계좌";
+
+    for (const own of ownersOrdered) {
+      const existing = positions.find(
+        (p) => p.owner === own && p.symbol === symbol && p.currency === form.currency,
+      );
+      if (existing && existing.name.trim() !== nameTrimmed) {
+        setAddPositionError(
+          `「${own}」에 이미 등록된 ${symbol}의 종목명은 「${existing.name.trim()}」입니다. 기존과 동일한 종목명으로 맞춘 뒤 추가해 주세요.`,
+        );
+        return;
+      }
+    }
+    setAddPositionError("");
+
     const base: Omit<Position, "owner"> = {
       symbol,
-      name: form.name.trim(),
+      name: nameTrimmed,
       quantity,
       avgPrice,
       currentPrice: avgPrice,
@@ -4061,7 +4081,9 @@ export default function Home() {
               담당자를 여러 명 선택하면 같은 티커·수량·평단으로 각각 한 줄씩 추가됩니다.
               같은 티커·담당자·계좌(해외/국내+계좌명)·통화로 다시 추가하면 기존 줄에{" "}
               <span className="font-medium text-foreground">수량이 더해지고 평단은 가중평균</span>으로
-              갱신됩니다.
+              갱신됩니다. 이 경우{" "}
+              <span className="font-medium text-foreground">종목명은 기존 줄과 정확히 같아야</span> 하며
+              다르면 저장되지 않습니다.
               국내 주식은 6자리 종목코드(예: <span className="font-medium text-foreground">005930</span>)
               또는 <span className="font-medium text-foreground">KRX:005930</span> 형식으로 입력하면 실시간 시세가 반영됩니다.
               KOSDAQ은 <span className="font-medium text-foreground">KQ:293490</span> 형식을 사용하세요.
@@ -4186,6 +4208,14 @@ export default function Home() {
                   ))}
                 </div>
               </div>
+              {addPositionError ? (
+                <p
+                  role="alert"
+                  className="col-span-2 text-sm text-destructive sm:col-span-3 md:col-span-6"
+                >
+                  {addPositionError}
+                </p>
+              ) : null}
               <div className="col-span-2 flex flex-wrap items-center gap-2 sm:col-span-3 md:col-span-6">
                 <span className="rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
                   {form.currency === "KRW" ? "국내주식" : "해외주식"}
