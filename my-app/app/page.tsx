@@ -121,6 +121,8 @@ const SELL_LOG_DIRTY_KEY = "portfolio_sell_log_dirty_v1";
 const TRADING_FEE_RATE = 0.002; // 0.2%
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
+/** 실현손익 '종목별 손익' 접기 키(전 보유자 합산 표이므로 단일 토글) */
+const REALIZED_SYMBOL_PNL_TOGGLE_KEY = "__realizedSymbolPnlAll__";
 
 export type DailySnapshot = {
   date: string; // YYYY-MM-DD
@@ -4211,8 +4213,9 @@ export default function Home() {
               const listLog = sellLog[listViewOwner] ?? [];
               const log = sellLog[owner] ?? [];
               const totalRealized = log.reduce((s, e) => s + calcSellRealizedKrw(e), 0);
+              const allSellLogEntries: SellLogEntry[] = Object.values(sellLog).flat();
               const symMap = new Map<string, { symbol: string; name: string; qty: number; costKrw: number; realizedKrw: number }>();
-              for (const e of log) {
+              for (const e of allSellLogEntries) {
                 const prev = symMap.get(e.symbol) ?? { symbol: e.symbol, name: e.name, qty: 0, costKrw: 0, realizedKrw: 0 };
                 const fx = e.fxRate ?? 1;
                 const costKrw = e.currency === "KRW" ? e.avgPrice * e.qty : e.avgPrice * e.qty * fx;
@@ -4548,12 +4551,19 @@ export default function Home() {
                         <button
                           type="button"
                           className="rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
-                          onClick={() => setShowSymbolPnl((prev) => ({ ...prev, [owner]: !prev[owner] }))}
+                          onClick={() =>
+                            setShowSymbolPnl((prev) => ({
+                              ...prev,
+                              [REALIZED_SYMBOL_PNL_TOGGLE_KEY]: !prev[REALIZED_SYMBOL_PNL_TOGGLE_KEY],
+                            }))
+                          }
                         >
-                          {showSymbolPnl[owner] ? "종목별 접기 ▲" : "종목별 손익 ▼"}
+                          {showSymbolPnl[REALIZED_SYMBOL_PNL_TOGGLE_KEY]
+                            ? "종목별 접기 ▲"
+                            : "종목별 손익 ▼ (전원 합산)"}
                         </button>
                       </div>
-                      {showSymbolPnl[owner] && (
+                      {showSymbolPnl[REALIZED_SYMBOL_PNL_TOGGLE_KEY] && (
                         <table className="w-full text-[11px]">
                           <thead>
                             <tr className="border-b text-muted-foreground">
