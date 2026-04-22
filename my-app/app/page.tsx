@@ -4472,7 +4472,7 @@ export default function Home() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">
-                      티커 보유자만 선택 가능 (단일 선택)
+                      보유자는 전부 표시됩니다(해당 티커를 안 갖고 있으면 &quot;· 미보유&quot;). 그 티커는 실제로 보유한 보유자만 저장됩니다.
                     </span>
                     <button
                       type="button"
@@ -4516,11 +4516,16 @@ export default function Home() {
                         }}
                       >
                         <option value="">{selectedSymbol ? "보유자 선택" : "먼저 티커를 선택해 주세요."}</option>
-                        {(selectedSymbol ? ownersWithTicker : ownerNames).map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
+                        {ownerNames.map((name) => {
+                          const noHoldingForTicker =
+                            Boolean(selectedSymbol) && !ownersWithTicker.includes(name);
+                          return (
+                            <option key={name} value={name}>
+                              {name}
+                              {noHoldingForTicker ? " · 미보유" : ""}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                     <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right sm:col-start-1" placeholder="수량" value={form.qty} onChange={(e) => setForm2({ qty: e.target.value })} />
