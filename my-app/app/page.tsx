@@ -4244,19 +4244,67 @@ export default function Home() {
               const log = sellLog[owner] ?? [];
               const totalRealized = log.reduce((s, e) => s + calcSellRealizedKrw(e), 0);
               const allSellLogEntries: SellLogEntry[] = Object.values(sellLog).flat();
-              const symMap = new Map<string, { symbol: string; name: string; qty: number; costKrw: number; realizedKrw: number }>();
+              type SymPnlRow = {
+                date: string;
+                symbol: string;
+                name: string;
+                qty: number;
+                costKrw: number;
+                realizedKrw: number;
+              };
+              const symPnlByDateSymbol = new Map<string, SymPnlRow>();
+              const dailyRealizedAllOwners = new Map<string, number>();
               for (const e of allSellLogEntries) {
-                const prev = symMap.get(e.symbol) ?? { symbol: e.symbol, name: e.name, qty: 0, costKrw: 0, realizedKrw: 0 };
+                const rk = calcSellRealizedKrw(e);
+                dailyRealizedAllOwners.set(e.date, (dailyRealizedAllOwners.get(e.date) ?? 0) + rk);
+                const dsKey = `${e.date}::${e.symbol}`;
+                const prev =
+                  symPnlByDateSymbol.get(dsKey) ??
+                  ({
+                    date: e.date,
+                    symbol: e.symbol,
+                    name: e.name,
+                    qty: 0,
+                    costKrw: 0,
+                    realizedKrw: 0,
+                  } satisfies SymPnlRow);
                 const fx = e.fxRate ?? 1;
                 const costKrw = e.currency === "KRW" ? e.avgPrice * e.qty : e.avgPrice * e.qty * fx;
-                symMap.set(e.symbol, {
-                  ...prev,
+                symPnlByDateSymbol.set(dsKey, {
+                  date: e.date,
+                  symbol: e.symbol,
+                  name: e.name,
                   qty: prev.qty + e.qty,
                   costKrw: prev.costKrw + costKrw,
-                  realizedKrw: prev.realizedKrw + calcSellRealizedKrw(e),
+                  realizedKrw: prev.realizedKrw + rk,
                 });
               }
-              const symPnlList = [...symMap.values()].sort((a, b) => b.realizedKrw - a.realizedKrw);
+              const symPnlList = [...symPnlByDateSymbol.values()];
+              const symPnlDatesDesc = [...new Set(symPnlList.map((r) => r.date))].sort((a, b) =>
+                b.localeCompare(a),
+              );
+              const symPnlByDate = new Map<string, SymPnlRow[]>();
+              for (const r of symPnlList) {
+                const list = symPnlByDate.get(r.date) ?? [];
+                list.push(r);
+                symPnlByDate.set(r.date, list);
+              }
+              for (const d of symPnlByDate.keys()) {
+                symPnlByDate.get(d)!.sort((a, b) => b.realizedKrw - a.realizedKrw);
+              }
+
+              const listByDate = new Map<string, SellLogEntry[]>();
+              for (const e of listLog) {
+                const list = listByDate.get(e.date) ?? [];
+                list.push(e);
+                listByDate.set(e.date, list);
+              }
+              const listDatesDesc = [...listByDate.keys()].sort((a, b) => b.localeCompare(a));
+              for (const d of listByDate.keys()) {
+                listByDate.get(d)!.sort((a, b) => b.id.localeCompare(a.id));
+              }
+              const listDailyRealized = (d: string) =>
+                (listByDate.get(d) ?? []).reduce((s, e) => s + calcSellRealizedKrw(e), 0);
               const ownerTickerOptions = Array.from(
                 new Map(
                   positions.map((p) => [
@@ -4605,23 +4653,61 @@ export default function Home() {
                             </tr>
                           </thead>
                           <tbody>
-                            {symPnlList.map((s) => {
-                              const pct = s.costKrw > 0 ? (s.realizedKrw / s.costKrw) * 100 : 0;
+                            {symPnlDatesDesc.map((d) => {
+                              const daySum = dailyRealizedAllOwners.get(d) ?? 0;
+                              const dayRows = symPnlByDate.get(d) ?? [];
                               return (
-                                <tr key={s.symbol} className="border-b border-border/30 last:border-0">
-                                  <td className="py-1 pr-2">
-                                    <span className="font-medium">{s.name}</span>
-                                    <span className="ml-1 text-muted-foreground">{s.symbol}</span>
-                                  </td>
-                                  <td className="py-1 pr-2 text-right tabular-nums">{s.qty}</td>
-                                  <td className="py-1 pr-2 text-right tabular-nums">₩{Math.round(s.costKrw).toLocaleString()}</td>
-                                  <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${s.realizedKrw > 0 ? "text-red-500" : s.realizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                                    {s.realizedKrw >= 0 ? "+" : ""}₩{Math.round(s.realizedKrw).toLocaleString()}
-                                  </td>
-                                  <td className={`py-1 text-right tabular-nums font-semibold ${pct > 0 ? "text-red-500" : pct < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                                    {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
-                                  </td>
-                                </tr>
+                                <Fragment key={d}>
+                                  <tr className="border-b border-border/50 bg-muted/50">
+                                    <td colSpan={5} className="py-1.5 pl-1 text-[10px] font-semibold sm:text-xs">
+                                      <span className="text-sm tabular-nums text-foreground sm:text-base">
+                                        {d}
+                                      </span>
+                                      <span className="ml-2 text-muted-foreground">— 당일 합산 실현손익</span>{" "}
+                                      <span
+                                        className={
+                                          daySum > 0
+                                            ? "text-red-500"
+                                            : daySum < 0
+                                              ? "text-blue-500"
+                                              : "text-muted-foreground"
+                                        }
+                                      >
+                                        {daySum >= 0 ? "+" : ""}₩{Math.round(daySum).toLocaleString()}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                  {dayRows.map((s) => {
+                                    const pct = s.costKrw > 0 ? (s.realizedKrw / s.costKrw) * 100 : 0;
+                                    return (
+                                      <tr
+                                        key={`${d}-${s.symbol}`}
+                                        className="border-b border-border/30 last:border-0"
+                                      >
+                                        <td className="py-1 pr-2">
+                                          <span className="font-medium">{s.name}</span>
+                                          <span className="ml-1 text-muted-foreground">{s.symbol}</span>
+                                        </td>
+                                        <td className="py-1 pr-2 text-right tabular-nums">{s.qty}</td>
+                                        <td className="py-1 pr-2 text-right tabular-nums">
+                                          ₩{Math.round(s.costKrw).toLocaleString()}
+                                        </td>
+                                        <td
+                                          className={`py-1 pr-2 text-right tabular-nums font-semibold ${s.realizedKrw > 0 ? "text-red-500" : s.realizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}
+                                        >
+                                          {s.realizedKrw >= 0 ? "+" : ""}₩
+                                          {Math.round(s.realizedKrw).toLocaleString()}
+                                        </td>
+                                        <td
+                                          className={`py-1 text-right tabular-nums font-semibold ${pct > 0 ? "text-red-500" : pct < 0 ? "text-blue-500" : "text-muted-foreground"}`}
+                                        >
+                                          {pct >= 0 ? "+" : ""}
+                                          {pct.toFixed(2)}%
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </Fragment>
                               );
                             })}
                           </tbody>
@@ -4662,7 +4748,6 @@ export default function Home() {
                         <table className="w-full text-[11px]">
                           <thead>
                             <tr className="border-b text-muted-foreground">
-                              <th className="py-1 pr-2 text-left font-medium">날짜</th>
                               <th className="py-1 pr-2 text-left font-medium">종목</th>
                               <th className="py-1 pr-2 text-right font-medium">수량</th>
                               <th className="py-1 pr-2 text-right font-medium">매도가</th>
@@ -4672,41 +4757,65 @@ export default function Home() {
                             </tr>
                           </thead>
                           <tbody>
-                            {[...listLog].sort((a, b) => b.date.localeCompare(a.date)).map((e) => (
-                              <tr key={e.id} className="border-b border-border/30 last:border-0">
-                                <td className="py-1 pr-2 tabular-nums">{e.date}</td>
-                                <td className="py-1 pr-2">
-                                  {e.name} <span className="text-muted-foreground">({e.symbol})</span>
-                                </td>
-                                <td className="py-1 pr-2 text-right tabular-nums">{e.qty}</td>
-                                <td className="py-1 pr-2 text-right tabular-nums">{e.sellPrice}</td>
-                                <td className="py-1 pr-2 text-right tabular-nums">{e.avgPrice}</td>
-                                <td
-                                  className={`py-1 pr-2 text-right tabular-nums font-semibold ${calcSellRealizedKrw(e) > 0 ? "text-red-500" : calcSellRealizedKrw(e) < 0 ? "text-blue-500" : "text-muted-foreground"}`}
-                                >
-                                  {calcSellRealizedKrw(e) >= 0 ? "+" : ""}₩
-                                  {Math.round(calcSellRealizedKrw(e)).toLocaleString()}
-                                </td>
-                                <td className="py-1 text-right">
-                                  <div className="flex justify-end gap-1">
-                                    <button
-                                      type="button"
-                                      className="rounded border px-1.5 py-0.5 text-[10px] hover:bg-muted"
-                                      onClick={() => handleListEdit(e)}
-                                    >
-                                      수정
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="rounded border px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10"
-                                      onClick={() => handleListDelete(e.id)}
-                                    >
-                                      삭제
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
+                            {listDatesDesc.map((d) => {
+                              const dayEnt = listByDate.get(d) ?? [];
+                              const dayTotal = listDailyRealized(d);
+                              return (
+                                <Fragment key={`list-${d}`}>
+                                  <tr className="border-b border-border/50 bg-muted/40">
+                                    <td colSpan={6} className="px-0 py-0">
+                                      <div className="flex flex-col gap-0.5 px-1 py-2 sm:flex-row sm:items-baseline sm:gap-3">
+                                        <span className="text-sm font-bold tabular-nums tracking-tight text-foreground sm:text-base">
+                                          {d}
+                                        </span>
+                                        <span className="text-[10px] text-muted-foreground sm:text-[11px]">
+                                          당일 합산 실현손익
+                                        </span>
+                                        <span
+                                          className={`text-xs font-semibold tabular-nums sm:text-sm ${dayTotal > 0 ? "text-red-500" : dayTotal < 0 ? "text-blue-500" : "text-muted-foreground"}`}
+                                        >
+                                          {dayTotal >= 0 ? "+" : ""}₩{Math.round(dayTotal).toLocaleString()}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  {dayEnt.map((e) => (
+                                    <tr key={e.id} className="border-b border-border/30 last:border-0">
+                                      <td className="py-1 pr-2">
+                                        {e.name} <span className="text-muted-foreground">({e.symbol})</span>
+                                      </td>
+                                      <td className="py-1 pr-2 text-right tabular-nums">{e.qty}</td>
+                                      <td className="py-1 pr-2 text-right tabular-nums">{e.sellPrice}</td>
+                                      <td className="py-1 pr-2 text-right tabular-nums">{e.avgPrice}</td>
+                                      <td
+                                        className={`py-1 pr-2 text-right tabular-nums font-semibold ${calcSellRealizedKrw(e) > 0 ? "text-red-500" : calcSellRealizedKrw(e) < 0 ? "text-blue-500" : "text-muted-foreground"}`}
+                                      >
+                                        {calcSellRealizedKrw(e) >= 0 ? "+" : ""}₩
+                                        {Math.round(calcSellRealizedKrw(e)).toLocaleString()}
+                                      </td>
+                                      <td className="py-1 text-right">
+                                        <div className="flex justify-end gap-1">
+                                          <button
+                                            type="button"
+                                            className="rounded border px-1.5 py-0.5 text-[10px] hover:bg-muted"
+                                            onClick={() => handleListEdit(e)}
+                                          >
+                                            수정
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="rounded border px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10"
+                                            onClick={() => handleListDelete(e.id)}
+                                          >
+                                            삭제
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </Fragment>
+                              );
+                            })}
                           </tbody>
                         </table>
                       ) : (
