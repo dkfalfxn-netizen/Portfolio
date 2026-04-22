@@ -918,6 +918,10 @@ export default function Home() {
   const [showSymbolPnl, setShowSymbolPnl] = useState<Record<string, boolean>>({});
   const [sellLogErrorByOwner, setSellLogErrorByOwner] = useState<Record<string, string>>({});
   const [sellLogOwnerForSection, setSellLogOwnerForSection] = useState<string>("김승주");
+  /** 실현손익 '기록 목록' 열람용 보유자(입력 폼의 보유자와 독립) */
+  const [sellLogListViewOwner, setSellLogListViewOwner] = useState<string>("김승주");
+  /** 기록 목록 UI 접힘(기본 접힘) */
+  const [sellLogListExpanded, setSellLogListExpanded] = useState(false);
   const [sellLogForm, setSellLogForm] = useState<Record<string, {
     date: string; symbol: string; name: string; qty: string;
     sellPrice: string; avgPrice: string; currency: "USD" | "EUR" | "KRW"; fxRate: string; note: string;
@@ -1159,6 +1163,12 @@ export default function Home() {
       setSellLogOwnerForSection(ownerNames[0]);
     }
   }, [ownerNames, sellLogOwnerForSection]);
+  useEffect(() => {
+    if (ownerNames.length === 0) return;
+    if (!ownerNames.includes(sellLogListViewOwner)) {
+      setSellLogListViewOwner(ownerNames[0]);
+    }
+  }, [ownerNames, sellLogListViewOwner]);
 
   const usdKrw = marketQuery.data?.usdKrw ?? 1350;
   const eurKrw = marketQuery.data?.eurKrw ?? 1450;
@@ -4197,6 +4207,8 @@ export default function Home() {
             <p className="mb-3 text-xs text-muted-foreground">종목 추가 아래에서 보유자별 매도 기록을 입력합니다.</p>
             {(() => {
               const owner = sellLogOwnerForSection;
+              const listViewOwner = sellLogListViewOwner;
+              const listLog = sellLog[listViewOwner] ?? [];
               const log = sellLog[owner] ?? [];
               const totalRealized = log.reduce((s, e) => s + calcSellRealizedKrw(e), 0);
               const symMap = new Map<string, { symbol: string; name: string; qty: number; costKrw: number; realizedKrw: number }>();
@@ -4410,26 +4422,49 @@ export default function Home() {
                   note: "", selectedOwners: [owner], ownerOverrides: {}, editingId: null,
                 });
               };
-              const handleEdit = (e: SellLogEntry) => {
-                setForm2({
-                  date: e.date,
-                  symbol: e.symbol,
-                  name: e.name,
-                  qty: String(e.qty),
-                  sellPrice: String(e.sellPrice),
-                  avgPrice: String(e.avgPrice),
-                  currency: e.currency,
-                  fxRate: String(e.fxRate),
-                  note: e.note ?? "",
-                  selectedOwners: [owner],
-                  ownerOverrides: {},
-                  editingId: e.id,
+              const handleListEdit = (e: SellLogEntry) => {
+                setSellLogOwnerForSection(listViewOwner);
+                setSellLogForm((prev) => {
+                  const base =
+                    prev[listViewOwner] ?? {
+                      date: new Date().toISOString().slice(0, 10),
+                      symbol: "",
+                      name: "",
+                      qty: "",
+                      sellPrice: "",
+                      avgPrice: "",
+                      currency: "USD" as const,
+                      fxRate: String(Math.round(usdKrw)),
+                      note: "",
+                      selectedOwners: [listViewOwner],
+                      ownerOverrides: {},
+                      editingId: null,
+                    };
+                  return {
+                    ...prev,
+                    [listViewOwner]: {
+                      ...base,
+                      date: e.date,
+                      symbol: e.symbol,
+                      name: e.name,
+                      qty: String(e.qty),
+                      sellPrice: String(e.sellPrice),
+                      avgPrice: String(e.avgPrice),
+                      currency: e.currency,
+                      fxRate: String(e.fxRate),
+                      note: e.note ?? "",
+                      selectedOwners: [listViewOwner],
+                      ownerOverrides: {},
+                      editingId: e.id,
+                    },
+                  };
                 });
+                setSellLogErrorByOwner((p) => ({ ...p, [listViewOwner]: "" }));
               };
-              const handleDelete = (id: string) => {
+              const handleListDelete = (id: string) => {
                 setSellLog((prev) => ({
                   ...prev,
-                  [owner]: (prev[owner] ?? []).filter((e) => e.id !== id),
+                  [listViewOwner]: (prev[listViewOwner] ?? []).filter((x) => x.id !== id),
                 }));
               };
               const preview = calcRealized(form);
@@ -4549,44 +4584,91 @@ export default function Home() {
                       )}
                     </div>
                   )}
-                  {log.length > 0 && (
-                    <div className="overflow-x-auto rounded-lg border bg-muted/20 p-2">
-                      <p className="mb-2 text-xs font-semibold">기록 목록</p>
-                      <table className="w-full text-[11px]">
-                        <thead>
-                          <tr className="border-b text-muted-foreground">
-                            <th className="py-1 pr-2 text-left font-medium">날짜</th>
-                            <th className="py-1 pr-2 text-left font-medium">종목</th>
-                            <th className="py-1 pr-2 text-right font-medium">수량</th>
-                            <th className="py-1 pr-2 text-right font-medium">매도가</th>
-                            <th className="py-1 pr-2 text-right font-medium">평단가</th>
-                            <th className="py-1 pr-2 text-right font-medium">실현손익</th>
-                            <th className="py-1 text-right font-medium">관리</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[...log].sort((a, b) => b.date.localeCompare(a.date)).map((e) => (
-                            <tr key={e.id} className="border-b border-border/30 last:border-0">
-                              <td className="py-1 pr-2 tabular-nums">{e.date}</td>
-                              <td className="py-1 pr-2">{e.name} <span className="text-muted-foreground">({e.symbol})</span></td>
-                              <td className="py-1 pr-2 text-right tabular-nums">{e.qty}</td>
-                              <td className="py-1 pr-2 text-right tabular-nums">{e.sellPrice}</td>
-                              <td className="py-1 pr-2 text-right tabular-nums">{e.avgPrice}</td>
-                              <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${calcSellRealizedKrw(e) > 0 ? "text-red-500" : calcSellRealizedKrw(e) < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                                {calcSellRealizedKrw(e) >= 0 ? "+" : ""}₩{Math.round(calcSellRealizedKrw(e)).toLocaleString()}
-                              </td>
-                              <td className="py-1 text-right">
-                                <div className="flex justify-end gap-1">
-                                  <button type="button" className="rounded border px-1.5 py-0.5 text-[10px] hover:bg-muted" onClick={() => handleEdit(e)}>수정</button>
-                                  <button type="button" className="rounded border px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10" onClick={() => handleDelete(e.id)}>삭제</button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                  <div className="overflow-x-auto rounded-lg border bg-muted/20 p-2">
+                    <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs font-semibold">기록 목록</p>
+                        <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                          <span>열람</span>
+                          <select
+                            className="max-w-[10rem] cursor-pointer rounded border bg-background px-2 py-0.5 text-xs"
+                            value={sellLogListViewOwner}
+                            onChange={(e) => setSellLogListViewOwner(e.target.value)}
+                          >
+                            {ownerNames.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <span className="text-[10px] text-muted-foreground tabular-nums">({listLog.length}건)</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="w-fit rounded border px-2 py-0.5 text-[10px] hover:bg-muted sm:ml-auto"
+                        onClick={() => setSellLogListExpanded((v) => !v)}
+                      >
+                        {sellLogListExpanded ? "접기 ▲" : "펼치기 ▼"}
+                      </button>
                     </div>
-                  )}
+                    {sellLogListExpanded ? (
+                      listLog.length > 0 ? (
+                        <table className="w-full text-[11px]">
+                          <thead>
+                            <tr className="border-b text-muted-foreground">
+                              <th className="py-1 pr-2 text-left font-medium">날짜</th>
+                              <th className="py-1 pr-2 text-left font-medium">종목</th>
+                              <th className="py-1 pr-2 text-right font-medium">수량</th>
+                              <th className="py-1 pr-2 text-right font-medium">매도가</th>
+                              <th className="py-1 pr-2 text-right font-medium">평단가</th>
+                              <th className="py-1 pr-2 text-right font-medium">실현손익</th>
+                              <th className="py-1 text-right font-medium">관리</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...listLog].sort((a, b) => b.date.localeCompare(a.date)).map((e) => (
+                              <tr key={e.id} className="border-b border-border/30 last:border-0">
+                                <td className="py-1 pr-2 tabular-nums">{e.date}</td>
+                                <td className="py-1 pr-2">
+                                  {e.name} <span className="text-muted-foreground">({e.symbol})</span>
+                                </td>
+                                <td className="py-1 pr-2 text-right tabular-nums">{e.qty}</td>
+                                <td className="py-1 pr-2 text-right tabular-nums">{e.sellPrice}</td>
+                                <td className="py-1 pr-2 text-right tabular-nums">{e.avgPrice}</td>
+                                <td
+                                  className={`py-1 pr-2 text-right tabular-nums font-semibold ${calcSellRealizedKrw(e) > 0 ? "text-red-500" : calcSellRealizedKrw(e) < 0 ? "text-blue-500" : "text-muted-foreground"}`}
+                                >
+                                  {calcSellRealizedKrw(e) >= 0 ? "+" : ""}₩
+                                  {Math.round(calcSellRealizedKrw(e)).toLocaleString()}
+                                </td>
+                                <td className="py-1 text-right">
+                                  <div className="flex justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      className="rounded border px-1.5 py-0.5 text-[10px] hover:bg-muted"
+                                      onClick={() => handleListEdit(e)}
+                                    >
+                                      수정
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="rounded border px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10"
+                                      onClick={() => handleListDelete(e.id)}
+                                    >
+                                      삭제
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground">이 보유자의 매도 기록이 없습니다.</p>
+                      )
+                    ) : null}
+                  </div>
                 </div>
               );
             })()}
