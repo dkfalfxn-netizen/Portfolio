@@ -5,6 +5,7 @@
   "crons": [
     { "path": "/api/alert/check", "schedule": "0 7 * * *" },
     { "path": "/api/cron/liquidity-briefing", "schedule": "0 0 * * *" },
+    { "path": "/api/cron/macro-fed-briefing", "schedule": "15 0 * * *" },
     { "path": "/api/cron/analyze-market", "schedule": "0 21 * * *" },
     { "path": "/api/cron/kcif-pdf-summary", "schedule": "1 9 * * *" },
     { "path": "/api/alert/kakao-price-move?slot=0100", "schedule": "0 16 * * *" },

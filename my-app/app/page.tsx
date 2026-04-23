@@ -92,6 +92,16 @@ type LiquidityHistoryResponse = {
   rows: LiquidityHistoryRow[];
 };
 
+type FedBriefApiResponse = {
+  ok: boolean;
+  summary: string | null;
+  reportDate: string | null;
+  error?: string;
+  hint?: string;
+  message?: string;
+  titles?: string[];
+};
+
 /** 로컬 저장 키 — v1에서 한 번만 마이그레이션 후 v2만 사용 */
 const STORAGE_KEY = "portfolio_positions_v2";
 const LEGACY_POSITIONS_STORAGE_KEY = "portfolio_positions_v1";
@@ -1213,6 +1223,27 @@ export default function Home() {
     staleTime: 1000 * 60 * 60,
     refetchInterval: 1000 * 60 * 60,
   });
+
+  const fedBriefQuery = useQuery<FedBriefApiResponse>({
+    queryKey: ["macro-fed-brief"],
+    queryFn: async () => {
+      const res = await fetch("/api/macro/fed-brief");
+      return res.json() as Promise<FedBriefApiResponse>;
+    },
+    staleTime: 1000 * 60 * 30,
+  });
+
+  const fedNote = useMemo(() => {
+    if (fedBriefQuery.isError) return { tone: "warn" as const, text: "연준·금리 뉴스 요약 API를 불러오지 못했습니다." };
+    const d = fedBriefQuery.data;
+    if (!d) return null;
+    if (d.ok === false) {
+      const t = [d.error, d.hint].filter(Boolean).join(" ");
+      return t ? { tone: "warn" as const, text: t } : null;
+    }
+    if (d.summary) return null;
+    return { tone: "info" as const, text: d.message ?? "아직 요약이 없습니다." };
+  }, [fedBriefQuery.isError, fedBriefQuery.data]);
 
   const signalBySymbol = useMemo(() => {
     const out = new Map<
@@ -3117,6 +3148,10 @@ export default function Home() {
             isLoading={liquidityHistoryQuery.isLoading}
             isError={!!liquidityHistoryQuery.error}
             rows={liquidityHistoryQuery.data?.rows ?? []}
+            fedLoading={fedBriefQuery.isLoading}
+            fedSummary={fedBriefQuery.data?.ok === true ? fedBriefQuery.data.summary : null}
+            fedReportDate={fedBriefQuery.data?.ok === true ? fedBriefQuery.data.reportDate ?? null : null}
+            fedNote={fedNote}
           />
           </div>
 

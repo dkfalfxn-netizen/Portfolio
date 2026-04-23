@@ -135,10 +135,34 @@ type LiquiditySnapshot = {
 };
 
 function fallbackAiSummary(v: LiquiditySnapshot): string {
-  const liqDir = v.netLiquidityPct !== null && v.netLiquidityPct >= 0 ? "유동성은 확대" : "유동성은 축소";
-  const riskDir = v.vixPct !== null && v.vixPct <= 0 ? "리스크 선호는 개선" : "리스크 경계는 유지";
-  const rateDir = v.us10yPct !== null && v.us10yPct > 0 ? "금리 상승 압력은 부담" : "금리 부담은 완화";
-  return `${liqDir} 흐름입니다. ${riskDir}되는 가운데 ${rateDir}되는 구간으로 보입니다.`;
+  const liqDir =
+    v.netLiquidityPct !== null
+      ? v.netLiquidityPct >= 0
+        ? "순유동성은 전일 대비 확대 흐름입니다."
+        : "순유동성은 전일 대비 축소 흐름입니다."
+      : "순유동성의 전일 대비 변화는 산출이 어렵습니다.";
+  const fx =
+    v.dxyPct !== null
+      ? `달러 지수(DXY)는 전일 대비 ${v.dxyPct >= 0 ? "상승" : "하락"}한 모습입니다.`
+      : "달러 지수(DXY) 변화는 직전 종가가 없어 요약이 제한됩니다.";
+  const us10yOne =
+    v.us10yPct === null
+      ? null
+      : v.us10yPct > 0
+        ? "미국 10년 금리는 전일 대비 상승했습니다."
+        : v.us10yPct < 0
+          ? "미국 10년 금리는 전일 대비 하락했습니다."
+          : "미국 10년 금리는 전일 대비 큰 변동이 없었습니다.";
+  const hyOne =
+    v.hySpreadDiffBp !== null
+      ? `하이일드 대비 IG 스프레드는 전일 대비 약 ${v.hySpreadDiffBp > 0 ? "넓어진" : "줄어든"} 방향입니다.`
+      : null;
+  const rate = [us10yOne, hyOne].filter(Boolean).join(" ") || "미 10년 금리·신용지표는 일부 누락이 있을 수 있습니다.";
+  const risk =
+    v.vixPct !== null
+      ? `VIX는 전일 대비 ${v.vixPct <= 0 ? "내려 권리스크심이 일부 완화된" : "올라 변동성 경계가 강한"} 쪽으로 읽힐 수 있습니다.`
+      : "VIX는 참고용입니다.";
+  return [liqDir, fx, rate, risk].join(" ");
 }
 
 async function generateAiSummary(snapshot: LiquiditySnapshot): Promise<string> {
@@ -150,12 +174,12 @@ async function generateAiSummary(snapshot: LiquiditySnapshot): Promise<string> {
     const completion = await client.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.2,
-      max_tokens: 140,
+      max_tokens: 520,
       messages: [
         {
           role: "system",
           content:
-            "너는 매크로 데일리 브리핑 작성자다. 한국어로 1~2문장만 작성하고, 과장 없이 지표 변화 중심으로 요약한다.",
+            "너는 매크로 데일리 브리핑 작성자다. 한국어로 정확히 3~4문장(문장 끝에 마침표)으로만 작성한다. 과장·투자 권유·단정적 예측은 피하고, 제시된 지표의 방향(전일 대비)만 간단히 엮는다. 마지막 문장에 한해 시장 ‘해석’을 아주 온건하게 덧붙일 수 있다.",
         },
         {
           role: "user",
@@ -173,7 +197,7 @@ async function generateAiSummary(snapshot: LiquiditySnapshot): Promise<string> {
       ],
     });
     const text = completion.choices[0]?.message?.content?.trim();
-    return text && text.length > 0 ? text.slice(0, 220) : fallbackAiSummary(snapshot);
+    return text && text.length > 0 ? text.slice(0, 1200) : fallbackAiSummary(snapshot);
   } catch {
     return fallbackAiSummary(snapshot);
   }
@@ -305,7 +329,7 @@ async function run() {
     "🌊 <b>오전 9시 유동성 브리핑</b>",
     `기준일: ${escapeHtml(date)}`,
     "",
-    `<b>AI 한줄 코멘트</b> ${escapeHtml(aiSummary)}`,
+    `<b>AI 요약</b> ${escapeHtml(aiSummary)}`,
     "",
     "<i>참고: 본 브리핑은 투자 권유가 아닌 시장 모니터링용 요약입니다.</i>",
   ].join("\n");

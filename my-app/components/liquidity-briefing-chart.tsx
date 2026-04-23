@@ -91,8 +91,10 @@ export function LiquidityBriefingChart({ rows }: Props) {
       </div>
 
       <div className="rounded-lg border bg-muted/20 p-3">
-        <p className="mb-1 text-xs text-muted-foreground">AI 한두 문장 요약</p>
-        <p className="text-sm">{last.aiSummary || "AI 요약이 아직 없습니다."}</p>
+        <p className="mb-1 text-xs text-muted-foreground">AI 요약</p>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">
+          {last.aiSummary || "AI 요약이 아직 없습니다."}
+        </p>
       </div>
     </div>
   );
