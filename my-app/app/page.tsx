@@ -50,8 +50,6 @@ import {
 
 const DEFAULT_OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율", "퇴직연금"] as const;
 type OwnerName = string;
-type AppView = "dashboard" | "signal" | "orders" | "backtest" | "strategy" | "system";
-
 type Position = {
   symbol: string;
   name: string;
@@ -1026,11 +1024,33 @@ export default function Home() {
   });
   const [addPositionError, setAddPositionError] = useState("");
 
-  const [appView, setAppView] = useState<AppView>("dashboard");
+  /** 상단 내비 활성 항목(스크롤 앵커 id 또는 dashboard) */
+  const [activeTopNav, setActiveTopNav] = useState<string>("dashboard");
+  const holdingsNavRef = useRef<HTMLDivElement>(null);
+  const [holdingsNavOpen, setHoldingsNavOpen] = useState(false);
 
-  /** 다른 탭에 있을 때는 대시보드로 전환한 뒤 해당 섹션으로 스크롤 */
+  useEffect(() => {
+    if (!holdingsNavOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (holdingsNavRef.current?.contains(e.target as Node)) return;
+      setHoldingsNavOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [holdingsNavOpen]);
+
+  const goDashboardTop = useCallback(() => {
+    setActiveTopNav("dashboard");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.getElementById("section-dashboard-top")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+  }, []);
+
   const goDashboardSection = useCallback((elementId: string) => {
-    setAppView("dashboard");
+    setActiveTopNav(elementId);
+    setHoldingsNavOpen(false);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         document.getElementById(elementId)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2695,107 +2715,128 @@ export default function Home() {
               USD/KRW {usdKrw.toLocaleString()} · EUR/KRW {eurKrw.toLocaleString()}
             </span>
           </div>
-          <nav className="mt-2 flex flex-wrap gap-0.5 border-t border-slate-800/80 pt-2" role="tablist" aria-label="메인 메뉴">
-            {(
-              [
-                { id: "dashboard" as const, label: "대시보드" },
-                { id: "signal" as const, label: "시그널" },
-                { id: "orders" as const, label: "주문내역" },
-                { id: "backtest" as const, label: "백테스트" },
-                { id: "strategy" as const, label: "전략 설정" },
-                { id: "system" as const, label: "시스템" },
-              ] as const
-            ).map((t) => (
+          <nav
+            className="mt-2 flex max-w-full gap-0.5 overflow-x-auto border-t border-slate-800/80 pt-2 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1"
+            role="navigation"
+            aria-label="포트폴리오"
+          >
+            <div className="flex min-w-min flex-nowrap items-stretch gap-0.5">
               <button
-                key={t.id}
                 type="button"
-                role="tab"
-                aria-selected={appView === t.id}
-                onClick={() => setAppView(t.id)}
+                onClick={goDashboardTop}
                 className={cn(
-                  "relative rounded-t-md px-3 py-2 text-xs font-medium transition-colors sm:px-4 sm:text-sm",
-                  appView === t.id
-                    ? "text-white after:absolute after:bottom-0 after:left-2 after:right-2 after:h-[3px] after:rounded-sm after:bg-sky-500"
+                  "relative shrink-0 rounded-t-md px-2.5 py-1.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm",
+                  activeTopNav === "dashboard"
+                    ? "text-white after:absolute after:bottom-0 after:left-1.5 after:right-1.5 after:h-[3px] after:rounded-sm after:bg-sky-500"
                     : "text-slate-400 hover:text-slate-200",
                 )}
               >
-                {t.label}
+                대시보드
               </button>
-            ))}
+              {(
+                [
+                  { id: "section-trend" as const, icon: "📈", label: "일별 자산 추이" },
+                ] as const
+              ).map(({ id, icon, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => goDashboardSection(id)}
+                  className={cn(
+                    "relative flex shrink-0 items-center gap-1 rounded-t-md px-2.5 py-1.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm",
+                    activeTopNav === id
+                      ? "text-white after:absolute after:bottom-0 after:left-1.5 after:right-1.5 after:h-[3px] after:rounded-sm after:bg-sky-500"
+                      : "text-slate-400 hover:text-slate-200",
+                  )}
+                >
+                  <span className="leading-none">{icon}</span>
+                  <span className="whitespace-nowrap">{label}</span>
+                </button>
+              ))}
+              <div className="relative shrink-0" ref={holdingsNavRef}>
+                <button
+                  type="button"
+                  aria-expanded={holdingsNavOpen}
+                  onClick={() => setHoldingsNavOpen((o) => !o)}
+                  className={cn(
+                    "relative flex w-full min-w-0 items-center gap-0.5 rounded-t-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors sm:px-3 sm:text-sm",
+                    activeTopNav === "section-holdings" || activeTopNav.startsWith("owner-")
+                      ? "text-white after:absolute after:bottom-0 after:left-1.5 after:right-1.5 after:h-[3px] after:rounded-sm after:bg-sky-500"
+                      : "text-slate-400 hover:text-slate-200",
+                  )}
+                >
+                  <span>📋</span>
+                  <span className="whitespace-nowrap">보유 종목</span>
+                  <span className="text-[10px] text-slate-500" aria-hidden>
+                    {holdingsNavOpen ? "▴" : "▾"}
+                  </span>
+                </button>
+                {holdingsNavOpen ? (
+                  <div
+                    className="absolute left-0 top-full z-50 mt-1 min-w-[11rem] rounded-md border border-slate-600 bg-[#0f172a] py-1 shadow-lg ring-1 ring-slate-800/60"
+                    role="menu"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-slate-800/80"
+                      onClick={() => goDashboardSection("section-holdings")}
+                    >
+                      보유·전체
+                    </button>
+                    {ownerNames.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        role="menuitem"
+                        className="w-full px-3 py-1.5 pl-5 text-left text-xs text-slate-400 hover:bg-slate-800/80 hover:text-slate-200"
+                        onClick={() => goDashboardSection(`owner-${name}`)}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              {(
+                [
+                  { id: "section-add" as const, icon: "➕", label: "종목 추가" },
+                  { id: "section-realized" as const, icon: "💰", label: "실현손익 입력" },
+                  { id: "section-rebalance" as const, icon: "⚖️", label: "리밸런싱 계산기" },
+                  { id: "section-alert" as const, icon: "🔔", label: "이메일 알림" },
+                  { id: "section-liquidity" as const, icon: "🌊", label: "유동성 브리핑" },
+                  { id: "section-watchlist" as const, icon: "⭐", label: "관심종목" },
+                  { id: "section-telegram" as const, icon: "📲", label: "텔레그램" },
+                  { id: "section-simulator" as const, icon: "🧮", label: "가상 매수" },
+                  { id: "section-sync" as const, icon: "🔑", label: "동기화 키" },
+                ] as const
+              ).map(({ id, icon, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => goDashboardSection(id)}
+                  className={cn(
+                    "relative flex shrink-0 items-center gap-1 rounded-t-md px-2.5 py-1.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm",
+                    activeTopNav === id
+                      ? "text-white after:absolute after:bottom-0 after:left-1.5 after:right-1.5 after:h-[3px] after:rounded-sm after:bg-sky-500"
+                      : "text-slate-400 hover:text-slate-200",
+                  )}
+                >
+                  <span className="leading-none">{icon}</span>
+                  <span className="whitespace-nowrap">{label}</span>
+                </button>
+              ))}
+            </div>
           </nav>
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1600px] gap-3 px-2 py-4 sm:gap-4 sm:py-6 md:px-4">
-        {appView === "dashboard" ? (
-        <aside className="hidden w-48 shrink-0 md:block">
-          <div className="sticky top-[104px] rounded-2xl border bg-card p-3 shadow-sm">
-            <h2 className="mb-3 px-1 text-sm font-semibold">포트폴리오</h2>
-            <nav className="space-y-0.5 text-sm">
-              {([
-                { id: "section-trend",     icon: "📈", label: "일별 자산 추이" },
-              ] as const).map(({ id, icon, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => goDashboardSection(id)}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
-                >
-                  <span className="leading-none">{icon}</span>
-                  <span>{label}</span>
-                </button>
-              ))}
-              {/* 보유 종목 + 하위 메뉴 */}
-              <button
-                type="button"
-                onClick={() => goDashboardSection("section-holdings")}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition-colors hover:bg-muted"
-              >
-                <span>📋</span>
-                <span>보유 종목</span>
-              </button>
-              <div className="ml-4 space-y-0.5 border-l border-border/50 pl-2">
-                {ownerNames.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => goDashboardSection(`owner-${name}`)}
-                    className="flex w-full cursor-pointer items-center rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-              {([
-                { id: "section-add",       icon: "➕", label: "종목 추가" },
-                { id: "section-realized",  icon: "💰", label: "실현손익 입력" },
-                { id: "section-rebalance", icon: "⚖️", label: "리밸런싱 계산기" },
-                { id: "section-alert",     icon: "🔔", label: "이메일 알림" },
-                { id: "section-liquidity", icon: "🌊", label: "유동성 브리핑" },
-                { id: "section-watchlist", icon: "⭐", label: "관심종목" },
-                { id: "section-telegram",  icon: "📲", label: "텔레그램" },
-                { id: "section-simulator", icon: "🧮", label: "가상 매수" },
-                { id: "section-sync",      icon: "🔑", label: "동기화 키" },
-              ] as const).map(({ id, icon, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => goDashboardSection(id)}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted"
-                >
-                  <span className="leading-none">{icon}</span>
-                  <span>{label}</span>
-                </button>
-              ))}
-            </nav>
-          </div>
-        </aside>
-        ) : null}
-
-        <main className="min-w-0 flex-1 space-y-4 sm:space-y-6">
-          {appView === "dashboard" ? (
-          <>
-          <header className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-3 sm:px-4">
+      <div className="mx-auto w-full max-w-[1600px] px-2 py-4 sm:py-6 md:px-4">
+        <main className="min-w-0 space-y-4 sm:space-y-6">
+          <header
+            id="section-dashboard-top"
+            className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-3 sm:px-4"
+          >
             <p className="text-sm font-medium text-slate-200">가족(담당자)별·계좌별 자산과 종목별 수익률을 한눈에 확인합니다.</p>
             <p className="mt-1 text-[11px] text-slate-500">
               환율 USD/KRW: {usdKrw.toLocaleString()} · EUR/KRW: {eurKrw.toLocaleString()} · 시세 갱신:{" "}
@@ -2804,53 +2845,6 @@ export default function Home() {
                 : "대기 중"}
             </p>
           </header>
-
-          {/* 모바일 전용 빠른 이동 메뉴 (정보/순서/기능은 PC와 동일) */}
-          <section className="md:hidden">
-            <div className="rounded-xl border bg-card p-2 shadow-sm">
-              <div className="mb-2 overflow-x-auto">
-                <div className="flex min-w-max items-center gap-1.5">
-                  {([
-                    { id: "section-trend", icon: "📈", label: "일별 자산 추이" },
-                    { id: "section-holdings", icon: "📋", label: "보유 종목" },
-                    { id: "section-add", icon: "➕", label: "종목 추가" },
-                    { id: "section-realized", icon: "💰", label: "실현손익 입력" },
-                    { id: "section-rebalance", icon: "⚖️", label: "리밸런싱" },
-                    { id: "section-alert", icon: "🔔", label: "이메일 알림" },
-                    { id: "section-liquidity", icon: "🌊", label: "유동성 브리핑" },
-                    { id: "section-watchlist", icon: "⭐", label: "관심종목" },
-                    { id: "section-telegram", icon: "📲", label: "텔레그램" },
-                    { id: "section-simulator", icon: "🧮", label: "가상 매수" },
-                    { id: "section-sync", icon: "🔑", label: "동기화 키" },
-                  ] as const).map(({ id, icon, label }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => goDashboardSection(id)}
-                      className="shrink-0 rounded-md border bg-background px-2.5 py-1.5 text-xs"
-                    >
-                      <span className="mr-1">{icon}</span>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <div className="flex min-w-max items-center gap-1.5">
-                  {ownerNames.map((name) => (
-                    <button
-                      key={name}
-                      type="button"
-                      onClick={() => goDashboardSection(`owner-${name}`)}
-                      className="shrink-0 rounded-md border bg-background px-2.5 py-1 text-xs text-muted-foreground"
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </section>
 
           <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {(
@@ -2931,6 +2925,101 @@ export default function Home() {
             </div>
           </section>
           <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
+
+          <section id="section-technical-signal" className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold text-slate-100">기술 시그널</h2>
+              {historyQuery.isLoading && (
+                <span className="text-[11px] text-slate-400">일봉 로드 중…</span>
+              )}
+              {historyQuery.isError && (
+                <span className="text-[11px] text-rose-400">데이터 조회 실패</span>
+              )}
+            </div>
+            <p className="mb-3 text-xs text-slate-400">
+              일봉(김승주 보유 종목) 기반 MA·RSI·BB·거래량 요약. 상세는 &quot;차트·근거&quot;와「관심종목」을
+              이용하세요.
+            </p>
+            {enrichedPositions.filter((p) => p.owner === "김승주").length === 0 ? (
+              <p className="py-8 text-center text-sm text-slate-500">김승주 보유 종목이 없습니다.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-700 text-slate-400">
+                      <th className="py-2 pr-2">종목명</th>
+                      <th className="py-2 pr-2">티커</th>
+                      <th className="py-2 pr-2">시장</th>
+                      <th className="py-2 text-right">시그널</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {enrichedPositions
+                      .filter((p) => p.owner === "김승주")
+                      .map((position) => {
+                        const s = signalBySymbol.get(position.symbol);
+                        const mkt =
+                          position.currency === "KRW"
+                            ? "국내"
+                            : position.currency === "USD"
+                              ? "미국"
+                              : "유럽";
+                        const color =
+                          s?.final === "BUY"
+                            ? "text-red-400"
+                            : s?.final === "SELL"
+                              ? "text-sky-400"
+                              : "text-slate-300";
+                        return (
+                          <tr key={`sig-${position.sourceIndex}`} className="border-b border-slate-800/80">
+                            <td className="py-2 pr-2 font-medium">{position.name}</td>
+                            <td className="py-2 pr-2 text-slate-400">{position.symbol}</td>
+                            <td className="py-2 pr-2 text-slate-500">{mkt}</td>
+                            <td className="py-2 text-right">
+                              {historyQuery.isLoading ? (
+                                <span className="text-slate-500">로드 중…</span>
+                              ) : historyQuery.isError ? (
+                                <span className="text-rose-400/70">조회 실패</span>
+                              ) : (
+                                <>
+                                  <span className={`font-semibold ${color}`}>
+                                    {s?.final ?? "HOLD"}
+                                  </span>
+                                  {s ? (
+                                    <p className="text-[10px] text-slate-500">
+                                      MA:{s.ma} RSI:{s.rsi} BB:{s.bb} VOL:{s.vol}
+                                    </p>
+                                  ) : null}
+                                  <button
+                                    type="button"
+                                    className="mt-1 text-[10px] text-sky-400 underline-offset-2 hover:underline"
+                                    onClick={() =>
+                                      setSignalDetailTarget({ symbol: position.symbol, name: position.name })
+                                    }
+                                  >
+                                    차트·근거
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="mt-4 text-center text-xs text-slate-500">
+              <button
+                type="button"
+                className="text-sky-400 underline"
+                onClick={() => goDashboardSection("section-watchlist")}
+              >
+                관심종목
+              </button>
+              으로 이동
+            </p>
+          </section>
 
           <LiquiditySection
             isLoading={liquidityHistoryQuery.isLoading}
@@ -5406,129 +5495,6 @@ export default function Home() {
               ) : null}
             </CardContent>
           </Card>
-          </>
-          ) : null}
-
-          {appView === "signal" ? (
-            <div className="space-y-6">
-              <section className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-4">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <h2 className="text-lg font-semibold text-slate-100">기술 시그널</h2>
-                  {historyQuery.isLoading && (
-                    <span className="text-[11px] text-slate-400">일봉 로드 중…</span>
-                  )}
-                  {historyQuery.isError && (
-                    <span className="text-[11px] text-rose-400">데이터 조회 실패</span>
-                  )}
-                </div>
-                <p className="mb-3 text-xs text-slate-400">
-                  일봉(김승주 보유 종목) 기반 MA·RSI·BB·거래량 요약. 상세는 &quot;차트·근거&quot;와
-                  대시보드「관심종목」을 이용하세요.
-                </p>
-                {enrichedPositions.filter((p) => p.owner === "김승주").length === 0 ? (
-                  <p className="py-8 text-center text-sm text-slate-500">김승주 보유 종목이 없습니다.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-700 text-slate-400">
-                          <th className="py-2 pr-2">종목명</th>
-                          <th className="py-2 pr-2">티커</th>
-                          <th className="py-2 pr-2">시장</th>
-                          <th className="py-2 text-right">시그널</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {enrichedPositions
-                          .filter((p) => p.owner === "김승주")
-                          .map((position) => {
-                            const s = signalBySymbol.get(position.symbol);
-                            const mkt =
-                              position.currency === "KRW"
-                                ? "국내"
-                                : position.currency === "USD"
-                                  ? "미국"
-                                  : "유럽";
-                            const color =
-                              s?.final === "BUY"
-                                ? "text-red-400"
-                                : s?.final === "SELL"
-                                  ? "text-sky-400"
-                                  : "text-slate-300";
-                            return (
-                              <tr key={`sig-${position.sourceIndex}`} className="border-b border-slate-800/80">
-                                <td className="py-2 pr-2 font-medium">{position.name}</td>
-                                <td className="py-2 pr-2 text-slate-400">{position.symbol}</td>
-                                <td className="py-2 pr-2 text-slate-500">{mkt}</td>
-                                <td className="py-2 text-right">
-                                  {historyQuery.isLoading ? (
-                                    <span className="text-slate-500">로드 중…</span>
-                                  ) : historyQuery.isError ? (
-                                    <span className="text-rose-400/70">조회 실패</span>
-                                  ) : (
-                                    <>
-                                      <span className={`font-semibold ${color}`}>
-                                        {s?.final ?? "HOLD"}
-                                      </span>
-                                      {s ? (
-                                        <p className="text-[10px] text-slate-500">
-                                          MA:{s.ma} RSI:{s.rsi} BB:{s.bb} VOL:{s.vol}
-                                        </p>
-                                      ) : null}
-                                      <button
-                                        type="button"
-                                        className="mt-1 text-[10px] text-sky-400 underline-offset-2 hover:underline"
-                                        onClick={() =>
-                                          setSignalDetailTarget({ symbol: position.symbol, name: position.name })
-                                        }
-                                      >
-                                        차트·근거
-                                      </button>
-                                    </>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
-              <p className="text-center text-xs text-slate-500">
-                <button
-                  type="button"
-                  className="text-sky-400 underline"
-                  onClick={() => goDashboardSection("section-watchlist")}
-                >
-                  대시보드 → 관심종목
-                </button>
-                으로 이동
-              </p>
-            </div>
-          ) : null}
-
-          {appView === "orders" || appView === "backtest" || appView === "strategy" ? (
-            <div className="rounded-xl border border-dashed border-slate-600 bg-slate-900/30 px-4 py-16 text-center">
-              <p className="text-sm text-slate-400">이 메뉴는 아직 연결되지 않았습니다.</p>
-            </div>
-          ) : null}
-
-          {appView === "system" ? (
-            <div className="space-y-4">
-              <p className="text-sm text-slate-400">
-                동기화·백업·로컬 변경 상태는 <strong className="text-slate-200">대시보드</strong> 맨
-                아래「동기화·백업」에서 확인·설정하세요.
-              </p>
-              <button
-                type="button"
-                className="rounded-lg border border-slate-600 bg-slate-800/60 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
-                onClick={() => goDashboardSection("section-sync")}
-              >
-                대시보드 → 동기화·백업으로 이동
-              </button>
-            </div>
-          ) : null}
 
         </main>
       </div>
