@@ -1352,13 +1352,6 @@ export default function Home() {
 
     return [
       {
-        label: "총 자산 (원화)",
-        value: `₩${Math.round(totalValue).toLocaleString()}`,
-        sub: `약 ${formatKrwApproxAsUsd(totalValue, usdKrw)} · 주식 ₩${Math.round(stockValue).toLocaleString()} · 현금 ₩${Math.round(totalCashKrw).toLocaleString()}`,
-        change: "",
-        positive: null as boolean | null,
-      },
-      {
         label: "전체 수익률 (원화 기준)",
         value: `${totalReturnPct >= 0 ? "+" : ""}${totalReturnPct.toFixed(2)}%`,
         sub: "투입(주식 원가+현금) 대비 평가",
@@ -1375,17 +1368,17 @@ export default function Home() {
     ];
   }, [enrichedPositions, totalCashKrw, usdKrw]);
 
-  /** 상단 4칸 요약(미니 KIS 대시보드 느낌) */
+  /** 상단 3칸 요약(미니 KIS 대시보드) — 보유 수는 티커 기준 유니크 */
   const kisMetrics = useMemo(() => {
     const stockValue = enrichedPositions.reduce((s, p) => s + p.valueKrw, 0);
     const totalAppraisal = stockValue + totalCashKrw;
+    const uniqueTickers = new Set(positions.map((p) => p.symbol.trim().toUpperCase()));
     return {
       totalAppraisal,
       deposit: totalCashKrw,
-      buyable: totalCashKrw,
-      positionCount: positions.length,
+      uniqueTickerCount: uniqueTickers.size,
     };
-  }, [enrichedPositions, totalCashKrw, positions.length]);
+  }, [enrichedPositions, totalCashKrw, positions]);
 
   const allocationByOwner = useMemo(() => {
     return ownerNames.map((ownerName) => {
@@ -2934,67 +2927,70 @@ export default function Home() {
             )}
             aria-hidden={activeTopNav !== "dashboard"}
           >
-          <header
-            id="section-dashboard-top"
-            className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-3 sm:px-4"
-          >
-            <p className="text-sm font-medium text-slate-200">가족(담당자)별·계좌별 자산과 종목별 수익률을 한눈에 확인합니다.</p>
-            <p className="mt-1 text-[11px] text-slate-500">
-              환율 USD/KRW: {usdKrw.toLocaleString()} · EUR/KRW: {eurKrw.toLocaleString()} · 시세 갱신:{" "}
-              {marketQuery.data?.fetchedAt
-                ? new Date(marketQuery.data.fetchedAt).toLocaleTimeString()
-                : "대기 중"}
-            </p>
-          </header>
+          <div className="space-y-4 font-sans sm:space-y-6">
+            <header
+              id="section-dashboard-top"
+              className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-3 sm:px-4"
+            >
+              <p className="text-sm font-bold tabular-nums text-white sm:text-base">
+                가족(담당자)별·계좌별 자산과 종목별 수익률을 한눈에 확인합니다.
+              </p>
+              <p className="mt-0.5 text-[10px] font-medium text-slate-500 sm:text-[11px]">
+                환율 USD/KRW: {usdKrw.toLocaleString()} · EUR/KRW: {eurKrw.toLocaleString()} · 시세 갱신:{" "}
+                {marketQuery.data?.fetchedAt
+                  ? new Date(marketQuery.data.fetchedAt).toLocaleTimeString()
+                  : "대기 중"}
+              </p>
+            </header>
 
-          <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {(
-              [
-                { key: "appr", label: "총 평가금액", sub: "실시간", value: `₩${Math.round(kisMetrics.totalAppraisal).toLocaleString()}` },
-                { key: "dep", label: "예수금(현금)", sub: "USD·KRW 합산", value: `₩${Math.round(kisMetrics.deposit).toLocaleString()}` },
-                { key: "buy", label: "매수 가능(참고)", sub: "현금과 동일", value: `₩${Math.round(kisMetrics.buyable).toLocaleString()}` },
-                { key: "cnt", label: "보유 종목 수", sub: "포지션 행", value: String(kisMetrics.positionCount) },
-              ] as const
-            ).map((c) => (
-              <div
-                key={c.key}
-                className="rounded-lg border border-slate-700/80 bg-slate-800/60 p-3 shadow-sm sm:p-4"
-              >
-                <p className="text-[11px] font-medium text-slate-400 sm:text-xs">{c.label}</p>
-                <p className="mt-1 text-lg font-bold tabular-nums text-white sm:text-xl">{c.value}</p>
-                <p className="mt-0.5 text-[10px] text-slate-500 sm:text-[11px]">{c.sub}</p>
-              </div>
-            ))}
-          </section>
+            <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {(
+                [
+                  { key: "appr", label: "총 평가금액", sub: "실시간", value: `₩${Math.round(kisMetrics.totalAppraisal).toLocaleString()}` },
+                  { key: "dep", label: "예수금(현금)", sub: "USD·KRW 합산", value: `₩${Math.round(kisMetrics.deposit).toLocaleString()}` },
+                  { key: "cnt", label: "보유 종목 수", sub: "고유 티커", value: String(kisMetrics.uniqueTickerCount) },
+                ] as const
+              ).map((c) => (
+                <div
+                  key={c.key}
+                  className="rounded-lg border border-slate-700/80 bg-slate-800/60 p-3 shadow-sm sm:p-4"
+                >
+                  <p className="text-[11px] font-medium text-slate-400 sm:text-xs">{c.label}</p>
+                  <p className="mt-1 text-lg font-bold tabular-nums text-white sm:text-xl">{c.value}</p>
+                  <p className="mt-0.5 text-[10px] text-slate-500 sm:text-[11px]">{c.sub}</p>
+                </div>
+              ))}
+            </section>
 
-          <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            {summaryCards.map((card) => (
-              <Card key={card.label} className="border-slate-700/60 bg-slate-800/40">
-                <CardHeader>
-                  <CardDescription className="text-slate-400">{card.label}</CardDescription>
-                  <CardTitle
-                    className={`text-2xl ${
+            <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {summaryCards.map((card) => (
+                <div
+                  key={card.label}
+                  className="rounded-lg border border-slate-700/80 bg-slate-800/60 p-3 shadow-sm sm:p-4"
+                >
+                  <p className="text-[11px] font-medium text-slate-400 sm:text-xs">{card.label}</p>
+                  <p
+                    className={cn(
+                      "mt-1 text-lg font-bold tabular-nums sm:text-xl",
                       card.positive === true
                         ? "text-red-400"
                         : card.positive === false
                           ? "text-sky-400"
-                          : "text-slate-100"
-                    }`}
+                          : "text-white",
+                    )}
                   >
                     {card.value}
-                  </CardTitle>
+                  </p>
                   {card.sub ? (
-                    <p className="text-xs text-slate-500">{card.sub}</p>
+                    <p className="mt-0.5 text-[10px] text-slate-500 sm:text-[11px]">{card.sub}</p>
                   ) : null}
-                </CardHeader>
-                {card.change ? (
-                  <CardContent className="pt-0">
-                    <p className="text-sm font-medium text-red-400">{card.change}</p>
-                  </CardContent>
-                ) : null}
-              </Card>
-            ))}
-          </section>
+                  {card.change ? (
+                    <p className="mt-0.5 text-[10px] font-medium text-red-400 sm:text-[11px]">{card.change}</p>
+                  ) : null}
+                </div>
+              ))}
+            </section>
+          </div>
 
           <section className="space-y-4">
             <h2 className="font-semibold">포트폴리오 비중 (가족·퇴직연금)</h2>
