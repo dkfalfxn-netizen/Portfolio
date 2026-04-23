@@ -1041,21 +1041,11 @@ export default function Home() {
 
   const goDashboardTop = useCallback(() => {
     setActiveTopNav("dashboard");
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        document.getElementById("section-dashboard-top")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-    });
   }, []);
 
   const goDashboardSection = useCallback((elementId: string) => {
     setActiveTopNav(elementId);
     setHoldingsNavOpen(false);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        document.getElementById(elementId)?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-    });
   }, []);
 
   useEffect(() => {
@@ -2699,6 +2689,22 @@ export default function Home() {
     window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
   }
 
+  const holdingsViewOwner = activeTopNav.startsWith("owner-")
+    ? activeTopNav.slice("owner-".length)
+    : null;
+  const positionsByOwnerForTab = useMemo(() => {
+    if (!holdingsViewOwner) return positionsByOwner;
+    return positionsByOwner.filter((g) => g.ownerName === holdingsViewOwner);
+  }, [holdingsViewOwner, positionsByOwner]);
+  const ownerGroupDailySummaryForTab = useMemo(() => {
+    if (!holdingsViewOwner) return ownerGroupDailySummary;
+    return ownerGroupDailySummary.filter((o) => o.ownerName === holdingsViewOwner);
+  }, [holdingsViewOwner, ownerGroupDailySummary]);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activeTopNav]);
+
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100">
       <header className="sticky top-0 z-40 border-b border-slate-800/90 bg-[#0b1220]">
@@ -2832,7 +2838,14 @@ export default function Home() {
       </header>
 
       <div className="mx-auto w-full max-w-[1600px] px-2 py-4 sm:py-6 md:px-4">
-        <main className="min-w-0 space-y-4 sm:space-y-6">
+        <main className="min-w-0">
+          <div
+            className={cn(
+              activeTopNav === "dashboard" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "dashboard"}
+          >
           <header
             id="section-dashboard-top"
             className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-3 sm:px-4"
@@ -2911,7 +2924,14 @@ export default function Home() {
               ))}
             </div>
           </section>
-
+          </div>
+          <div
+            className={cn(
+              activeTopNav === "section-trend" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-trend"}
+          >
           {/* 일별 자산 추이 — 총 평가금액 추이 */}
           <section id="section-trend" className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 text-base font-semibold text-slate-100 sm:text-lg">
@@ -2926,6 +2946,14 @@ export default function Home() {
           </section>
           <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
 
+          </div>
+          <div
+            className={cn(
+              activeTopNav === "dashboard" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "dashboard"}
+          >
           <section id="section-technical-signal" className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="text-lg font-semibold text-slate-100">기술 시그널</h2>
@@ -3020,14 +3048,22 @@ export default function Home() {
               으로 이동
             </p>
           </section>
-
+          </div>
+          <div
+            className={cn(
+              activeTopNav === "section-liquidity" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-liquidity"}
+          >
           <LiquiditySection
             isLoading={liquidityHistoryQuery.isLoading}
             isError={!!liquidityHistoryQuery.error}
             rows={liquidityHistoryQuery.data?.rows ?? []}
           />
+          </div>
 
-          {/* 리밸런싱 계산기 */}
+          {/* 리밸런싱 계산기 (구버전·숨김) */}
           <section id="section-rebalance-old" className="hidden rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">리밸런싱 계산기</h2>
             <p className="mb-3 text-xs text-muted-foreground">
@@ -3040,19 +3076,32 @@ export default function Home() {
             />
           </section>
 
+          <div
+            className={cn(
+              activeTopNav === "section-holdings" || activeTopNav.startsWith("owner-")
+                ? "block"
+                : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={
+              !(activeTopNav === "section-holdings" || activeTopNav.startsWith("owner-"))
+            }
+          >
           <div id="section-holdings" className="flex flex-col gap-4 xl:flex-row xl:items-start">
           <section className="min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-sm">
             <div className="border-b border-slate-700/60 px-4 py-3">
               <h2 className="flex flex-wrap items-center gap-2 font-semibold text-slate-100">
                 보유 포지션
                 <span className="rounded-full bg-slate-700/80 px-2 py-0.5 text-xs font-normal text-slate-300 tabular-nums">
-                  {positions.length}
+                  {holdingsViewOwner
+                    ? positionsByOwnerForTab.reduce((a, g) => a + g.items.length, 0)
+                    : positions.length}
                 </span>
                 <span className="text-xs font-normal text-slate-500">(가족·퇴직연금)</span>
               </h2>
             </div>
             <div className="space-y-5 p-4">
-              {positionsByOwner.map((group) => {
+              {positionsByOwnerForTab.map((group) => {
                 const sortMode = holdingsSortByOwner[group.ownerName] ?? "manual";
                 const displayItems = sortHoldingsItems(group.items, sortMode);
                 const holdingsGroupBlocks = buildHoldingsGroupBlocks(displayItems);
@@ -4194,7 +4243,7 @@ export default function Home() {
               <h2 className="text-sm font-semibold">오늘 수익 요약</h2>
             </div>
             <div className="divide-y">
-              {ownerGroupDailySummary.map((owner) => (
+              {ownerGroupDailySummaryForTab.map((owner) => (
                 <div key={owner.ownerName} className="px-3 py-2.5">
                   <div className="mb-1.5 flex items-center justify-between">
                     <p className="text-[11px] font-semibold text-muted-foreground">{owner.ownerName}</p>
@@ -4226,6 +4275,15 @@ export default function Home() {
 
           </div>{/* flex wrapper end */}
 
+          </div>
+
+          <div
+            className={cn(
+              activeTopNav === "section-add" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-add"}
+          >
           <section id="section-add" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-3 font-semibold">종목 추가</h2>
             <div className="mb-4 rounded-xl border bg-muted/20 p-3">
@@ -4418,7 +4476,15 @@ export default function Home() {
               합계(원화): ₩{Math.round(totalCashKrw).toLocaleString()}
             </p>
           </section>
+          </div>
 
+          <div
+            className={cn(
+              activeTopNav === "section-realized" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-realized"}
+          >
           <section id="section-realized" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-2 font-semibold">실현손익 입력</h2>
             <p className="mb-3 text-xs text-muted-foreground">종목 추가 아래에서 보유자별 매도 기록을 입력합니다.</p>
@@ -5012,7 +5078,15 @@ export default function Home() {
               );
             })()}
           </section>
+          </div>
 
+          <div
+            className={cn(
+              activeTopNav === "section-rebalance" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-rebalance"}
+          >
           {/* 리밸런싱 계산기 */}
           <section id="section-rebalance" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">리밸런싱 계산기</h2>
@@ -5025,7 +5099,15 @@ export default function Home() {
               usdKrw={usdKrw}
             />
           </section>
+          </div>
 
+          <div
+            className={cn(
+              activeTopNav === "section-alert" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-alert"}
+          >
           {/* 알림 설정 섹션 */}
           <section id="section-alert" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">비중 이탈 이메일 알림</h2>
@@ -5164,7 +5246,15 @@ export default function Home() {
               {alertBusy && <p className="text-xs text-amber-600">처리 중…</p>}
             </div>
           </section>
+          </div>
 
+          <div
+            className={cn(
+              activeTopNav === "section-watchlist" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-watchlist"}
+          >
           {/* 관심종목 (텔레그램 MA·RSI·BB·VOL) */}
           <section id="section-watchlist" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">⭐ 관심종목 (매수 타이밍 참고)</h2>
@@ -5231,7 +5321,15 @@ export default function Home() {
               )}
             </div>
           </section>
+          </div>
 
+          <div
+            className={cn(
+              activeTopNav === "section-telegram" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-telegram"}
+          >
           {/* 텔레그램 가격 변동 알림 섹션 */}
           <section id="section-telegram" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 font-semibold">📲 텔레그램 가격 변동 알림</h2>
@@ -5327,7 +5425,15 @@ export default function Home() {
               </div>
             )}
           </section>
+          </div>
 
+          <div
+            className={cn(
+              activeTopNav === "section-simulator" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-simulator"}
+          >
           {/* 가상 매수 시뮬레이터 */}
           <SimulatorSection
             simForm={simForm}
@@ -5335,7 +5441,15 @@ export default function Home() {
             simResult={simResult as SimResult}
             ownerNames={ownerNames}
           />
+          </div>
 
+          <div
+            className={cn(
+              activeTopNav === "section-sync" ? "block" : "hidden",
+              "space-y-4 sm:space-y-6",
+            )}
+            aria-hidden={activeTopNav !== "section-sync"}
+          >
           <Card id="section-sync" className="border-dashed">
             <CardHeader className="pb-2">
               <CardDescription>클라우드 동기화 (폰·PC 같은 데이터)</CardDescription>
@@ -5495,6 +5609,7 @@ export default function Home() {
               ) : null}
             </CardContent>
           </Card>
+          </div>
 
         </main>
       </div>
