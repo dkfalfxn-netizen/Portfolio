@@ -7,10 +7,12 @@ import {
   FormEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { FamilyAllocationDonut } from "@/components/family-allocation-chart";
 import { IntradaySparkline } from "@/components/intraday-sparkline";
 import { LivePriceCell } from "@/components/live-price-cell";
@@ -1027,12 +1029,58 @@ export default function Home() {
   /** 상단 내비 활성 항목(스크롤 앵커 id 또는 dashboard) */
   const [activeTopNav, setActiveTopNav] = useState<string>("dashboard");
   const holdingsNavRef = useRef<HTMLDivElement>(null);
+  const holdingsMenuRef = useRef<HTMLDivElement>(null);
   const [holdingsNavOpen, setHoldingsNavOpen] = useState(false);
+  const [holdingsMenuPos, setHoldingsMenuPos] = useState<{
+    top: number;
+    left: number;
+    minW: number;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!holdingsNavOpen) {
+      setHoldingsMenuPos(null);
+      return;
+    }
+    const el = holdingsNavRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const minW = Math.max(200, Math.round(rect.width));
+    let left = rect.left;
+    if (typeof window !== "undefined") {
+      const pad = 8;
+      left = Math.max(pad, Math.min(left, window.innerWidth - minW - pad));
+    }
+    setHoldingsMenuPos({ top: Math.round(rect.bottom + 6), left: Math.round(left), minW });
+  }, [holdingsNavOpen, ownerNames.length]);
+
+  useEffect(() => {
+    if (!holdingsNavOpen) return;
+    const onScrollOrResize = () => {
+      const el = holdingsNavRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const minW = Math.max(200, Math.round(rect.width));
+      let left = rect.left;
+      if (typeof window !== "undefined") {
+        const pad = 8;
+        left = Math.max(pad, Math.min(left, window.innerWidth - minW - pad));
+      }
+      setHoldingsMenuPos({ top: Math.round(rect.bottom + 6), left: Math.round(left), minW });
+    };
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [holdingsNavOpen, ownerNames.length]);
 
   useEffect(() => {
     if (!holdingsNavOpen) return;
     const onDoc = (e: MouseEvent) => {
-      if (holdingsNavRef.current?.contains(e.target as Node)) return;
+      const t = e.target as Node;
+      if (holdingsNavRef.current?.contains(t) || holdingsMenuRef.current?.contains(t)) return;
       setHoldingsNavOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
@@ -2777,32 +2825,41 @@ export default function Home() {
                     {holdingsNavOpen ? "▴" : "▾"}
                   </span>
                 </button>
-                {holdingsNavOpen ? (
-                  <div
-                    className="absolute left-0 top-full z-50 mt-1 min-w-[11rem] rounded-md border border-slate-600 bg-[#0f172a] py-1 shadow-lg ring-1 ring-slate-800/60"
-                    role="menu"
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="w-full px-3 py-2 text-left text-xs text-slate-200 hover:bg-slate-800/80"
-                      onClick={() => goDashboardSection("section-holdings")}
-                    >
-                      보유·전체
-                    </button>
-                    {ownerNames.map((name) => (
-                      <button
-                        key={name}
-                        type="button"
-                        role="menuitem"
-                        className="w-full px-3 py-1.5 pl-5 text-left text-xs text-slate-400 hover:bg-slate-800/80 hover:text-slate-200"
-                        onClick={() => goDashboardSection(`owner-${name}`)}
+                {holdingsNavOpen && holdingsMenuPos
+                  ? createPortal(
+                      <div
+                        ref={holdingsMenuRef}
+                        role="menu"
+                        className="fixed z-[100] max-h-[min(70dvh,22rem)] max-w-[min(100vw-1rem,20rem)] overflow-y-auto overscroll-contain rounded-lg border border-slate-600 bg-[#0f172a] py-0.5 shadow-xl ring-1 ring-slate-800/60 divide-y divide-slate-800/80"
+                        style={{
+                          top: holdingsMenuPos.top,
+                          left: holdingsMenuPos.left,
+                          minWidth: holdingsMenuPos.minW,
+                        }}
                       >
-                        {name}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="w-full px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-800/80"
+                          onClick={() => goDashboardSection("section-holdings")}
+                        >
+                          보유·전체
+                        </button>
+                        {ownerNames.map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            role="menuitem"
+                            className="w-full px-3 py-2.5 pl-4 text-left text-sm text-slate-300 hover:bg-slate-800/80 hover:text-slate-100"
+                            onClick={() => goDashboardSection(`owner-${name}`)}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>,
+                      document.body,
+                    )
+                  : null}
               </div>
               {(
                 [
