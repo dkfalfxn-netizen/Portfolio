@@ -34,7 +34,7 @@ function fmtNum(v: number | null, digits = 2): string {
 
 export function LiquidityBriefingChart({ rows }: Props) {
   if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground">유동성 브리핑 데이터가 아직 없습니다.</p>;
+    return <p className="text-sm text-muted-foreground">지표 시계열 데이터가 아직 없습니다.</p>;
   }
 
   const last = rows[rows.length - 1];

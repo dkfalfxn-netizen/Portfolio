@@ -326,7 +326,7 @@ async function run() {
   }
 
   const text = [
-    "🌊 <b>오전 9시 유동성 브리핑</b>",
+    "🌊 <b>데이터 분석 — 유동성 지표(09:00 KST)</b>",
     `기준일: ${escapeHtml(date)}`,
     "",
     `<b>AI 요약</b> ${escapeHtml(aiSummary)}`,

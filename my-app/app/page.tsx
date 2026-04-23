@@ -20,7 +20,6 @@ import { DailyTrendChart } from "@/components/daily-trend-chart";
 import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
-import { SimulatorSection, type SimResult } from "@/components/simulator-section";
 import { LiquiditySection } from "@/components/liquidity-section";
 import { cn } from "@/lib/utils";
 import { todayKST } from "@/lib/date-utils";
@@ -93,6 +92,16 @@ type LiquidityHistoryResponse = {
 };
 
 type FedBriefApiResponse = {
+  ok: boolean;
+  summary: string | null;
+  reportDate: string | null;
+  error?: string;
+  hint?: string;
+  message?: string;
+  titles?: string[];
+};
+
+type ThemesBriefApiResponse = {
   ok: boolean;
   summary: string | null;
   reportDate: string | null;
@@ -1012,16 +1021,6 @@ export default function Home() {
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [watchlistMessage, setWatchlistMessage] = useState("");
 
-  // 가상 매수 시뮬레이터 상태
-  const [simForm, setSimForm] = useState({
-    symbol: "",
-    name: "",
-    quantity: "",
-    avgPrice: "",
-    currency: "USD" as "USD" | "EUR" | "KRW",
-    owner: "김승주" as OwnerName,
-  });
-
   const [form, setForm] = useState({
     symbol: "",
     name: "",
@@ -1217,7 +1216,7 @@ export default function Home() {
     queryKey: ["liquidity-history"],
     queryFn: async () => {
       const res = await fetch("/api/liquidity/history");
-      if (!res.ok) throw new Error("유동성 브리핑 조회 실패");
+      if (!res.ok) throw new Error("데이터 분석(지표) 조회 실패");
       return res.json() as Promise<LiquidityHistoryResponse>;
     },
     staleTime: 1000 * 60 * 60,
@@ -1233,6 +1232,15 @@ export default function Home() {
     staleTime: 1000 * 60 * 30,
   });
 
+  const themesBriefQuery = useQuery<ThemesBriefApiResponse>({
+    queryKey: ["macro-themes-brief"],
+    queryFn: async () => {
+      const res = await fetch("/api/macro/themes-brief");
+      return res.json() as Promise<ThemesBriefApiResponse>;
+    },
+    staleTime: 1000 * 60 * 30,
+  });
+
   const fedNote = useMemo(() => {
     if (fedBriefQuery.isError) return { tone: "warn" as const, text: "연준·금리 뉴스 요약 API를 불러오지 못했습니다." };
     const d = fedBriefQuery.data;
@@ -1244,6 +1252,18 @@ export default function Home() {
     if (d.summary) return null;
     return { tone: "info" as const, text: d.message ?? "아직 요약이 없습니다." };
   }, [fedBriefQuery.isError, fedBriefQuery.data]);
+
+  const themesNote = useMemo(() => {
+    if (themesBriefQuery.isError) return { tone: "warn" as const, text: "AI·방산 뉴스 요약 API를 불러오지 못했습니다." };
+    const d = themesBriefQuery.data;
+    if (!d) return null;
+    if (d.ok === false) {
+      const t = [d.error, d.hint].filter(Boolean).join(" ");
+      return t ? { tone: "warn" as const, text: t } : null;
+    }
+    if (d.summary) return null;
+    return { tone: "info" as const, text: d.message ?? "아직 요약이 없습니다." };
+  }, [themesBriefQuery.isError, themesBriefQuery.data]);
 
   const signalBySymbol = useMemo(() => {
     const out = new Map<
@@ -2475,41 +2495,6 @@ export default function Home() {
     }
   }
 
-  // 가상 매수 시뮬레이션 계산
-  const simResult = useMemo(() => {
-    const qty = Number(simForm.quantity);
-    const price = Number(simForm.avgPrice);
-    if (!simForm.symbol || !qty || !price || qty <= 0 || price <= 0) return null;
-
-    const simValueKrw =
-      qty *
-      price *
-      (simForm.currency === "USD" ? usdKrw : simForm.currency === "EUR" ? eurKrw : 1);
-    const ownerData = positionsByOwner.find((g) => g.ownerName === simForm.owner);
-    if (!ownerData) return null;
-
-    const beforeTotal = ownerData.sectionTotal;
-    const afterTotal = beforeTotal + simValueKrw;
-
-    const rows = ownerData.items.map((p) => {
-      const beforePct = beforeTotal > 0 ? (p.valueKrw / beforeTotal) * 100 : 0;
-      const afterPct = afterTotal > 0 ? (p.valueKrw / afterTotal) * 100 : 0;
-      return { label: `${p.name} (${p.symbol})`, beforePct, afterPct, delta: afterPct - beforePct };
-    });
-
-    // 추가될 종목의 비중
-    const newBeforePct = 0;
-    const newAfterPct = afterTotal > 0 ? (simValueKrw / afterTotal) * 100 : 0;
-    rows.push({
-      label: `${simForm.symbol.toUpperCase()} (신규)`,
-      beforePct: newBeforePct,
-      afterPct: newAfterPct,
-      delta: newAfterPct,
-    });
-
-    return { beforeTotal, afterTotal, simValueKrw, rows };
-  }, [simForm, positionsByOwner, usdKrw, eurKrw]);
-
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const savedScrollY = window.scrollY;
@@ -2706,7 +2691,6 @@ export default function Home() {
       ...prev,
       selectedOwners: prev.selectedOwners.map((o) => (o === name ? renamed : o)),
     }));
-    setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? renamed : prev.owner }));
     setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? renamed : r.owner })));
     setSellLog((prev) => {
       if (!prev[name]) return prev;
@@ -2754,7 +2738,6 @@ export default function Home() {
       const selected = prev.selectedOwners.filter((o) => o !== name);
       return { ...prev, selectedOwners: selected.length > 0 ? selected : [fallbackOwner] };
     });
-    setSimForm((prev) => ({ ...prev, owner: prev.owner === name ? fallbackOwner : prev.owner }));
     setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? "전체" : r.owner })));
     setSellLog((prev) => { const next = { ...prev }; delete next[name]; return next; });
     setSellLogForm((prev) => { const next = { ...prev }; delete next[name]; return next; });
@@ -2891,10 +2874,9 @@ export default function Home() {
                   { id: "section-realized" as const, icon: "💰", label: "실현손익 입력" },
                   { id: "section-rebalance" as const, icon: "⚖️", label: "리밸런싱 계산기" },
                   { id: "section-alert" as const, icon: "🔔", label: "이메일 알림" },
-                  { id: "section-liquidity" as const, icon: "🌊", label: "유동성 브리핑" },
+                  { id: "section-data" as const, icon: "📊", label: "데이터 분석" },
                   { id: "section-watchlist" as const, icon: "⭐", label: "관심종목" },
                   { id: "section-telegram" as const, icon: "📲", label: "텔레그램" },
-                  { id: "section-simulator" as const, icon: "🧮", label: "가상 매수" },
                   { id: "section-sync" as const, icon: "🔑", label: "동기화 키" },
                 ] as const
               ).map(({ id, icon, label }) => (
@@ -3135,10 +3117,10 @@ export default function Home() {
           </div>
           <div
             className={cn(
-              activeTopNav === "section-liquidity" ? "block" : "hidden",
+              activeTopNav === "section-data" ? "block" : "hidden",
               "space-y-4 sm:space-y-6",
             )}
-            aria-hidden={activeTopNav !== "section-liquidity"}
+            aria-hidden={activeTopNav !== "section-data"}
           >
           <LiquiditySection
             isLoading={liquidityHistoryQuery.isLoading}
@@ -3148,6 +3130,10 @@ export default function Home() {
             fedSummary={fedBriefQuery.data?.ok === true ? fedBriefQuery.data.summary : null}
             fedReportDate={fedBriefQuery.data?.ok === true ? fedBriefQuery.data.reportDate ?? null : null}
             fedNote={fedNote}
+            themesLoading={themesBriefQuery.isLoading}
+            themesSummary={themesBriefQuery.data?.ok === true ? themesBriefQuery.data.summary : null}
+            themesReportDate={themesBriefQuery.data?.ok === true ? themesBriefQuery.data.reportDate ?? null : null}
+            themesNote={themesNote}
           />
           </div>
 
@@ -5513,22 +5499,6 @@ export default function Home() {
               </div>
             )}
           </section>
-          </div>
-
-          <div
-            className={cn(
-              activeTopNav === "section-simulator" ? "block" : "hidden",
-              "space-y-4 sm:space-y-6",
-            )}
-            aria-hidden={activeTopNav !== "section-simulator"}
-          >
-          {/* 가상 매수 시뮬레이터 */}
-          <SimulatorSection
-            simForm={simForm}
-            setSimForm={setSimForm as React.Dispatch<React.SetStateAction<typeof simForm>>}
-            simResult={simResult as SimResult}
-            ownerNames={ownerNames}
-          />
           </div>
 
           <div
