@@ -14,6 +14,8 @@ const NEON_PALETTE = [
 ];
 
 const TARGET_WEIGHT_STORAGE_KEY = "portfolio_target_stock_weight_v1";
+/** 목표 비중 합계 100% 허용 오차 (%) */
+const TARGET_SUM_TOLERANCE = 0.05;
 
 export type AllocationSlice = {
   name: string;
@@ -186,6 +188,19 @@ function TargetStockWeightNeu({
     });
   }, []);
 
+  const targetSum = useMemo(
+    () => slices.reduce((sum, sl) => sum + (targetsByTicker[sl.ticker] ?? 0), 0),
+    [slices, targetsByTicker],
+  );
+
+  const hasAnyTarget = useMemo(
+    () => slices.some((sl) => (targetsByTicker[sl.ticker] ?? 0) > 0),
+    [slices, targetsByTicker],
+  );
+
+  const targetSumOk = Math.abs(targetSum - 100) <= TARGET_SUM_TOLERANCE;
+  const showTargetSumError = hasAnyTarget && !targetSumOk;
+
   if (slices.length === 0) {
     return (
       <div
@@ -223,6 +238,33 @@ function TargetStockWeightNeu({
           목표 초과
         </span>
       </div>
+      {showTargetSumError ? (
+        <div
+          className="mb-3 rounded-lg border border-rose-500/45 bg-rose-950/35 px-2.5 py-2 text-[10px] leading-snug text-rose-100/95"
+          role="alert"
+        >
+          <p className="font-semibold text-rose-200">목표 비중 합계가 100%가 아닙니다</p>
+          <p className="mt-1">
+            위에 입력한 목표(%) 합계는{" "}
+            <span className="tabular-nums font-semibold text-rose-50">{targetSum.toFixed(1)}%</span>
+            입니다. 종목별 목표 비중의 합이{" "}
+            <span className="font-semibold">정확히 100%</span>가 되도록 조정해 주세요.
+            {targetSum < 100 - TARGET_SUM_TOLERANCE ? (
+              <span className="block pt-0.5 text-rose-200/90">
+                → 현재 <span className="tabular-nums">{(100 - targetSum).toFixed(1)}%</span> 부족합니다.
+              </span>
+            ) : (
+              <span className="block pt-0.5 text-rose-200/90">
+                → 현재 <span className="tabular-nums">{(targetSum - 100).toFixed(1)}%</span> 초과입니다.
+              </span>
+            )}
+          </p>
+        </div>
+      ) : hasAnyTarget && targetSumOk ? (
+        <p className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-950/25 px-2.5 py-1.5 text-[10px] text-emerald-200/95">
+          목표 비중 합계 <span className="tabular-nums font-semibold">{targetSum.toFixed(1)}%</span> — 100%에 맞습니다.
+        </p>
+      ) : null}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(48px,1fr))] gap-x-1 gap-y-4 py-2 justify-items-center">
         {slices.map((slice) => {
           const target = targetsByTicker[slice.ticker] ?? 0;
