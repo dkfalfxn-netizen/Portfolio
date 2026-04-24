@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { generateBriefSummary } from "@/lib/ai-brief-summary";
 import { todayKST } from "@/lib/date-utils";
 
 export const maxDuration = 60;
@@ -50,7 +50,7 @@ function fallbackSummary(titles: string[]): string {
   if (titles.length === 0) {
     return "오늘은 RSS에서 가져온 제목이 없어 요약을 만들 수 없습니다. 뉴스 소스·네트워크를 확인하거나, Google 뉴스 검색 결과가 비어 있을 수 있습니다.";
   }
-  return `최신 헤드라인 ${Math.min(5, titles.length)}개를 기준으로 AI·방산 관련 흐름을 짐작할 수 있습니다. OpenAI API 키가 없을 때는 이 안내만 표시됩니다. (예시) ${titles.slice(0, 2).join(" / ")}`;
+  return `최신 헤드라인 ${Math.min(5, titles.length)}개를 기준으로 AI·방산 관련 흐름을 짐작할 수 있습니다. Gemini/OpenAI를 쓸 수 없을 때는 이 안내만 저장됩니다. (예시) ${titles.slice(0, 2).join(" / ")}`;
 }
 
 async function fetchAllTitles(): Promise<string[]> {
@@ -72,29 +72,15 @@ async function fetchAllTitles(): Promise<string[]> {
 }
 
 async function generateSummary(titles: string[], date: string): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
   if (titles.length === 0) return fallbackSummary(titles);
-  if (!apiKey) return fallbackSummary(titles);
-
-  const client = new OpenAI({ apiKey });
   const lines = titles.map((t, i) => `${i + 1}. ${t}`).join("\n");
-  const completion = await client.chat.completions.create({
-    model: "gpt-4o-mini",
+  const text = await generateBriefSummary({
+    system:
+      "너는 테크·산업 뉴스 데스크다. 아래는 최근(당일) **AI(인공지능)·반도체·투자**와 **방위·군수·한국 방산** 등으로 수집된 뉴스 **제목**이다(영·한 혼재 가능). 투자 권유·단정적 예측은 금지. 한국어로 **정확히 3~5문장**만 쓰고, (1) AI/기술/반도체 쪽에서 공통으로 보이는 화제 (2) 방산·국방·계약/수출 관련 흐름이 제목에 있으면 요약 (3) 두 축이 섞이면 짧게 연결 (4) 마지막에 **원문 기사가 필요**하다고 한 문장. 제목에 없는 수치·인용·속보 사실은 쓰지 말라.",
+    user: `기준일(한국): ${date}\n\n뉴스 제목:\n${lines.slice(0, 4000)}`,
+    maxTokens: 650,
     temperature: 0.25,
-    max_tokens: 650,
-    messages: [
-      {
-        role: "system",
-        content:
-          "너는 테크·산업 뉴스 데스크다. 아래는 최근(당일) **AI(인공지능)·반도체·투자**와 **방위·군수·한국 방산** 등으로 수집된 뉴스 **제목**이다(영·한 혼재 가능). 투자 권유·단정적 예측은 금지. 한국어로 **정확히 3~5문장**만 쓰고, (1) AI/기술/반도체 쪽에서 공통으로 보이는 화제 (2) 방산·국방·계약/수출 관련 흐름이 제목에 있으면 요약 (3) 두 축이 섞이면 짧게 연결 (4) 마지막에 **원문 기사가 필요**하다고 한 문장. 제목에 없는 수치·인용·속보 사실은 쓰지 말라.",
-      },
-      {
-        role: "user",
-        content: `기준일(한국): ${date}\n\n뉴스 제목:\n${lines.slice(0, 4000)}`,
-      },
-    ],
   });
-  const text = completion.choices[0]?.message?.content?.trim();
   return text && text.length > 0 ? text.slice(0, 2000) : fallbackSummary(titles);
 }
 
@@ -109,7 +95,13 @@ export async function GET(req: NextRequest) {
 
   const date = todayKST();
   const titles = await fetchAllTitles();
-  const summary = await generateSummary(titles, date);
+  let summary: string;
+  try {
+    summary = await generateSummary(titles, date);
+  } catch (err) {
+    console.error("[macro-themes-briefing] generateSummary:", err);
+    summary = fallbackSummary(titles);
+  }
 
   const admin = createSupabaseAdmin();
   if (!admin) {

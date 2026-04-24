@@ -1034,6 +1034,27 @@ export default function Home() {
     selectedOwners: ["김승주"] as OwnerName[],
   });
   const [addPositionError, setAddPositionError] = useState("");
+  const actionSuccessToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [actionSuccessToast, setActionSuccessToast] = useState("");
+  const showActionSuccessToast = useCallback((message: string) => {
+    if (actionSuccessToastTimerRef.current) {
+      clearTimeout(actionSuccessToastTimerRef.current);
+    }
+    setActionSuccessToast(message);
+    actionSuccessToastTimerRef.current = setTimeout(() => {
+      setActionSuccessToast("");
+      actionSuccessToastTimerRef.current = null;
+    }, 3200);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (actionSuccessToastTimerRef.current) {
+        clearTimeout(actionSuccessToastTimerRef.current);
+      }
+    },
+    [],
+  );
 
   /** 상단 내비 활성 항목(스크롤 앵커 id 또는 dashboard) */
   const [activeTopNav, setActiveTopNav] = useState<string>("dashboard");
@@ -2571,6 +2592,8 @@ export default function Home() {
       selectedOwners: form.selectedOwners,
     });
 
+    showActionSuccessToast("종목이 정상적으로 반영되었습니다.");
+
     requestAnimationFrame(() => {
       window.scrollTo({ top: savedScrollY, behavior: "instant" });
     });
@@ -2762,6 +2785,15 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100">
+      {actionSuccessToast ? (
+        <div
+          className="pointer-events-none fixed bottom-6 left-1/2 z-[60] max-w-[min(90vw,24rem)] -translate-x-1/2 rounded-lg border border-emerald-500/45 bg-emerald-950/95 px-4 py-2.5 text-center text-sm font-medium text-emerald-100 shadow-lg shadow-emerald-950/50"
+          role="status"
+          aria-live="polite"
+        >
+          {actionSuccessToast}
+        </div>
+      ) : null}
       <header className="sticky top-0 z-40 border-b border-slate-800/90 bg-[#0b1220]">
         <div className="mx-auto max-w-[1600px] px-3 py-3 sm:px-4">
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -4821,6 +4853,15 @@ export default function Home() {
                     const existing = prev[owner] ?? [];
                     return { ...prev, [owner]: existing.map((e) => (e.id === form.editingId ? entry : e)) };
                   });
+                }
+                const newRealizedSaveOk =
+                  !form.editingId &&
+                  Number.isFinite(Number(form.qty)) &&
+                  Number(form.qty) > 0 &&
+                  Number.isFinite(Number(form.avgPrice)) &&
+                  Number(form.avgPrice) > 0;
+                if (form.editingId || newRealizedSaveOk) {
+                  showActionSuccessToast("실현손익이 정상적으로 반영되었습니다.");
                 }
                 setForm2({
                   symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",

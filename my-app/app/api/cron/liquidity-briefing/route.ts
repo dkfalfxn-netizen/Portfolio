@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { generateBriefSummary } from "@/lib/ai-brief-summary";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { todayKST } from "@/lib/date-utils";
 
@@ -166,39 +166,27 @@ function fallbackAiSummary(v: LiquiditySnapshot): string {
 }
 
 async function generateAiSummary(snapshot: LiquiditySnapshot): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return fallbackAiSummary(snapshot);
-
+  const user = [
+    `날짜: ${snapshot.date}`,
+    `순유동성: ${snapshot.netLiquidity.toFixed(2)} (전일대비 ${snapshot.netLiquidityPct?.toFixed(2) ?? "N/A"}%)`,
+    `DXY: ${snapshot.dxy?.toFixed(2) ?? "N/A"} (${snapshot.dxyPct?.toFixed(2) ?? "N/A"}%)`,
+    `미10년물: ${snapshot.us10y?.toFixed(2) ?? "N/A"}% (${snapshot.us10yPct?.toFixed(2) ?? "N/A"}%)`,
+    `하이일드스프레드: ${snapshot.hySpread?.toFixed(2) ?? "N/A"}%p (${snapshot.hySpreadDiffBp?.toFixed(1) ?? "N/A"}bp)`,
+    `VIX: ${snapshot.vix?.toFixed(2) ?? "N/A"} (${snapshot.vixPct?.toFixed(2) ?? "N/A"}%)`,
+    `BTC: ${snapshot.btc?.toFixed(2) ?? "N/A"} (${snapshot.btcPct?.toFixed(2) ?? "N/A"}%)`,
+    `금: ${snapshot.gold?.toFixed(2) ?? "N/A"} (${snapshot.goldPct?.toFixed(2) ?? "N/A"}%)`,
+  ].join("\n");
   try {
-    const client = new OpenAI({ apiKey });
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+    const text = await generateBriefSummary({
+      system:
+        "너는 매크로 데일리 브리핑 작성자다. 한국어로 정확히 3~4문장(문장 끝에 마침표)으로만 작성한다. 과장·투자 권유·단정적 예측은 피하고, 제시된 지표의 방향(전일 대비)만 간단히 엮는다. 마지막 문장에 한해 시장 ‘해석’을 아주 온건하게 덧붙일 수 있다.",
+      user,
+      maxTokens: 520,
       temperature: 0.2,
-      max_tokens: 520,
-      messages: [
-        {
-          role: "system",
-          content:
-            "너는 매크로 데일리 브리핑 작성자다. 한국어로 정확히 3~4문장(문장 끝에 마침표)으로만 작성한다. 과장·투자 권유·단정적 예측은 피하고, 제시된 지표의 방향(전일 대비)만 간단히 엮는다. 마지막 문장에 한해 시장 ‘해석’을 아주 온건하게 덧붙일 수 있다.",
-        },
-        {
-          role: "user",
-          content: [
-            `날짜: ${snapshot.date}`,
-            `순유동성: ${snapshot.netLiquidity.toFixed(2)} (전일대비 ${snapshot.netLiquidityPct?.toFixed(2) ?? "N/A"}%)`,
-            `DXY: ${snapshot.dxy?.toFixed(2) ?? "N/A"} (${snapshot.dxyPct?.toFixed(2) ?? "N/A"}%)`,
-            `미10년물: ${snapshot.us10y?.toFixed(2) ?? "N/A"}% (${snapshot.us10yPct?.toFixed(2) ?? "N/A"}%)`,
-            `하이일드스프레드: ${snapshot.hySpread?.toFixed(2) ?? "N/A"}%p (${snapshot.hySpreadDiffBp?.toFixed(1) ?? "N/A"}bp)`,
-            `VIX: ${snapshot.vix?.toFixed(2) ?? "N/A"} (${snapshot.vixPct?.toFixed(2) ?? "N/A"}%)`,
-            `BTC: ${snapshot.btc?.toFixed(2) ?? "N/A"} (${snapshot.btcPct?.toFixed(2) ?? "N/A"}%)`,
-            `금: ${snapshot.gold?.toFixed(2) ?? "N/A"} (${snapshot.goldPct?.toFixed(2) ?? "N/A"}%)`,
-          ].join("\n"),
-        },
-      ],
     });
-    const text = completion.choices[0]?.message?.content?.trim();
     return text && text.length > 0 ? text.slice(0, 1200) : fallbackAiSummary(snapshot);
-  } catch {
+  } catch (err) {
+    console.error("[liquidity-briefing] generateAiSummary:", err);
     return fallbackAiSummary(snapshot);
   }
 }
