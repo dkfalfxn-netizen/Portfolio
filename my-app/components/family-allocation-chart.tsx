@@ -1,15 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Treemap,
-  Tooltip,
-  type PieLabelRenderProps,
-} from "recharts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ResponsiveContainer, Tooltip, Treemap } from "recharts";
 
 /** 네온 글로우용 팔레트 (한 단계 어둡게 — 채도는 유지) */
 const NEON_PALETTE = [
@@ -20,6 +12,8 @@ const NEON_PALETTE = [
   "#7C3AED",
   "#0D9488",
 ];
+
+const TARGET_WEIGHT_STORAGE_KEY = "portfolio_target_stock_weight_v1";
 
 export type AllocationSlice = {
   name: string;
@@ -33,6 +27,19 @@ export type AllocationSlice = {
 
 function formatKrw(n: number) {
   return `₩${Math.round(n).toLocaleString()}`;
+}
+
+function loadAllTargets(): Record<string, Record<string, number>> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(TARGET_WEIGHT_STORAGE_KEY);
+    if (!raw) return {};
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null) return {};
+    return p as Record<string, Record<string, number>>;
+  } catch {
+    return {};
+  }
 }
 
 function NeonTooltip({
@@ -137,6 +144,167 @@ function NeonTreemapNode(props: {
   );
 }
 
+function TargetStockWeightNeu({
+  ownerName,
+  slices,
+}: {
+  ownerName: string;
+  slices: AllocationSlice[];
+}) {
+  const skipSaveRef = useRef(true);
+  const [targetsByTicker, setTargetsByTicker] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const all = loadAllTargets();
+    skipSaveRef.current = true;
+    setTargetsByTicker({ ...(all[ownerName] ?? {}) });
+  }, [ownerName]);
+
+  useEffect(() => {
+    if (skipSaveRef.current) {
+      skipSaveRef.current = false;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      const all = loadAllTargets();
+      all[ownerName] = targetsByTicker;
+      window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [ownerName, targetsByTicker]);
+
+  const setTarget = useCallback((ticker: string, raw: string) => {
+    const n = parseFloat(raw.replace(",", "."));
+    setTargetsByTicker((prev) => {
+      const next = { ...prev };
+      if (raw === "" || !Number.isFinite(n) || n <= 0) {
+        delete next[ticker];
+      } else {
+        next[ticker] = Math.min(100, Math.max(0, n));
+      }
+      return next;
+    });
+  }, []);
+
+  if (slices.length === 0) {
+    return (
+      <div
+        className="flex min-h-[200px] flex-col items-center justify-center rounded-2xl px-3 py-4 text-center text-xs text-zinc-500"
+        style={{
+          boxShadow: "inset 4px 4px 10px rgba(0,0,0,0.45), inset -4px -4px 10px rgba(255,255,255,0.04)",
+          background: "#151a24",
+        }}
+      >
+        목표 비중을 설정할 주식 슬라이스가 없습니다.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex flex-col rounded-2xl p-3 sm:p-4"
+      style={{
+        background: "#151a24",
+        boxShadow:
+          "6px 6px 14px rgba(0,0,0,0.45), -4px -4px 12px rgba(255,255,255,0.03), inset 0 1px 0 rgba(255,255,255,0.04)",
+      }}
+    >
+      <p className="mb-1 text-[11px] font-semibold tracking-wide text-zinc-300">목표 주식 비중</p>
+      <p className="mb-3 text-[10px] leading-snug text-zinc-500">
+        종목별 목표(%)를 입력하세요. 막대는 현재 비중이 목표 대비 어느 정도인지 보여 줍니다. 주황은 목표 초과입니다.
+      </p>
+      <div className="mb-2 flex flex-wrap gap-3 text-[10px] text-zinc-500">
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-2 rounded-sm bg-sky-500" />
+          목표 이하
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-2 rounded-sm bg-amber-500" />
+          목표 초과
+        </span>
+      </div>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(48px,1fr))] gap-x-1 gap-y-4 py-2 justify-items-center">
+        {slices.map((slice) => {
+          const target = targetsByTicker[slice.ticker] ?? 0;
+          const actual = slice.weight;
+          const hasTarget = target > 0;
+          const ratio = hasTarget ? actual / target : 0;
+          const fillPct = hasTarget ? Math.min(ratio * 100, 100) : 0;
+          const tol = Math.max(0.3, target * 0.015);
+          const exceeded = hasTarget && actual > target + tol;
+          const near =
+            hasTarget && !exceeded && actual >= target - tol && actual <= target + tol;
+          const fillColor = !hasTarget ? "transparent" : exceeded ? "#f59e0b" : "#3b82f6";
+
+          let statusLabel: string;
+          if (!hasTarget) statusLabel = "목표 입력";
+          else if (exceeded) statusLabel = "초과";
+          else if (near) statusLabel = "목표 부근";
+          else statusLabel = "미달";
+
+          return (
+            <div key={slice.name} className="flex w-full max-w-[56px] flex-col items-center gap-1">
+              <label className="flex w-full flex-col gap-0.5">
+                <span className="text-center text-[8px] font-medium text-zinc-500">목표%</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  placeholder="—"
+                  className="w-full rounded-md border border-white/10 bg-zinc-900/80 px-0.5 py-0.5 text-center text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 placeholder:text-zinc-600 focus:ring-1"
+                  style={{
+                    boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
+                  }}
+                  value={hasTarget ? String(targetsByTicker[slice.ticker]) : ""}
+                  onChange={(e) => setTarget(slice.ticker, e.target.value)}
+                />
+              </label>
+              <span className="line-clamp-2 min-h-[1.75rem] w-full break-all text-center text-[8px] font-semibold leading-tight text-zinc-200" title={slice.displayName}>
+                {slice.ticker}
+              </span>
+              <div
+                className="relative h-[118px] w-[18px] shrink-0 rounded-full"
+                style={{
+                  background: "#12161f",
+                  boxShadow:
+                    "inset 3px 3px 6px rgba(0,0,0,0.55), inset -2px -2px 6px rgba(255,255,255,0.05)",
+                }}
+              >
+                {hasTarget ? (
+                  <div
+                    className="absolute bottom-0.5 left-0.5 right-0.5 rounded-full transition-[height] duration-300"
+                    style={{
+                      height: `calc(${fillPct}% - 3px)`,
+                      minHeight: ratio > 0 ? 4 : 0,
+                      maxHeight: "calc(100% - 6px)",
+                      background: fillColor,
+                      boxShadow:
+                        exceeded
+                          ? "0 0 12px rgba(245,158,11,0.45)"
+                          : "0 0 12px rgba(59,130,246,0.35)",
+                    }}
+                  />
+                ) : null}
+              </div>
+              <div className="text-center text-[8px] tabular-nums leading-tight text-zinc-400">
+                현재 {actual.toFixed(1)}%
+                <span
+                  className={`mt-0.5 block font-medium ${
+                    !hasTarget ? "text-zinc-600" : exceeded ? "text-amber-400" : near ? "text-emerald-400/90" : "text-zinc-500"
+                  }`}
+                >
+                  {statusLabel}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function FamilyAllocationDonut({
   ownerName,
   data,
@@ -146,10 +314,14 @@ export function FamilyAllocationDonut({
   data: AllocationSlice[];
   total: number;
 }) {
-  /** 큰 비율이 12시에서 시작해 시계 방향으로 갈수록 작아지도록 정렬 */
-  const chartData = useMemo(
-    () => [...data].sort((a, b) => b.value - a.value),
-    [data],
+  const chartData = useMemo(() => [...data].sort((a, b) => b.value - a.value), [data]);
+
+  const stockSlicesForTargets = useMemo(
+    () =>
+      chartData.filter(
+        (d) => d.ticker !== "USD 현금" && d.ticker !== "KRW 현금" && d.value > 0,
+      ),
+    [chartData],
   );
 
   if (data.length === 0) {
@@ -197,7 +369,6 @@ export function FamilyAllocationDonut({
         `,
       }}
     >
-      {/* 상단 글래스 범례 — 차트와 동일: 비중 내림차순 */}
       <div className="mb-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 backdrop-blur-md">
         {chartData.map((d, i) => {
           const c = NEON_PALETTE[i % NEON_PALETTE.length];
@@ -219,113 +390,34 @@ export function FamilyAllocationDonut({
         })}
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <div className="relative h-[280px] w-full sm:h-[320px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
-              <Pie
+      <div className="mb-3 border-b border-white/10 pb-3">
+        <p className="text-base font-bold text-zinc-100">{ownerName}</p>
+        <p className="mt-0.5 text-sm font-semibold tabular-nums text-zinc-300">총 자산 {formatKrw(total)}</p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.88fr)_minmax(320px,1.2fr)] lg:items-start">
+        <div className="flex min-h-0 max-w-full flex-col lg:max-w-[min(100%,520px)]">
+          <p className="mb-2 text-[11px] font-medium tracking-wide text-zinc-400">비중 트리맵</p>
+          <div className="h-[200px] w-full rounded-xl border border-white/10 bg-zinc-950/40 p-2 sm:h-[228px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <Treemap
                 data={chartData}
                 dataKey="value"
-                nameKey="name"
-                cx="50%"
-                cy="50%"
-                innerRadius="52%"
-                outerRadius="88%"
-                startAngle={90}
-                endAngle={-270}
-                paddingAngle={2.5}
                 stroke="rgba(255,255,255,0.12)"
-                strokeWidth={1}
-                cornerRadius={4}
-                labelLine={false}
-                label={(props: PieLabelRenderProps) => {
-                  const pct = (props.percent ?? 0) * 100;
-                  const RADIAN = Math.PI / 180;
-                  const cx = props.cx ?? 0;
-                  const cy = props.cy ?? 0;
-                  const inner = Number(props.innerRadius) || 0;
-                  const outer = Number(props.outerRadius) || 0;
-                  const midAngle = props.midAngle ?? 0;
-                  const radius = inner + (outer - inner) * 0.55;
-                  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-                  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-                  const c = NEON_PALETTE[(props.index ?? 0) % NEON_PALETTE.length];
-                  return (
-                    <text
-                      x={x}
-                      y={y}
-                      fill="white"
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      className={`pointer-events-none select-none font-semibold ${
-                        pct < 5 ? "text-[10px]" : "text-xs sm:text-[13px]"
-                      }`}
-                      style={{
-                        textShadow: `0 0 8px ${c}, 0 0 2px rgba(0,0,0,0.9)`,
-                      }}
-                    >
-                      {pct.toFixed(1)}%
-                    </text>
-                  );
-                }}
+                content={<NeonTreemapNode />}
+                aspectRatio={1.6}
               >
-                {chartData.map((entry, index) => {
-                  const c = NEON_PALETTE[index % NEON_PALETTE.length];
-                  return (
-                    <Cell
-                      key={entry.name}
-                      fill={c}
-                      style={{
-                        filter: `drop-shadow(0 0 6px ${c}) drop-shadow(0 0 14px ${c}55)`,
-                      }}
-                    />
-                  );
-                })}
-              </Pie>
-              <Tooltip
-                content={<NeonTooltip />}
-                allowEscapeViewBox={{ x: true, y: true }}
-                wrapperStyle={{ zIndex: 50 }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-
-          {/* 중앙 허브 (이름 + 합계) */}
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div
-              className="flex h-[100px] w-[100px] flex-col items-center justify-center rounded-full border border-white/10 bg-zinc-950/90 text-center backdrop-blur-sm sm:h-[108px] sm:w-[108px]"
-              style={{
-                boxShadow: `
-                  inset 0 2px 16px rgba(0,0,0,0.65),
-                  inset 0 -1px 0 rgba(255,255,255,0.06),
-                  0 0 0 1px rgba(255,255,255,0.05)
-                `,
-              }}
-            >
-              <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-                {ownerName}
-              </span>
-              <span className="mt-0.5 max-w-[100px] truncate text-[13px] font-bold tabular-nums leading-tight text-zinc-100 sm:max-w-[108px] sm:text-sm">
-                {formatKrw(total)}
-              </span>
-            </div>
+                <Tooltip
+                  content={<NeonTooltip />}
+                  allowEscapeViewBox={{ x: true, y: true }}
+                  wrapperStyle={{ zIndex: 50 }}
+                />
+              </Treemap>
+            </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="h-[280px] w-full rounded-xl border border-white/10 bg-zinc-950/40 p-2 sm:h-[320px]">
-          <p className="mb-2 px-1 text-[11px] font-medium tracking-wide text-zinc-400">
-            GROUP TREEMAP
-          </p>
-          <ResponsiveContainer width="100%" height="100%">
-            <Treemap data={chartData} dataKey="value" stroke="rgba(255,255,255,0.12)" content={<NeonTreemapNode />} aspectRatio={1.6}>
-              <Tooltip
-                content={<NeonTooltip />}
-                allowEscapeViewBox={{ x: true, y: true }}
-                wrapperStyle={{ zIndex: 50 }}
-              />
-            </Treemap>
-          </ResponsiveContainer>
-        </div>
+        <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} />
       </div>
     </div>
   );

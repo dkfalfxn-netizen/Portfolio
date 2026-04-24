@@ -2977,7 +2977,7 @@ export default function Home() {
           <section className="space-y-4">
             <h2 className="font-semibold">포트폴리오 비중 (가족·퇴직연금)</h2>
             <p className="text-xs text-muted-foreground">
-              도넛 중앙은 담당자명과 평가 합계, 상단은 범례입니다. 조각 안에 비중(%)이 표시됩니다.
+              왼쪽 트리맵은 비중(%)·당일 등락, 오른쪽은 종목별 목표 비중(%)과 달성 여부입니다. 목표 값은 이 브라우저에 저장됩니다.
             </p>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               {allocationByOwner.map(({ ownerName, data, total }) => (
