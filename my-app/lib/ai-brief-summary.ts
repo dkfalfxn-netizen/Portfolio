@@ -1,4 +1,8 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  GoogleGenerativeAI,
+  HarmBlockThreshold,
+  HarmCategory,
+} from "@google/generative-ai";
 import OpenAI from "openai";
 
 function cleanKey(s: string | undefined): string | undefined {
@@ -10,6 +14,18 @@ function cleanKey(s: string | undefined): string | undefined {
   return t || undefined;
 }
 
+/** 헤드라인에 정치·연준 키워드가 있으면 CIVIC_INTEGRITY 등으로 막히기 쉬워 완화 */
+const GEMINI_SAFETY_RELAXED = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+  HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+].map((category) => ({
+  category,
+  threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+}));
+
 export type BriefSummaryParams = {
   system: string;
   user: string;
@@ -18,7 +34,11 @@ export type BriefSummaryParams = {
 };
 
 /** `.text()`가 throw(차단·빈 후보)일 때 후보 parts에서 이어붙이기 */
-function extractGeminiText(response: { text: () => string; candidates?: Array<{ content?: { parts?: unknown[] } }> }): string | undefined {
+function extractGeminiText(response: {
+  text: () => string;
+  candidates?: Array<{ content?: { parts?: unknown[] }; finishReason?: string }>;
+  promptFeedback?: { blockReason?: string };
+}): string | undefined {
   try {
     const t = response.text()?.trim();
     if (t) return t;
@@ -39,6 +59,18 @@ function extractGeminiText(response: { text: () => string; candidates?: Array<{ 
   return merged || undefined;
 }
 
+function logGeminiDiag(modelId: string, response: Parameters<typeof extractGeminiText>[0]) {
+  const c0 = response.candidates?.[0];
+  const fr = c0?.finishReason;
+  const br = response.promptFeedback?.blockReason;
+  if (br) {
+    console.warn(`[ai-brief-summary] Gemini model=${modelId} promptFeedback.blockReason=${br}`);
+  }
+  if (fr && fr !== "STOP") {
+    console.warn(`[ai-brief-summary] Gemini model=${modelId} finishReason=${fr}`);
+  }
+}
+
 function geminiModelCandidates(): string[] {
   const fromEnv = cleanKey(process.env.GEMINI_MODEL);
   const chain = [
@@ -51,7 +83,7 @@ function geminiModelCandidates(): string[] {
   return [...new Set(chain)];
 }
 
-async function tryGeminiOneModel(
+async function tryGeminiSdk(
   params: BriefSummaryParams,
   apiKey: string,
   modelId: string,
@@ -60,37 +92,104 @@ async function tryGeminiOneModel(
   const model = genAI.getGenerativeModel({
     model: modelId,
     systemInstruction: params.system,
+    safetySettings: GEMINI_SAFETY_RELAXED,
     generationConfig: {
       maxOutputTokens: params.maxTokens,
       temperature: params.temperature,
     },
   });
   const result = await model.generateContent(params.user);
+  logGeminiDiag(modelId, result.response);
   const text = extractGeminiText(result.response);
   return text && text.length > 0 ? text : null;
 }
 
+/** SDK와 다른 경로(일부 런타임에서 SDK만 실패할 때) */
+async function tryGeminiRest(
+  params: BriefSummaryParams,
+  apiKey: string,
+  modelId: string,
+): Promise<string | null> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const body = {
+    systemInstruction: { parts: [{ text: params.system }] },
+    contents: [{ role: "user", parts: [{ text: params.user }] }],
+    generationConfig: {
+      maxOutputTokens: params.maxTokens,
+      temperature: params.temperature,
+    },
+    safetySettings: GEMINI_SAFETY_RELAXED,
+  };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const raw = (await res.json()) as {
+    error?: { message?: string; status?: string };
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+    promptFeedback?: { blockReason?: string };
+  };
+  if (!res.ok) {
+    console.error(
+      `[ai-brief-summary] Gemini REST model=${modelId} HTTP ${res.status}:`,
+      (raw.error?.message ?? JSON.stringify(raw)).slice(0, 400),
+    );
+    return null;
+  }
+  if (raw.promptFeedback?.blockReason) {
+    console.warn(`[ai-brief-summary] Gemini REST model=${modelId} promptBlock=${raw.promptFeedback.blockReason}`);
+  }
+  const parts = raw.candidates?.[0]?.content?.parts;
+  const fr = raw.candidates?.[0]?.finishReason;
+  if (fr && fr !== "STOP") {
+    console.warn(`[ai-brief-summary] Gemini REST model=${modelId} finishReason=${fr}`);
+  }
+  if (!Array.isArray(parts)) return null;
+  const text = parts
+    .map((p) => p?.text ?? "")
+    .join("")
+    .trim();
+  return text.length > 0 ? text : null;
+}
+
+async function tryGeminiOneModel(
+  params: BriefSummaryParams,
+  apiKey: string,
+  modelId: string,
+): Promise<string | null> {
+  try {
+    const t = await tryGeminiSdk(params, apiKey, modelId);
+    if (t) return t;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[ai-brief-summary] Gemini SDK failed model=${modelId}:`, msg.slice(0, 500));
+  }
+  try {
+    const t = await tryGeminiRest(params, apiKey, modelId);
+    if (t) {
+      console.warn(`[ai-brief-summary] Gemini OK via REST model=${modelId}`);
+      return t;
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[ai-brief-summary] Gemini REST failed model=${modelId}:`, msg.slice(0, 500));
+  }
+  return null;
+}
+
 async function tryGemini(params: BriefSummaryParams, apiKey: string): Promise<string | null> {
   const models = geminiModelCandidates();
-  let lastErr: unknown;
   for (const modelId of models) {
-    try {
-      const t = await tryGeminiOneModel(params, apiKey, modelId);
-      if (t) {
-        if (modelId !== models[0]) {
-          console.warn(`[ai-brief-summary] Gemini OK with fallback model: ${modelId}`);
-        }
-        return t;
+    const t = await tryGeminiOneModel(params, apiKey, modelId);
+    if (t) {
+      if (modelId !== models[0]) {
+        console.warn(`[ai-brief-summary] Gemini OK with fallback model: ${modelId}`);
       }
-    } catch (e) {
-      lastErr = e;
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`[ai-brief-summary] Gemini failed model=${modelId}:`, msg.slice(0, 500));
+      return t;
     }
   }
-  if (lastErr) {
-    console.error("[ai-brief-summary] Gemini all models exhausted");
-  }
+  console.error("[ai-brief-summary] Gemini all models exhausted (SDK + REST, every candidate)");
   return null;
 }
 
@@ -124,8 +223,8 @@ export async function generateBriefSummary(params: BriefSummaryParams): Promise<
     try {
       const t = await tryGemini(params, geminiKey);
       if (t) return t;
-    } catch {
-      /* 빈 응답 또는 API 오류 */
+    } catch (e) {
+      console.error("[ai-brief-summary] Gemini unexpected:", e instanceof Error ? e.message : String(e));
     }
     if (!allowOpenAiAfterGemini) return null;
   }
