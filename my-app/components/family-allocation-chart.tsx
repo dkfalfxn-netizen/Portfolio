@@ -226,16 +226,20 @@ function TargetStockWeightNeu({
     >
       <p className="mb-1 text-[11px] font-semibold tracking-wide text-zinc-300">목표 주식 비중</p>
       <p className="mb-3 text-[10px] leading-snug text-zinc-500">
-        종목별 목표(%)를 입력하세요. 막대는 현재 비중이 목표 대비 어느 정도인지 보여 줍니다. 주황은 목표 초과입니다.
+        종목별 목표(%)를 입력하세요. 막대 색은 목표 대비 상대 차이(±5%)에 따라 표시됩니다.
       </p>
       <div className="mb-2 flex flex-wrap gap-3 text-[10px] text-zinc-500">
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-sm bg-sky-500" />
-          목표 이하
+          ±5% 이내
         </span>
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-sm bg-amber-500" />
-          목표 초과
+          <span className="h-2 w-2 rounded-sm bg-red-500" />
+          5% 이상 낮음
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-2 rounded-sm bg-emerald-500" />
+          5% 이상 높음
         </span>
       </div>
       {showTargetSumError ? (
@@ -243,21 +247,21 @@ function TargetStockWeightNeu({
           className="mb-3 rounded-lg border border-rose-500/45 bg-rose-950/35 px-2.5 py-2 text-[10px] leading-snug text-rose-100/95"
           role="alert"
         >
-          <p className="font-semibold text-rose-200">목표 비중 합계가 100%가 아닙니다</p>
-          <p className="mt-1">
-            위에 입력한 목표(%) 합계는{" "}
-            <span className="tabular-nums font-semibold text-rose-50">{targetSum.toFixed(1)}%</span>
-            입니다. 종목별 목표 비중의 합이{" "}
-            <span className="font-semibold">정확히 100%</span>가 되도록 조정해 주세요.
+          <p className="text-rose-200/95">
+            목표 합계 <span className="tabular-nums font-semibold text-rose-50">{targetSum.toFixed(1)}%</span>
+            — 100%에 맞추세요
             {targetSum < 100 - TARGET_SUM_TOLERANCE ? (
-              <span className="block pt-0.5 text-rose-200/90">
-                → 현재 <span className="tabular-nums">{(100 - targetSum).toFixed(1)}%</span> 부족합니다.
+              <span>
+                {" "}
+                (<span className="tabular-nums">{(100 - targetSum).toFixed(1)}%</span> 부족)
               </span>
             ) : (
-              <span className="block pt-0.5 text-rose-200/90">
-                → 현재 <span className="tabular-nums">{(targetSum - 100).toFixed(1)}%</span> 초과입니다.
+              <span>
+                {" "}
+                (<span className="tabular-nums">{(targetSum - 100).toFixed(1)}%</span> 초과)
               </span>
             )}
+            .
           </p>
         </div>
       ) : hasAnyTarget && targetSumOk ? (
@@ -272,28 +276,43 @@ function TargetStockWeightNeu({
           const hasTarget = target > 0;
           const ratio = hasTarget ? actual / target : 0;
           const fillPct = hasTarget ? Math.min(ratio * 100, 100) : 0;
-          const tol = Math.max(0.3, target * 0.015);
-          const exceeded = hasTarget && actual > target + tol;
-          const near =
-            hasTarget && !exceeded && actual >= target - tol && actual <= target + tol;
-          const fillColor = !hasTarget ? "transparent" : exceeded ? "#f59e0b" : "#3b82f6";
+          /** 목표 대비 상대 편차 (actual−target)/target — ±5% 이내 파랑, 미만 빨강, 초과 초록 */
+          const relDev = hasTarget ? (actual - target) / target : 0;
+          const withinBand = hasTarget && Math.abs(relDev) <= 0.05;
+          const belowBand = hasTarget && relDev < -0.05;
+          const aboveBand = hasTarget && relDev > 0.05;
+          const fillColor = !hasTarget
+            ? "transparent"
+            : withinBand
+              ? "#3b82f6"
+              : belowBand
+                ? "#ef4444"
+                : "#22c55e";
+          const barGlow =
+            !hasTarget
+              ? undefined
+              : withinBand
+                ? "0 0 12px rgba(59,130,246,0.35)"
+                : belowBand
+                  ? "0 0 12px rgba(239,68,68,0.4)"
+                  : "0 0 12px rgba(34,197,94,0.4)";
 
           let statusLabel: string;
           if (!hasTarget) statusLabel = "목표 입력";
-          else if (exceeded) statusLabel = "초과";
-          else if (near) statusLabel = "목표 부근";
+          else if (aboveBand) statusLabel = "초과";
+          else if (withinBand) statusLabel = "±5% 이내";
           else statusLabel = "미달";
 
           return (
             <div key={slice.name} className="flex w-full max-w-[56px] flex-col items-center gap-1">
               <label className="flex w-full flex-col gap-0.5">
-                <span className="text-center text-[8px] font-medium text-zinc-500">목표%</span>
                 <input
                   type="number"
                   min={0}
                   max={100}
                   step={0.1}
                   placeholder="—"
+                  aria-label={`${slice.ticker} 목표 비중 %`}
                   className="w-full rounded-md border border-white/10 bg-zinc-900/80 px-0.5 py-0.5 text-center text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 placeholder:text-zinc-600 focus:ring-1"
                   style={{
                     boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
@@ -321,19 +340,26 @@ function TargetStockWeightNeu({
                       minHeight: ratio > 0 ? 4 : 0,
                       maxHeight: "calc(100% - 6px)",
                       background: fillColor,
-                      boxShadow:
-                        exceeded
-                          ? "0 0 12px rgba(245,158,11,0.45)"
-                          : "0 0 12px rgba(59,130,246,0.35)",
+                      boxShadow: barGlow,
                     }}
                   />
                 ) : null}
               </div>
-              <div className="text-center text-[8px] tabular-nums leading-tight text-zinc-400">
+              <div
+                className={`text-center text-[8px] tabular-nums leading-tight ${
+                  !hasTarget
+                    ? "text-zinc-400"
+                    : withinBand
+                      ? "text-sky-400"
+                      : belowBand
+                        ? "text-red-400"
+                        : "text-emerald-400"
+                }`}
+              >
                 현재 {actual.toFixed(1)}%
                 <span
                   className={`mt-0.5 block font-medium ${
-                    !hasTarget ? "text-zinc-600" : exceeded ? "text-amber-400" : near ? "text-emerald-400/90" : "text-zinc-500"
+                    !hasTarget ? "text-zinc-600" : withinBand ? "text-sky-400" : belowBand ? "text-red-400" : "text-emerald-400"
                   }`}
                 >
                   {statusLabel}
