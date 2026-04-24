@@ -1247,19 +1247,23 @@ export default function Home() {
   const fedBriefQuery = useQuery<FedBriefApiResponse>({
     queryKey: ["macro-fed-brief"],
     queryFn: async () => {
-      const res = await fetch("/api/macro/fed-brief");
+      const res = await fetch("/api/macro/fed-brief", { cache: "no-store" });
       return res.json() as Promise<FedBriefApiResponse>;
     },
-    staleTime: 1000 * 60 * 30,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 
   const themesBriefQuery = useQuery<ThemesBriefApiResponse>({
     queryKey: ["macro-themes-brief"],
     queryFn: async () => {
-      const res = await fetch("/api/macro/themes-brief");
+      const res = await fetch("/api/macro/themes-brief", { cache: "no-store" });
       return res.json() as Promise<ThemesBriefApiResponse>;
     },
-    staleTime: 1000 * 60 * 30,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 
   const fedNote = useMemo(() => {
