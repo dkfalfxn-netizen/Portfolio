@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { normalizeStoredSourceTitles } from "@/lib/google-news-rss";
 
 export const dynamic = "force-dynamic";
 
@@ -7,11 +8,22 @@ const NO_STORE = {
   "Cache-Control": "private, no-store, must-revalidate",
 } as const;
 
+const emptySources = [] as { title: string; url: string }[];
+
+const THEMES_BRIEF_V2_MARKER = "참고 링크 (위 요약의 [N]과 동일 번호";
+
 export async function GET() {
   const admin = createSupabaseAdmin();
   if (!admin) {
     return NextResponse.json(
-      { ok: false, error: "Supabase 설정 누락", summary: null, reportDate: null, titles: [] as string[] },
+      {
+        ok: false,
+        error: "Supabase 설정 누락",
+        summary: null,
+        reportDate: null,
+        titles: [] as string[],
+        sources: emptySources,
+      },
       { status: 503, headers: NO_STORE },
     );
   }
@@ -31,6 +43,7 @@ export async function GET() {
         summary: null,
         reportDate: null,
         titles: [] as string[],
+        sources: emptySources,
         hint: "테이블이 없으면 supabase/macro_themes_briefings.sql 을 Supabase에 실행하세요.",
       },
       { status: 200, headers: NO_STORE },
@@ -44,20 +57,26 @@ export async function GET() {
         summary: null,
         reportDate: null,
         titles: [] as string[],
+        sources: emptySources,
         message: "아직 저장된 AI·방산 뉴스 요약이 없습니다. Cron(macro-themes-briefing)이 실행되면 쌓입니다.",
       },
       { headers: NO_STORE },
     );
   }
 
-  const titles = Array.isArray(data.source_titles) ? (data.source_titles as string[]) : [];
+  const sources = normalizeStoredSourceTitles(data.source_titles);
+  const titles = sources.map((s) => s.title);
 
+  const summary = data.summary ?? null;
   return NextResponse.json(
     {
       ok: true,
-      summary: data.summary ?? null,
+      summary,
       reportDate: data.report_date,
       titles,
+      sources,
+      briefingFormat:
+        summary && summary.includes(THEMES_BRIEF_V2_MARKER) ? "headlines-with-links" : "legacy",
     },
     { headers: NO_STORE },
   );

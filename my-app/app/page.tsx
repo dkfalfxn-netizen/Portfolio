@@ -99,6 +99,9 @@ type FedBriefApiResponse = {
   hint?: string;
   message?: string;
   titles?: string[];
+  sources?: { title: string; url: string }[];
+  /** `headlines-with-links`: 크론 v2 포맷(참고 링크 블록 포함). */
+  briefingFormat?: "headlines-with-links" | "legacy";
 };
 
 type ThemesBriefApiResponse = {
@@ -109,6 +112,8 @@ type ThemesBriefApiResponse = {
   hint?: string;
   message?: string;
   titles?: string[];
+  sources?: { title: string; url: string }[];
+  briefingFormat?: "headlines-with-links" | "legacy";
 };
 
 /** 로컬 저장 키 — v1에서 한 번만 마이그레이션 후 v2만 사용 */

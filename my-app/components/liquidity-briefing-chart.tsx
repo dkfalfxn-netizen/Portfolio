@@ -1,5 +1,6 @@
 "use client";
 
+import { coerceNumberedSummaryLines } from "@/lib/briefing-format";
 import {
   CartesianGrid,
   Line,
@@ -93,7 +94,9 @@ export function LiquidityBriefingChart({ rows }: Props) {
       <div className="rounded-lg border bg-muted/20 p-3">
         <p className="mb-1 text-xs text-muted-foreground">AI 요약</p>
         <p className="whitespace-pre-wrap text-sm leading-relaxed">
-          {last.aiSummary || "AI 요약이 아직 없습니다."}
+          {last.aiSummary
+            ? coerceNumberedSummaryLines(last.aiSummary, 6)
+            : "AI 요약이 아직 없습니다."}
         </p>
       </div>
     </div>

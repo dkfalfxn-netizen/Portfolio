@@ -3,7 +3,7 @@ create table if not exists macro_fed_briefings (
   id uuid primary key default gen_random_uuid(),
   report_date date not null unique,
   summary text not null,
-  source_titles jsonb,
+  source_titles jsonb, -- string[] (구버전) 또는 {"title","url"}[] (신버전 RSS 출처)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateBriefSummary } from "@/lib/ai-brief-summary";
+import { coerceNumberedSummaryLines } from "@/lib/briefing-format";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { todayKST } from "@/lib/date-utils";
 
@@ -162,7 +163,7 @@ function fallbackAiSummary(v: LiquiditySnapshot): string {
     v.vixPct !== null
       ? `VIX는 전일 대비 ${v.vixPct <= 0 ? "내려 권리스크심이 일부 완화된" : "올라 변동성 경계가 강한"} 쪽으로 읽힐 수 있습니다.`
       : "VIX는 참고용입니다.";
-  return [liqDir, fx, rate, risk].join(" ");
+  return [liqDir, fx, rate, risk].map((s, i) => `${i + 1}. ${s}`).join("\n");
 }
 
 async function generateAiSummary(snapshot: LiquiditySnapshot): Promise<string> {
@@ -179,12 +180,13 @@ async function generateAiSummary(snapshot: LiquiditySnapshot): Promise<string> {
   try {
     const text = await generateBriefSummary({
       system:
-        "너는 매크로 데일리 브리핑 작성자다. 한국어로 정확히 3~4문장(문장 끝에 마침표)으로만 작성한다. 과장·투자 권유·단정적 예측은 피하고, 제시된 지표의 방향(전일 대비)만 간단히 엮는다. 마지막 문장에 한해 시장 ‘해석’을 아주 온건하게 덧붙일 수 있다.",
+        "너는 매크로 데일리 브리핑 작성자다. 한국어로 **4~6줄**만 출력한다. **각 줄은 반드시 `1. ` `2. ` …처럼 숫자·마침표·공백으로 시작**한다. (유동성, 달러, 금리·스프레드, 변동성 등 지표는 각각 1줄씩 쓰고, **마지막 줄**에만 온건한 ‘해석’을 한 문장으로 덧붙인다.) 과장·투자 권유·단정적 예측은 피하고, 제시된 지표의 방향(전일 대비)을 중심으로 쓴다.",
       user,
-      maxTokens: 520,
+      maxTokens: 640,
       temperature: 0.2,
     });
-    return text && text.length > 0 ? text.slice(0, 1200) : fallbackAiSummary(snapshot);
+    if (!text || text.length === 0) return fallbackAiSummary(snapshot);
+    return coerceNumberedSummaryLines(text.trim().slice(0, 1200), 6);
   } catch (err) {
     console.error("[liquidity-briefing] generateAiSummary:", err);
     return fallbackAiSummary(snapshot);
@@ -313,11 +315,12 @@ async function run() {
     throw new Error(`DB 저장 실패: ${saved.error ?? "unknown"} — 텔레그램 전송을 건너뜁니다.`);
   }
 
+  const summaryHtml = escapeHtml(aiSummary).replace(/\n/g, "<br/>");
   const text = [
     "🌊 <b>데이터 분석 — 유동성 지표(09:00 KST)</b>",
     `기준일: ${escapeHtml(date)}`,
     "",
-    `<b>AI 요약</b> ${escapeHtml(aiSummary)}`,
+    `<b>AI 요약</b><br/>${summaryHtml}`,
     "",
     "<i>참고: 본 브리핑은 투자 권유가 아닌 시장 모니터링용 요약입니다.</i>",
   ].join("\n");

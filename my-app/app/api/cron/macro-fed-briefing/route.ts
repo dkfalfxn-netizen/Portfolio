@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { generateBriefSummary } from "@/lib/ai-brief-summary";
 import { todayKST } from "@/lib/date-utils";
+import { coerceNumberedSummaryLines } from "@/lib/briefing-format";
+import {
+  dedupeHeadlines,
+  formatHeadlinesSourceBlock,
+  type GoogleNewsHeadline,
+  parseGoogleNewsRssHeadlines,
+} from "@/lib/google-news-rss";
 
 export const maxDuration = 60;
 
@@ -11,44 +18,23 @@ const RSS_QUERIES = [
   "FOMC+policy",
 ] as const;
 
+const SOURCE_BLOCK_SEP =
+  "\n\n────────────────────────\n참고 링크 (위 요약의 [N]과 동일 번호 · Google 뉴스 RSS)\n\n";
+
 function googleNewsRssUrl(q: string): string {
   return `https://news.google.com/rss/search?q=${q}&hl=en&gl=US&ceid=US:en`;
 }
 
-function parseRssTitles(xml: string, limit = 28): string[] {
-  const out: string[] = [];
-  const itemBlocks = xml.match(/<item[\s\S]*?<\/item>/g) ?? [];
-  for (const item of itemBlocks) {
-    if (out.length >= limit) break;
-    const m = item.match(
-      /<title(?:\s[^>]*)?>(?:\s*<!\[CDATA\[)?([\s\S]*?)(?:\]\]>\s*)?<\/title>/i,
-    );
-    if (!m) continue;
-    let t = m[1]
-      .replace(/^\s*<!\[CDATA\[/, "")
-      .replace(/\]\]>\s*$/, "")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .trim();
-    t = t.replace(/<[^>]+>/g, "");
-    if (t.length < 6) continue;
-    out.push(t);
-  }
-  return [...new Set(out)];
-}
-
-function fallbackSummary(titles: string[]): string {
-  if (titles.length === 0) {
+function fallbackSummary(items: GoogleNewsHeadline[]): string {
+  if (items.length === 0) {
     return "오늘은 RSS에서 가져온 제목이 없어 요약을 만들 수 없습니다. 뉴스 소스·네트워크 응답을 확인하세요. 연준·금리 관련 쟁점은 수동 점검이 필요할 수 있습니다. Vercel Cron 로그를 함께 확인해 주세요.";
   }
-  return `최신 헤드라인 ${Math.min(5, titles.length)}개를 기준으로, 연준·금리 정책 논의가 뉴스 흐름에 포함돼 있는지 확인할 수 있습니다. Gemini/OpenAI를 쓸 수 없을 때는 상세 AI 요약 대신 이 안내가 저장됩니다. (예시 제목) ${titles.slice(0, 2).join(" / ")}`;
+  const head = `최신 헤드라인 ${Math.min(5, items.length)}개를 기준으로, 연준·금리 정책 논의가 뉴스 흐름에 포함돼 있는지 확인할 수 있습니다. Gemini/OpenAI를 쓸 수 없을 때는 상세 AI 요약 대신 아래 목록이 저장됩니다.`;
+  return `${head}${SOURCE_BLOCK_SEP}${formatHeadlinesSourceBlock(items.slice(0, 8))}`;
 }
 
-async function fetchAllTitles(): Promise<string[]> {
-  const all: string[] = [];
+async function fetchAllHeadlines(): Promise<GoogleNewsHeadline[]> {
+  const all: GoogleNewsHeadline[] = [];
   for (const q of RSS_QUERIES) {
     try {
       const res = await fetch(googleNewsRssUrl(q), {
@@ -57,25 +43,38 @@ async function fetchAllTitles(): Promise<string[]> {
       });
       if (!res.ok) continue;
       const text = await res.text();
-      all.push(...parseRssTitles(text, 20));
+      all.push(...parseGoogleNewsRssHeadlines(text, 20));
     } catch {
       /* next query */
     }
   }
-  return [...new Set(all)].slice(0, 36);
+  return dedupeHeadlines(all).slice(0, 36);
 }
 
-async function generateSummary(titles: string[], date: string): Promise<string> {
-  if (titles.length === 0) return fallbackSummary(titles);
-  const lines = titles.map((t, i) => `${i + 1}. ${t}`).join("\n");
+async function generateSummary(items: GoogleNewsHeadline[], date: string): Promise<string> {
+  if (items.length === 0) return fallbackSummary(items);
+  const numbered = items
+    .map((it, i) => `${i + 1}. ${it.title}\n   URL: ${it.url}`)
+    .join("\n\n");
   const text = await generateBriefSummary({
     system:
-      "너는 국제 금융 뉴스 데스크다. 아래는 최근(당일) 연준·금리·FOMC·후보(케빈 워시 등) 관련으로 수집된 **영어 뉴스 제목**이다. 투자 권유·단정적 예측은 금지. 한국어로 **정확히 3~4문장**만 쓰고, (1) 시장/정책 쪽에서 공통으로 보이는 관심사 (2) 연준·금리·후보자 관련 언급이 있으면 요지만 (3) 뉴스끼리 상충되면 '제목 상으로는 상충이 보인다' 수준의 온건한 표현 (4) 마지막에 한 문장: 자료는 헤드라인만이므로 **원문 기사 확인이 필요**하다는 점을 밝힌다. 제목에 없는 사실(구체 수치, 인용)은 쓰지 말라.",
-    user: `기준일(한국): ${date}\n\n다음 뉴스 제목:\n${lines.slice(0, 4000)}`,
-    maxTokens: 600,
+      "너는 국제 금융 뉴스 데스크다. 입력은 번호가 매겨진 뉴스 **헤드라인**과 각각의 RSS **URL**이다(Google 뉴스, 클릭 시 기사로 연결).\n\n" +
+      "규칙:\n" +
+      "- 투자 권유·단정적 예측 금지.\n" +
+      "- 헤드라인에 없는 사실(구체 수치, 인용, 속보)은 쓰지 말 것.\n" +
+      "- 한국어로 **정확히 4~6줄**만 출력한다. 각 줄은 반드시 `1. `처럼 **숫자·마침표·공백**으로 시작하고, 문장 끝에 **(근거: [N])** 또는 **(근거: [N][M])**처럼 요약 근거가 된 헤드라인 번호만 대괄호 안에 적는다. N은 입력 번호와 정확히 일치해야 한다.\n" +
+      "- 뉴스들이 상충하면 한 줄에서 '제목만 보면 상충이 보인다'고 온건하게 쓴다.\n" +
+      "- **URL·도메인·http는 응답에 절대 넣지 마라.** 링크는 시스템이 아래에 붙인다.\n" +
+      "- 마지막 줄은 헤드라인만으로는 한계가 있어 **원문 기사 확인이 필요**하다는 취지로 짧게 마무리한다. 이때 `(근거: …)`는 생략하거나 대표 번호 하나만 붙여도 된다.",
+    user: `기준일(한국): ${date}\n\n각 번호는 하나의 뉴스 헤드라인과 그 RSS 링크에 대응한다.\n\n${numbered.slice(0, 12000)}`,
+    maxTokens: 900,
     temperature: 0.25,
   });
-  return text && text.length > 0 ? text.slice(0, 2000) : fallbackSummary(titles);
+  if (!text || text.length === 0) {
+    return fallbackSummary(items);
+  }
+  const body = coerceNumberedSummaryLines(text.trim().slice(0, 8000), 6);
+  return `${body}${SOURCE_BLOCK_SEP}${formatHeadlinesSourceBlock(items)}`;
 }
 
 export async function GET(req: NextRequest) {
@@ -88,36 +87,40 @@ export async function GET(req: NextRequest) {
   }
 
   const date = todayKST();
-  const titles = await fetchAllTitles();
+  const items = await fetchAllHeadlines();
   let summary: string;
   try {
-    summary = await generateSummary(titles, date);
+    summary = await generateSummary(items, date);
   } catch (err) {
     console.error("[macro-fed-briefing] generateSummary:", err);
-    summary = fallbackSummary(titles);
+    summary = fallbackSummary(items);
   }
 
   const admin = createSupabaseAdmin();
   if (!admin) {
     return NextResponse.json(
-      { ok: false, error: "Supabase admin 없음", titlesCount: titles.length, summary },
+      { ok: false, error: "Supabase admin 없음", titlesCount: items.length, summary },
       { status: 503 },
     );
   }
 
   const { error } = await admin.from("macro_fed_briefings").upsert(
-    { report_date: date, summary, source_titles: titles },
+    { report_date: date, summary, source_titles: items },
     { onConflict: "report_date" },
   );
 
   if (error) {
     return NextResponse.json(
-      { ok: false, error: error.message, hint: "Supabase에 macro_fed_briefings 테이블이 있는지 확인하세요 (supabase/macro_fed_briefings.sql)." },
+      {
+        ok: false,
+        error: error.message,
+        hint: "Supabase에 macro_fed_briefings 테이블이 있는지 확인하세요 (supabase/macro_fed_briefings.sql).",
+      },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({ ok: true, date, titlesCount: titles.length, summaryLen: summary.length });
+  return NextResponse.json({ ok: true, date, titlesCount: items.length, summaryLen: summary.length });
 }
 
 export async function POST(req: NextRequest) {

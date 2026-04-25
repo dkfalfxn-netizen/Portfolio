@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { normalizeStoredSourceTitles } from "@/lib/google-news-rss";
 
 /** Cron 직후에도 대시보드가 바로 갱신되도록 캐시 비활성화 */
 export const dynamic = "force-dynamic";
@@ -8,11 +9,21 @@ const NO_STORE = {
   "Cache-Control": "private, no-store, must-revalidate",
 } as const;
 
+/** `macro-fed-briefing` v2 저장 시 summary에 포함되는 고정 문구 */
+const FED_BRIEF_V2_MARKER = "참고 링크 (위 요약의 [N]과 동일 번호";
+
 export async function GET() {
   const admin = createSupabaseAdmin();
   if (!admin) {
     return NextResponse.json(
-      { ok: false, error: "Supabase 설정 누락", summary: null, reportDate: null, titles: [] as string[] },
+      {
+        ok: false,
+        error: "Supabase 설정 누락",
+        summary: null,
+        reportDate: null,
+        titles: [] as string[],
+        sources: [] as { title: string; url: string }[],
+      },
       { status: 503, headers: NO_STORE },
     );
   }
@@ -32,6 +43,7 @@ export async function GET() {
         summary: null,
         reportDate: null,
         titles: [] as string[],
+        sources: [] as { title: string; url: string }[],
         hint: "테이블이 없으면 supabase/macro_fed_briefings.sql 을 Supabase에 실행하세요.",
       },
       { status: 200, headers: NO_STORE },
@@ -45,20 +57,26 @@ export async function GET() {
         summary: null,
         reportDate: null,
         titles: [] as string[],
+        sources: [] as { title: string; url: string }[],
         message: "아직 저장된 연준·금리 뉴스 요약이 없습니다. Cron(macro-fed-briefing)이 실행되면 쌓입니다.",
       },
       { headers: NO_STORE },
     );
   }
 
-  const titles = Array.isArray(data.source_titles) ? (data.source_titles as string[]) : [];
+  const sources = normalizeStoredSourceTitles(data.source_titles);
+  const titles = sources.map((s) => s.title);
 
+  const summary = data.summary ?? null;
   return NextResponse.json(
     {
       ok: true,
-      summary: data.summary ?? null,
+      summary,
       reportDate: data.report_date,
       titles,
+      sources,
+      briefingFormat:
+        summary && summary.includes(FED_BRIEF_V2_MARKER) ? "headlines-with-links" : "legacy",
     },
     { headers: NO_STORE },
   );

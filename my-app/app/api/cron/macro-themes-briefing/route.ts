@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { generateBriefSummary } from "@/lib/ai-brief-summary";
 import { todayKST } from "@/lib/date-utils";
+import { coerceNumberedSummaryLines } from "@/lib/briefing-format";
+import {
+  dedupeHeadlines,
+  formatHeadlinesSourceBlock,
+  type GoogleNewsHeadline,
+  parseGoogleNewsRssHeadlines,
+} from "@/lib/google-news-rss";
 
 export const maxDuration = 60;
 
@@ -13,6 +20,9 @@ const RSS_QUERIES: { q: string; ceid: "US:en" | "KR:ko" }[] = [
   { q: "방산 한국 주식", ceid: "KR:ko" },
 ];
 
+const SOURCE_BLOCK_SEP =
+  "\n\n────────────────────────\n참고 링크 (위 요약의 [N]과 동일 번호 · Google 뉴스 RSS)\n\n";
+
 function googleNewsRssUrl(q: string, ceid: "US:en" | "KR:ko"): string {
   const encoded = encodeURIComponent(q);
   if (ceid === "KR:ko") {
@@ -21,40 +31,16 @@ function googleNewsRssUrl(q: string, ceid: "US:en" | "KR:ko"): string {
   return `https://news.google.com/rss/search?q=${encoded}&hl=en&gl=US&ceid=US:en`;
 }
 
-function parseRssTitles(xml: string, limit = 22): string[] {
-  const out: string[] = [];
-  const itemBlocks = xml.match(/<item[\s\S]*?<\/item>/g) ?? [];
-  for (const item of itemBlocks) {
-    if (out.length >= limit) break;
-    const m = item.match(
-      /<title(?:\s[^>]*)?>(?:\s*<!\[CDATA\[)?([\s\S]*?)(?:\]\]>\s*)?<\/title>/i,
-    );
-    if (!m) continue;
-    let t = m[1]
-      .replace(/^\s*<!\[CDATA\[/, "")
-      .replace(/\]\]>\s*$/, "")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .trim();
-    t = t.replace(/<[^>]+>/g, "");
-    if (t.length < 6) continue;
-    out.push(t);
-  }
-  return [...new Set(out)];
-}
-
-function fallbackSummary(titles: string[]): string {
-  if (titles.length === 0) {
+function fallbackSummary(items: GoogleNewsHeadline[]): string {
+  if (items.length === 0) {
     return "오늘은 RSS에서 가져온 제목이 없어 요약을 만들 수 없습니다. 뉴스 소스·네트워크를 확인하거나, Google 뉴스 검색 결과가 비어 있을 수 있습니다.";
   }
-  return `최신 헤드라인 ${Math.min(5, titles.length)}개를 기준으로 AI·방산 관련 흐름을 짐작할 수 있습니다. Gemini/OpenAI를 쓸 수 없을 때는 이 안내만 저장됩니다. (예시) ${titles.slice(0, 2).join(" / ")}`;
+  const head = `최신 헤드라인 ${Math.min(5, items.length)}개를 기준으로 AI·방산 관련 흐름을 짐작할 수 있습니다. Gemini/OpenAI를 쓸 수 없을 때는 아래 목록이 저장됩니다.`;
+  return `${head}${SOURCE_BLOCK_SEP}${formatHeadlinesSourceBlock(items.slice(0, 10))}`;
 }
 
-async function fetchAllTitles(): Promise<string[]> {
-  const all: string[] = [];
+async function fetchAllHeadlines(): Promise<GoogleNewsHeadline[]> {
+  const all: GoogleNewsHeadline[] = [];
   for (const { q, ceid } of RSS_QUERIES) {
     try {
       const res = await fetch(googleNewsRssUrl(q, ceid), {
@@ -63,25 +49,38 @@ async function fetchAllTitles(): Promise<string[]> {
       });
       if (!res.ok) continue;
       const text = await res.text();
-      all.push(...parseRssTitles(text, 18));
+      all.push(...parseGoogleNewsRssHeadlines(text, 18));
     } catch {
       /* next query */
     }
   }
-  return [...new Set(all)].slice(0, 40);
+  return dedupeHeadlines(all).slice(0, 40);
 }
 
-async function generateSummary(titles: string[], date: string): Promise<string> {
-  if (titles.length === 0) return fallbackSummary(titles);
-  const lines = titles.map((t, i) => `${i + 1}. ${t}`).join("\n");
+async function generateSummary(items: GoogleNewsHeadline[], date: string): Promise<string> {
+  if (items.length === 0) return fallbackSummary(items);
+  const numbered = items
+    .map((it, i) => `${i + 1}. ${it.title}\n   URL: ${it.url}`)
+    .join("\n\n");
   const text = await generateBriefSummary({
     system:
-      "너는 테크·산업 뉴스 데스크다. 아래는 최근(당일) **AI(인공지능)·반도체·투자**와 **방위·군수·한국 방산** 등으로 수집된 뉴스 **제목**이다(영·한 혼재 가능). 투자 권유·단정적 예측은 금지. 한국어로 **정확히 3~5문장**만 쓰고, (1) AI/기술/반도체 쪽에서 공통으로 보이는 화제 (2) 방산·국방·계약/수출 관련 흐름이 제목에 있으면 요약 (3) 두 축이 섞이면 짧게 연결 (4) 마지막에 **원문 기사가 필요**하다고 한 문장. 제목에 없는 수치·인용·속보 사실은 쓰지 말라.",
-    user: `기준일(한국): ${date}\n\n뉴스 제목:\n${lines.slice(0, 4000)}`,
-    maxTokens: 650,
+      "너는 테크·산업 뉴스 데스크다. 입력은 번호가 매겨진 뉴스 **헤드라인**(영·한 혼재)과 각각의 RSS **URL**이다.\n\n" +
+      "규칙:\n" +
+      "- 투자 권유·단정적 예측 금지.\n" +
+      "- 제목에 없는 수치·인용·속보 사실은 쓰지 말 것.\n" +
+      "- 한국어로 **정확히 4~6줄**만 출력한다. 각 줄은 **숫자·마침표·공백**으로 시작하고, 끝에 **(근거: [N])** 또는 **(근거: [N][M])**로 근거 헤드라인 번호를 적는다.\n" +
+      "- AI·반도체·투자 축과 방산·국방 축이 섞여 있으면 각각 반영한다.\n" +
+      "- **URL·도메인·http는 응답에 넣지 마라.**\n" +
+      "- 마지막 줄은 **원문 기사 확인이 필요**하다는 취지로 짧게 마무리한다. `(근거: …)`는 생략 가능하다.",
+    user: `기준일(한국): ${date}\n\n각 번호는 하나의 뉴스 헤드라인과 그 RSS 링크에 대응한다.\n\n${numbered.slice(0, 12000)}`,
+    maxTokens: 950,
     temperature: 0.25,
   });
-  return text && text.length > 0 ? text.slice(0, 2000) : fallbackSummary(titles);
+  if (!text || text.length === 0) {
+    return fallbackSummary(items);
+  }
+  const body = coerceNumberedSummaryLines(text.trim().slice(0, 8000), 6);
+  return `${body}${SOURCE_BLOCK_SEP}${formatHeadlinesSourceBlock(items)}`;
 }
 
 export async function GET(req: NextRequest) {
@@ -94,25 +93,25 @@ export async function GET(req: NextRequest) {
   }
 
   const date = todayKST();
-  const titles = await fetchAllTitles();
+  const items = await fetchAllHeadlines();
   let summary: string;
   try {
-    summary = await generateSummary(titles, date);
+    summary = await generateSummary(items, date);
   } catch (err) {
     console.error("[macro-themes-briefing] generateSummary:", err);
-    summary = fallbackSummary(titles);
+    summary = fallbackSummary(items);
   }
 
   const admin = createSupabaseAdmin();
   if (!admin) {
     return NextResponse.json(
-      { ok: false, error: "Supabase admin 없음", titlesCount: titles.length, summary },
+      { ok: false, error: "Supabase admin 없음", titlesCount: items.length, summary },
       { status: 503 },
     );
   }
 
   const { error } = await admin.from("macro_themes_briefings").upsert(
-    { report_date: date, summary, source_titles: titles },
+    { report_date: date, summary, source_titles: items },
     { onConflict: "report_date" },
   );
 
@@ -127,7 +126,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ ok: true, date, titlesCount: titles.length, summaryLen: summary.length });
+  return NextResponse.json({ ok: true, date, titlesCount: items.length, summaryLen: summary.length });
 }
 
 export async function POST(req: NextRequest) {

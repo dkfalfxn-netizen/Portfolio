@@ -75,8 +75,8 @@ function geminiModelCandidates(): string[] {
   const fromEnv = cleanKey(process.env.GEMINI_MODEL);
   const chain = [
     fromEnv,
-    "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
   ].filter((x): x is string => Boolean(x));
@@ -213,7 +213,7 @@ async function tryOpenAI(params: BriefSummaryParams, apiKey: string): Promise<st
  * - `GEMINI_API_KEY`가 있으면 **Gemini만** 사용 (실패·빈 응답 시 null). OpenAI로 넘어가지 않아 429 로그·불필요 과금을 막음.
  * - 없으면 `OPENAI_API_KEY`로 OpenAI.
  * - `AI_SUMMARY_ALLOW_OPENAI_FALLBACK=1`이면 Gemini 실패 후에도 OpenAI 시도(예: 로컬 디버그).
- * 모델: `GEMINI_MODEL` 우선, 실패 시 2.5-flash-lite → 2.5-flash → 2.0-flash → 1.5-flash 순으로 자동 재시도.
+ * 모델: `GEMINI_MODEL` 우선, 실패 시 2.5-flash → 2.5-flash-lite → 2.0-flash → 1.5-flash 순으로 자동 재시도.
  */
 export async function generateBriefSummary(params: BriefSummaryParams): Promise<string | null> {
   const geminiKey = cleanKey(process.env.GEMINI_API_KEY);
