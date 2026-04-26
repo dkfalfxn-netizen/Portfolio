@@ -1020,7 +1020,7 @@ export default function Home() {
     sentHoldings?: number;
     sentWatchlist?: number;
   } | null>(null);
-  type WatchlistRow = { symbol: string; name: string };
+  type WatchlistRow = { symbol: string; name: string; group?: string };
   const [watchlistRows, setWatchlistRows] = useState<WatchlistRow[]>([]);
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
@@ -2391,10 +2391,10 @@ export default function Home() {
     void (async () => {
       try {
         const r = await fetch(`/api/watchlist?sync_key=${encodeURIComponent(cloudSyncKey)}`);
-        const j = (await r.json()) as { ok?: boolean; entries?: Array<{ symbol: string; name?: string }> };
+        const j = (await r.json()) as { ok?: boolean; entries?: Array<{ symbol: string; name?: string; group?: string }> };
         if (r.ok && j.entries && j.entries.length > 0) {
           setWatchlistRows(
-            j.entries.map((e) => ({ symbol: e.symbol, name: e.name ?? "" })),
+            j.entries.map((e) => ({ symbol: e.symbol, name: e.name ?? "", group: e.group ?? "" })),
           );
         }
       } catch {
@@ -2415,6 +2415,7 @@ export default function Home() {
         .map((row) => ({
           symbol: row.symbol.trim().toUpperCase(),
           ...(row.name.trim() ? { name: row.name.trim() } : {}),
+          ...(row.group?.trim() ? { group: row.group.trim() } : {}),
         }))
         .filter((e) => e.symbol.length > 0);
       const res = await fetch("/api/watchlist", {
@@ -5415,6 +5416,16 @@ export default function Home() {
                       )
                     }
                   />
+                  <input
+                    className="w-28 rounded border bg-background px-2 py-1 text-xs"
+                    placeholder="그룹 (선택)"
+                    value={row.group ?? ""}
+                    onChange={(e) =>
+                      setWatchlistRows((prev) =>
+                        prev.map((r, i) => (i === idx ? { ...r, group: e.target.value } : r)),
+                      )
+                    }
+                  />
                   <button
                     type="button"
                     className="ml-auto rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
@@ -5428,7 +5439,7 @@ export default function Home() {
                 <button
                   type="button"
                   className="cursor-pointer rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
-                  onClick={() => setWatchlistRows((prev) => [...prev, { symbol: "", name: "" }])}
+                  onClick={() => setWatchlistRows((prev) => [...prev, { symbol: "", name: "", group: "" }])}
                 >
                   + 종목 추가
                 </button>

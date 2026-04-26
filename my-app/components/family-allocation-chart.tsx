@@ -275,14 +275,15 @@ function TargetStockWeightNeu({
           const target = targetsByTicker[slice.ticker] ?? 0;
           const actual = slice.weight;
           const hasPositiveTarget = target > 0;
+          const isOverTargetWhenZero = hasInputTarget && !hasPositiveTarget && actual > 0;
           const ratio = hasPositiveTarget ? actual / target : 0;
-          const fillPct = hasPositiveTarget ? Math.min(ratio * 100, 100) : 0;
+          const fillPct = hasPositiveTarget ? Math.min(ratio * 100, 100) : isOverTargetWhenZero ? 100 : 0;
           /** 목표 대비 상대 편차 (actual−target)/target — ±5% 이내 파랑, 미만 빨강, 초과 초록 */
           const relDev = hasPositiveTarget ? (actual - target) / target : 0;
           const withinBand = hasPositiveTarget && Math.abs(relDev) <= 0.05;
           const belowBand = hasPositiveTarget && relDev < -0.05;
-          const aboveBand = hasPositiveTarget && relDev > 0.05;
-          const fillColor = !hasPositiveTarget
+          const aboveBand = (hasPositiveTarget && relDev > 0.05) || isOverTargetWhenZero;
+          const fillColor = !(hasPositiveTarget || isOverTargetWhenZero)
             ? "transparent"
             : withinBand
               ? "#3b82f6"
@@ -290,7 +291,7 @@ function TargetStockWeightNeu({
                 ? "#ef4444"
                 : "#22c55e";
           const barGlow =
-            !hasPositiveTarget
+            !(hasPositiveTarget || isOverTargetWhenZero)
               ? undefined
               : withinBand
                 ? "0 0 12px rgba(59,130,246,0.35)"
@@ -300,13 +301,36 @@ function TargetStockWeightNeu({
 
           let statusLabel: string;
           if (!hasInputTarget) statusLabel = "목표 입력";
-          else if (!hasPositiveTarget) statusLabel = "0%";
+          else if (!hasPositiveTarget) statusLabel = actual > 0 ? "초과" : "0%";
           else if (aboveBand) statusLabel = "초과";
           else if (withinBand) statusLabel = "±5% 이내";
           else statusLabel = "미달";
 
+          const tooltipEntries = slice.allEntries.filter((e) => e.name !== "USD 현금" && e.name !== "KRW 현금");
+          const isGrouped = tooltipEntries.length > 1;
+
           return (
-            <div key={slice.name} className="flex w-full max-w-[56px] flex-col items-center gap-1">
+            <div key={slice.name} className="group relative flex w-full max-w-[56px] flex-col items-center gap-1">
+              {tooltipEntries.length > 0 ? (
+                <div className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-20 hidden w-max min-w-[140px] -translate-x-1/2 rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
+                  {isGrouped ? (
+                    <div className="space-y-1">
+                      <p className="font-bold text-cyan-400">{slice.ticker}</p>
+                      {tooltipEntries.map((e) => (
+                        <div key={`${slice.ticker}-${e.symbol}`} className="flex items-baseline gap-1.5">
+                          <span className="font-semibold text-zinc-300">{e.symbol}</span>
+                          <span className="text-zinc-500">{e.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-cyan-400">{tooltipEntries[0].symbol || slice.ticker}</p>
+                      <p className="font-semibold text-zinc-200">{tooltipEntries[0].name || slice.displayName}</p>
+                    </div>
+                  )}
+                </div>
+              ) : null}
               <label className="flex w-full flex-col gap-0.5">
                 <input
                   type="number"
@@ -334,12 +358,12 @@ function TargetStockWeightNeu({
                     "inset 3px 3px 6px rgba(0,0,0,0.55), inset -2px -2px 6px rgba(255,255,255,0.05)",
                 }}
               >
-                {hasPositiveTarget ? (
+                {hasPositiveTarget || isOverTargetWhenZero ? (
                   <div
                     className="absolute bottom-0.5 left-0.5 right-0.5 rounded-full transition-[height] duration-300"
                     style={{
                       height: `calc(${fillPct}% - 3px)`,
-                      minHeight: ratio > 0 ? 4 : 0,
+                      minHeight: hasPositiveTarget ? (ratio > 0 ? 4 : 0) : isOverTargetWhenZero ? 4 : 0,
                       maxHeight: "calc(100% - 6px)",
                       background: fillColor,
                       boxShadow: barGlow,
@@ -384,32 +408,68 @@ export function FamilyAllocationDonut({
   ownerName: string;
   data: AllocationSlice[];
   total: number;
-  watchlistEntries?: Array<{ symbol: string; name: string }>;
+  watchlistEntries?: Array<{ symbol: string; name: string; group?: string }>;
 }) {
   const chartData = useMemo(() => [...data].sort((a, b) => b.value - a.value), [data]);
 
   const stockSlicesForTargets = useMemo(
     () => {
-      const base = chartData.filter((d) => d.value > 0);
+      const usdCash = chartData.find((d) => d.ticker === "USD 현금");
+      const krwCash = chartData.find((d) => d.ticker === "KRW 현금");
+      const mergedCashValue = (usdCash?.value ?? 0) + (krwCash?.value ?? 0);
+      const mergedCashWeight = (usdCash?.weight ?? 0) + (krwCash?.weight ?? 0);
+      const base = chartData.filter(
+        (d) => d.value > 0 && d.ticker !== "USD 현금" && d.ticker !== "KRW 현금",
+      );
+      if (mergedCashValue > 0) {
+        base.push({
+          name: "cash-merged",
+          displayName: "현금(USD+KRW)",
+          ticker: "현금",
+          allEntries: [
+            ...(usdCash?.allEntries ?? []),
+            ...(krwCash?.allEntries ?? []),
+          ],
+          value: mergedCashValue,
+          weight: mergedCashWeight,
+          changePct: null,
+        });
+      }
       const seen = new Set(base.map((d) => d.ticker.trim().toUpperCase()));
-      const extra = (watchlistEntries ?? [])
-        .map((w) => ({
-          symbol: w.symbol.trim().toUpperCase(),
-          name: w.name.trim(),
-        }))
-        .filter((w) => w.symbol.length > 0)
-        .filter((w) => !seen.has(w.symbol))
-        .map(
-          (w): AllocationSlice => ({
-            name: `watch|${w.symbol}`,
-            displayName: w.name || w.symbol,
-            ticker: w.symbol,
-            allEntries: [{ name: w.name || w.symbol, symbol: w.symbol }],
-            value: 0,
-            weight: 0,
-            changePct: null,
-          }),
-        );
+      const groupedWatch = new Map<
+        string,
+        { ticker: string; displayName: string; allEntries: { name: string; symbol: string }[] }
+      >();
+      for (const row of watchlistEntries ?? []) {
+        const symbol = row.symbol.trim().toUpperCase();
+        if (!symbol) continue;
+        const group = (row.group ?? "").trim();
+        const ticker = group || symbol;
+        const key = ticker.toUpperCase();
+        if (seen.has(key)) continue;
+        const prev = groupedWatch.get(key);
+        const entry = { name: row.name.trim() || symbol, symbol };
+        if (prev) {
+          prev.allEntries.push(entry);
+        } else {
+          groupedWatch.set(key, {
+            ticker,
+            displayName: group || row.name.trim() || symbol,
+            allEntries: [entry],
+          });
+        }
+      }
+      const extra = Array.from(groupedWatch.entries()).map(
+        ([key, v]): AllocationSlice => ({
+          name: `watch|${key}`,
+          displayName: v.displayName,
+          ticker: v.ticker,
+          allEntries: v.allEntries,
+          value: 0,
+          weight: 0,
+          changePct: null,
+        }),
+      );
       return [...base, ...extra];
     },
     [chartData, watchlistEntries],
