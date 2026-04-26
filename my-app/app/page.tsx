@@ -5469,32 +5469,47 @@ export default function Home() {
                       )
                     }
                   />
-                  <select
-                    multiple
-                    className="w-28 rounded border bg-background px-2 py-1 text-xs"
-                    value={row.owners && row.owners.length > 0 ? row.owners : [WATCHLIST_OWNER_ALL]}
-                    onChange={(e) =>
-                      setWatchlistRows((prev) =>
-                        prev.map((r, i) => {
-                          if (i !== idx) return r;
-                          const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
-                          const nextOwners = selected.includes(WATCHLIST_OWNER_ALL)
-                            ? [WATCHLIST_OWNER_ALL]
-                            : selected.length > 0
-                              ? selected
-                              : [WATCHLIST_OWNER_ALL];
-                          return { ...r, owners: nextOwners };
-                        }),
-                      )
-                    }
-                  >
-                    <option value={WATCHLIST_OWNER_ALL}>전체</option>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border bg-background px-2 py-1">
+                    <label className="flex cursor-pointer items-center gap-1 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={(row.owners ?? [WATCHLIST_OWNER_ALL]).includes(WATCHLIST_OWNER_ALL)}
+                        onChange={(e) =>
+                          setWatchlistRows((prev) =>
+                            prev.map((r, i) => {
+                              if (i !== idx) return r;
+                              if (e.target.checked) return { ...r, owners: [WATCHLIST_OWNER_ALL] };
+                              return { ...r, owners: [] };
+                            }),
+                          )
+                        }
+                      />
+                      전체
+                    </label>
                     {ownerNames.map((name) => (
-                      <option key={`watch-owner-${name}`} value={name}>
+                      <label key={`watch-owner-${name}`} className="flex cursor-pointer items-center gap-1 text-[11px]">
+                        <input
+                          type="checkbox"
+                          checked={(row.owners ?? [WATCHLIST_OWNER_ALL]).includes(name)}
+                          onChange={(e) =>
+                            setWatchlistRows((prev) =>
+                              prev.map((r, i) => {
+                                if (i !== idx) return r;
+                                const current = (r.owners ?? [WATCHLIST_OWNER_ALL]).filter(
+                                  (v) => v !== WATCHLIST_OWNER_ALL,
+                                );
+                                const next = e.target.checked
+                                  ? Array.from(new Set([...current, name]))
+                                  : current.filter((v) => v !== name);
+                                return { ...r, owners: next.length > 0 ? next : [WATCHLIST_OWNER_ALL] };
+                              }),
+                            )
+                          }
+                        />
                         {name}
-                      </option>
+                      </label>
                     ))}
-                  </select>
+                  </div>
                   <button
                     type="button"
                     className="ml-auto rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
