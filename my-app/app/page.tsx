@@ -3027,6 +3027,7 @@ export default function Home() {
                   ownerName={ownerName}
                   data={data}
                   total={total}
+                  watchlistEntries={watchlistRows}
                 />
               ))}
             </div>

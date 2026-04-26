@@ -377,19 +377,42 @@ export function FamilyAllocationDonut({
   ownerName,
   data,
   total,
+  watchlistEntries,
 }: {
   ownerName: string;
   data: AllocationSlice[];
   total: number;
+  watchlistEntries?: Array<{ symbol: string; name: string }>;
 }) {
   const chartData = useMemo(() => [...data].sort((a, b) => b.value - a.value), [data]);
 
   const stockSlicesForTargets = useMemo(
-    () =>
-      chartData.filter(
+    () => {
+      const base = chartData.filter(
         (d) => d.ticker !== "USD 현금" && d.ticker !== "KRW 현금" && d.value > 0,
-      ),
-    [chartData],
+      );
+      const seen = new Set(base.map((d) => d.ticker.trim().toUpperCase()));
+      const extra = (watchlistEntries ?? [])
+        .map((w) => ({
+          symbol: w.symbol.trim().toUpperCase(),
+          name: w.name.trim(),
+        }))
+        .filter((w) => w.symbol.length > 0)
+        .filter((w) => !seen.has(w.symbol))
+        .map(
+          (w): AllocationSlice => ({
+            name: `watch|${w.symbol}`,
+            displayName: w.name || w.symbol,
+            ticker: w.symbol,
+            allEntries: [{ name: w.name || w.symbol, symbol: w.symbol }],
+            value: 0,
+            weight: 0,
+            changePct: null,
+          }),
+        );
+      return [...base, ...extra];
+    },
+    [chartData, watchlistEntries],
   );
 
   if (data.length === 0) {
