@@ -334,7 +334,7 @@ function TargetStockWeightNeu({
                     "inset 3px 3px 6px rgba(0,0,0,0.55), inset -2px -2px 6px rgba(255,255,255,0.05)",
                 }}
               >
-                {hasTarget ? (
+                {hasPositiveTarget ? (
                   <div
                     className="absolute bottom-0.5 left-0.5 right-0.5 rounded-full transition-[height] duration-300"
                     style={{
