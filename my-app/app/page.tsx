@@ -1021,7 +1021,7 @@ export default function Home() {
     sentWatchlist?: number;
   } | null>(null);
   const WATCHLIST_OWNER_ALL = "__ALL__";
-  type WatchlistRow = { symbol: string; name: string; group?: string; owner?: string };
+  type WatchlistRow = { symbol: string; name: string; group?: string; owners?: string[] };
   const [watchlistRows, setWatchlistRows] = useState<WatchlistRow[]>([]);
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
@@ -2406,15 +2406,26 @@ export default function Home() {
     void (async () => {
       try {
         const r = await fetch(`/api/watchlist?sync_key=${encodeURIComponent(cloudSyncKey)}`);
-        const j = (await r.json()) as { ok?: boolean; entries?: Array<{ symbol: string; name?: string; group?: string; owner?: string }> };
+        const j = (await r.json()) as {
+          ok?: boolean;
+          entries?: Array<{ symbol: string; name?: string; group?: string; owner?: string; owners?: string[] }>;
+        };
         if (r.ok && j.entries && j.entries.length > 0) {
           setWatchlistRows(
-            j.entries.map((e) => ({
-              symbol: e.symbol,
-              name: e.name ?? "",
-              group: e.group ?? "",
-              owner: e.owner ?? WATCHLIST_OWNER_ALL,
-            })),
+            j.entries.map((e) => {
+              const owners =
+                Array.isArray(e.owners) && e.owners.length > 0
+                  ? e.owners
+                  : e.owner
+                    ? [e.owner]
+                    : [WATCHLIST_OWNER_ALL];
+              return {
+                symbol: e.symbol,
+                name: e.name ?? "",
+                group: e.group ?? "",
+                owners,
+              };
+            }),
           );
         }
       } catch {
@@ -2436,7 +2447,11 @@ export default function Home() {
           symbol: row.symbol.trim().toUpperCase(),
           ...(row.name.trim() ? { name: row.name.trim() } : {}),
           ...(row.group?.trim() ? { group: row.group.trim() } : {}),
-          ...(row.owner && row.owner !== WATCHLIST_OWNER_ALL ? { owner: row.owner } : {}),
+          ...(row.owners?.includes(WATCHLIST_OWNER_ALL)
+            ? {}
+            : row.owners && row.owners.length > 0
+              ? { owners: row.owners }
+              : {}),
         }))
         .filter((e) => e.symbol.length > 0);
       const res = await fetch("/api/watchlist", {
@@ -3052,7 +3067,10 @@ export default function Home() {
                   watchlistEntries={watchlistRows.filter(
                     (row) =>
                       !!row.symbol?.trim() &&
-                      (!row.owner || row.owner === WATCHLIST_OWNER_ALL || row.owner === ownerName),
+                      (!row.owners ||
+                        row.owners.length === 0 ||
+                        row.owners.includes(WATCHLIST_OWNER_ALL) ||
+                        row.owners.includes(ownerName)),
                   )}
                 />
               ))}
@@ -5452,11 +5470,21 @@ export default function Home() {
                     }
                   />
                   <select
+                    multiple
                     className="w-28 rounded border bg-background px-2 py-1 text-xs"
-                    value={row.owner ?? WATCHLIST_OWNER_ALL}
+                    value={row.owners && row.owners.length > 0 ? row.owners : [WATCHLIST_OWNER_ALL]}
                     onChange={(e) =>
                       setWatchlistRows((prev) =>
-                        prev.map((r, i) => (i === idx ? { ...r, owner: e.target.value } : r)),
+                        prev.map((r, i) => {
+                          if (i !== idx) return r;
+                          const selected = Array.from(e.target.selectedOptions).map((o) => o.value);
+                          const nextOwners = selected.includes(WATCHLIST_OWNER_ALL)
+                            ? [WATCHLIST_OWNER_ALL]
+                            : selected.length > 0
+                              ? selected
+                              : [WATCHLIST_OWNER_ALL];
+                          return { ...r, owners: nextOwners };
+                        }),
                       )
                     }
                   >
@@ -5483,7 +5511,7 @@ export default function Home() {
                   onClick={() =>
                     setWatchlistRows((prev) => [
                       ...prev,
-                      { symbol: "", name: "", group: "", owner: WATCHLIST_OWNER_ALL },
+                      { symbol: "", name: "", group: "", owners: [WATCHLIST_OWNER_ALL] },
                     ])
                   }
                 >
