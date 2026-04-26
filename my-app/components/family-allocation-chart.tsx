@@ -179,7 +179,7 @@ function TargetStockWeightNeu({
     const n = parseFloat(raw.replace(",", "."));
     setTargetsByTicker((prev) => {
       const next = { ...prev };
-      if (raw === "" || !Number.isFinite(n) || n <= 0) {
+      if (raw === "" || !Number.isFinite(n) || n < 0) {
         delete next[ticker];
       } else {
         next[ticker] = Math.min(100, Math.max(0, n));
@@ -271,17 +271,18 @@ function TargetStockWeightNeu({
       ) : null}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(48px,1fr))] gap-x-1 gap-y-4 py-2 justify-items-center">
         {slices.map((slice) => {
+          const hasInputTarget = Object.prototype.hasOwnProperty.call(targetsByTicker, slice.ticker);
           const target = targetsByTicker[slice.ticker] ?? 0;
           const actual = slice.weight;
-          const hasTarget = target > 0;
-          const ratio = hasTarget ? actual / target : 0;
-          const fillPct = hasTarget ? Math.min(ratio * 100, 100) : 0;
+          const hasPositiveTarget = target > 0;
+          const ratio = hasPositiveTarget ? actual / target : 0;
+          const fillPct = hasPositiveTarget ? Math.min(ratio * 100, 100) : 0;
           /** 목표 대비 상대 편차 (actual−target)/target — ±5% 이내 파랑, 미만 빨강, 초과 초록 */
-          const relDev = hasTarget ? (actual - target) / target : 0;
-          const withinBand = hasTarget && Math.abs(relDev) <= 0.05;
-          const belowBand = hasTarget && relDev < -0.05;
-          const aboveBand = hasTarget && relDev > 0.05;
-          const fillColor = !hasTarget
+          const relDev = hasPositiveTarget ? (actual - target) / target : 0;
+          const withinBand = hasPositiveTarget && Math.abs(relDev) <= 0.05;
+          const belowBand = hasPositiveTarget && relDev < -0.05;
+          const aboveBand = hasPositiveTarget && relDev > 0.05;
+          const fillColor = !hasPositiveTarget
             ? "transparent"
             : withinBand
               ? "#3b82f6"
@@ -289,7 +290,7 @@ function TargetStockWeightNeu({
                 ? "#ef4444"
                 : "#22c55e";
           const barGlow =
-            !hasTarget
+            !hasPositiveTarget
               ? undefined
               : withinBand
                 ? "0 0 12px rgba(59,130,246,0.35)"
@@ -298,7 +299,8 @@ function TargetStockWeightNeu({
                   : "0 0 12px rgba(34,197,94,0.4)";
 
           let statusLabel: string;
-          if (!hasTarget) statusLabel = "목표 입력";
+          if (!hasInputTarget) statusLabel = "목표 입력";
+          else if (!hasPositiveTarget) statusLabel = "0%";
           else if (aboveBand) statusLabel = "초과";
           else if (withinBand) statusLabel = "±5% 이내";
           else statusLabel = "미달";
@@ -317,7 +319,7 @@ function TargetStockWeightNeu({
                   style={{
                     boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
                   }}
-                  value={hasTarget ? String(targetsByTicker[slice.ticker]) : ""}
+                  value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
                   onChange={(e) => setTarget(slice.ticker, e.target.value)}
                 />
               </label>
@@ -347,7 +349,7 @@ function TargetStockWeightNeu({
               </div>
               <div
                 className={`text-center text-[8px] tabular-nums leading-tight ${
-                  !hasTarget
+                  !hasInputTarget
                     ? "text-zinc-400"
                     : withinBand
                       ? "text-sky-400"
@@ -359,7 +361,7 @@ function TargetStockWeightNeu({
                 현재 {actual.toFixed(1)}%
                 <span
                   className={`mt-0.5 block font-medium ${
-                    !hasTarget ? "text-zinc-600" : withinBand ? "text-sky-400" : belowBand ? "text-red-400" : "text-emerald-400"
+                    !hasInputTarget ? "text-zinc-600" : withinBand ? "text-sky-400" : belowBand ? "text-red-400" : "text-emerald-400"
                   }`}
                 >
                   {statusLabel}
