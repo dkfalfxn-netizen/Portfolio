@@ -390,9 +390,7 @@ export function FamilyAllocationDonut({
 
   const stockSlicesForTargets = useMemo(
     () => {
-      const base = chartData.filter(
-        (d) => d.ticker !== "USD 현금" && d.ticker !== "KRW 현금" && d.value > 0,
-      );
+      const base = chartData.filter((d) => d.value > 0);
       const seen = new Set(base.map((d) => d.ticker.trim().toUpperCase()));
       const extra = (watchlistEntries ?? [])
         .map((w) => ({
