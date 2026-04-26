@@ -21,7 +21,7 @@ export type AllocationSlice = {
   name: string;
   displayName: string;
   ticker: string;
-  allEntries: { name: string; symbol: string }[];
+  allEntries: { name: string; symbol: string; weight?: number }[];
   value: number;
   weight: number;
   changePct: number | null;
@@ -57,15 +57,19 @@ function NeonTooltip({
   const p = payload[0].payload;
   const entries = p.allEntries.filter((e) => e.name !== "USD 현금" && e.name !== "KRW 현금");
   const isGroup = entries.length > 1;
+  const entryPctText = (w?: number) => `${(w ?? p.weight).toFixed(1)}%`;
   return (
     <div className="rounded-lg border border-white/15 bg-zinc-950/95 px-3 py-2 text-xs shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md">
       {isGroup ? (
         <div className="mb-1.5 space-y-1">
           <p className="mb-1 font-bold text-cyan-400">{p.ticker}</p>
           {entries.map((e) => (
-            <div key={`${e.symbol}-${e.name}`} className="flex items-baseline gap-1.5">
-              <span className="font-semibold text-zinc-300">{e.symbol}</span>
-              <span className="text-zinc-500">{e.name}</span>
+            <div key={`${e.symbol}-${e.name}`} className="flex items-baseline justify-between gap-2">
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-semibold text-zinc-300">{e.symbol}</span>
+                <span className="text-zinc-500">{e.name}</span>
+              </div>
+              <span className="tabular-nums text-zinc-400">{entryPctText(e.weight)}</span>
             </div>
           ))}
         </div>
@@ -74,7 +78,9 @@ function NeonTooltip({
           {entries[0]?.symbol && entries[0].symbol !== entries[0].name && (
             <p className="font-bold text-cyan-400">{entries[0].symbol}</p>
           )}
-          <p className="font-semibold text-foreground">{p.displayName}</p>
+          <p className="font-semibold text-foreground">
+            {p.displayName} <span className="tabular-nums text-zinc-400">({entryPctText(entries[0]?.weight)})</span>
+          </p>
         </div>
       )}
       <p className="text-muted-foreground">
@@ -308,6 +314,7 @@ function TargetStockWeightNeu({
 
           const tooltipEntries = slice.allEntries.filter((e) => e.name !== "USD 현금" && e.name !== "KRW 현금");
           const isGrouped = tooltipEntries.length > 1;
+          const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
 
           return (
             <div key={slice.name} className="group relative flex w-full max-w-[56px] flex-col items-center gap-1">
@@ -317,16 +324,22 @@ function TargetStockWeightNeu({
                     <div className="space-y-1">
                       <p className="font-bold text-cyan-400">{slice.ticker}</p>
                       {tooltipEntries.map((e) => (
-                        <div key={`${slice.ticker}-${e.symbol}`} className="flex items-baseline gap-1.5">
-                          <span className="font-semibold text-zinc-300">{e.symbol}</span>
-                          <span className="text-zinc-500">{e.name}</span>
+                        <div key={`${slice.ticker}-${e.symbol}`} className="flex items-baseline justify-between gap-2">
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="font-semibold text-zinc-300">{e.symbol}</span>
+                            <span className="text-zinc-500">{e.name}</span>
+                          </div>
+                          <span className="tabular-nums text-zinc-400">{tooltipPctText(e.weight)}</span>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <div className="space-y-0.5">
                       <p className="font-bold text-cyan-400">{tooltipEntries[0].symbol || slice.ticker}</p>
-                      <p className="font-semibold text-zinc-200">{tooltipEntries[0].name || slice.displayName}</p>
+                      <p className="font-semibold text-zinc-200">
+                        {tooltipEntries[0].name || slice.displayName}{" "}
+                        <span className="tabular-nums text-zinc-400">({tooltipPctText(tooltipEntries[0].weight)})</span>
+                      </p>
                     </div>
                   )}
                 </div>

@@ -3,7 +3,7 @@ import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 const MIN_KEY = 8;
 
-export type WatchlistEntry = { symbol: string; name?: string; group?: string };
+export type WatchlistEntry = { symbol: string; name?: string; group?: string; owner?: string };
 
 function parseEntries(raw: unknown): WatchlistEntry[] | null {
   if (!Array.isArray(raw)) return null;
@@ -15,7 +15,13 @@ function parseEntries(raw: unknown): WatchlistEntry[] | null {
     if (sym.length < 1) continue;
     const name = typeof o.name === "string" ? o.name.trim() : undefined;
     const group = typeof o.group === "string" ? o.group.trim() : undefined;
-    out.push({ symbol: sym, ...(name ? { name } : {}), ...(group ? { group } : {}) });
+    const owner = typeof o.owner === "string" ? o.owner.trim() : undefined;
+    out.push({
+      symbol: sym,
+      ...(name ? { name } : {}),
+      ...(group ? { group } : {}),
+      ...(owner ? { owner } : {}),
+    });
   }
   return out;
 }

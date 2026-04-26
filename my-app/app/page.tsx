@@ -1020,7 +1020,8 @@ export default function Home() {
     sentHoldings?: number;
     sentWatchlist?: number;
   } | null>(null);
-  type WatchlistRow = { symbol: string; name: string; group?: string };
+  const WATCHLIST_OWNER_ALL = "__ALL__";
+  type WatchlistRow = { symbol: string; name: string; group?: string; owner?: string };
   const [watchlistRows, setWatchlistRows] = useState<WatchlistRow[]>([]);
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
@@ -1436,7 +1437,7 @@ export default function Home() {
       // chartGroup이 있으면 그룹명 기준, 없으면 symbol 기준으로 차트 슬라이스 합산
       const groupMap = new Map<string, {
         displayName: string;
-        allEntries: { name: string; symbol: string }[];
+        allEntries: { name: string; symbol: string; value: number }[];
         value: number;
         weightedChangeSum: number;
         prevCloseValueSum: number;
@@ -1456,13 +1457,18 @@ export default function Home() {
             existing.weightedChangeSum += dailyChangePct * v;
             existing.prevCloseValueSum += v;
           }
-          if (!existing.allEntries.some((e) => e.symbol === position.symbol && e.name === position.name)) {
-            existing.allEntries.push({ name: position.name, symbol: position.symbol });
+          const entry = existing.allEntries.find(
+            (e) => e.symbol === position.symbol && e.name === position.name,
+          );
+          if (entry) {
+            entry.value += v;
+          } else {
+            existing.allEntries.push({ name: position.name, symbol: position.symbol, value: v });
           }
         } else {
           groupMap.set(groupKey, {
             displayName: position.chartGroup?.trim() || position.name,
-            allEntries: [{ name: position.name, symbol: position.symbol }],
+            allEntries: [{ name: position.name, symbol: position.symbol, value: v }],
             value: v,
             weightedChangeSum: dailyChangePct !== null ? dailyChangePct * v : 0,
             prevCloseValueSum: dailyChangePct !== null ? v : 0,
@@ -1474,7 +1480,11 @@ export default function Home() {
           name: `stk|${groupKey}|${ownerName}`,
           displayName,
           ticker: groupKey,
-          allEntries,
+          allEntries: allEntries.map((entry) => ({
+            name: entry.name,
+            symbol: entry.symbol,
+            value: entry.value,
+          })),
           value,
           changePct: prevCloseValueSum > 0 ? weightedChangeSum / prevCloseValueSum : null,
         }),
@@ -1488,7 +1498,7 @@ export default function Home() {
         name: string;
         displayName: string;
         ticker: string;
-        allEntries: { name: string; symbol: string }[];
+        allEntries: { name: string; symbol: string; value: number }[];
         value: number;
         changePct: number | null;
       }[] = [];
@@ -1497,7 +1507,7 @@ export default function Home() {
           name: `cash-usd|${ownerName}`,
           displayName: "USD 현금",
           ticker: "USD 현금",
-          allEntries: [{ name: "USD 현금", symbol: "" }],
+          allEntries: [{ name: "USD 현금", symbol: "", value: usdCashKrw }],
           value: usdCashKrw,
           changePct: null,
         });
@@ -1507,7 +1517,7 @@ export default function Home() {
           name: `cash-krw|${ownerName}`,
           displayName: "KRW 현금",
           ticker: "KRW 현금",
-          allEntries: [{ name: "KRW 현금", symbol: "" }],
+          allEntries: [{ name: "KRW 현금", symbol: "", value: krw }],
           value: krw,
           changePct: null,
         });
@@ -1516,6 +1526,11 @@ export default function Home() {
       const total = merged.reduce((sum, item) => sum + item.value, 0);
       const data = merged.map((item) => ({
         ...item,
+        allEntries: item.allEntries.map((entry) => ({
+          name: entry.name,
+          symbol: entry.symbol,
+          weight: total > 0 ? (entry.value / total) * 100 : 0,
+        })),
         weight: total > 0 ? (item.value / total) * 100 : 0,
       }));
       return { ownerName, data, total };
@@ -2391,10 +2406,15 @@ export default function Home() {
     void (async () => {
       try {
         const r = await fetch(`/api/watchlist?sync_key=${encodeURIComponent(cloudSyncKey)}`);
-        const j = (await r.json()) as { ok?: boolean; entries?: Array<{ symbol: string; name?: string; group?: string }> };
+        const j = (await r.json()) as { ok?: boolean; entries?: Array<{ symbol: string; name?: string; group?: string; owner?: string }> };
         if (r.ok && j.entries && j.entries.length > 0) {
           setWatchlistRows(
-            j.entries.map((e) => ({ symbol: e.symbol, name: e.name ?? "", group: e.group ?? "" })),
+            j.entries.map((e) => ({
+              symbol: e.symbol,
+              name: e.name ?? "",
+              group: e.group ?? "",
+              owner: e.owner ?? WATCHLIST_OWNER_ALL,
+            })),
           );
         }
       } catch {
@@ -2416,6 +2436,7 @@ export default function Home() {
           symbol: row.symbol.trim().toUpperCase(),
           ...(row.name.trim() ? { name: row.name.trim() } : {}),
           ...(row.group?.trim() ? { group: row.group.trim() } : {}),
+          ...(row.owner && row.owner !== WATCHLIST_OWNER_ALL ? { owner: row.owner } : {}),
         }))
         .filter((e) => e.symbol.length > 0);
       const res = await fetch("/api/watchlist", {
@@ -3028,7 +3049,11 @@ export default function Home() {
                   ownerName={ownerName}
                   data={data}
                   total={total}
-                  watchlistEntries={watchlistRows}
+                  watchlistEntries={watchlistRows.filter(
+                    (row) =>
+                      !!row.symbol?.trim() &&
+                      (!row.owner || row.owner === WATCHLIST_OWNER_ALL || row.owner === ownerName),
+                  )}
                 />
               ))}
             </div>
@@ -5426,6 +5451,22 @@ export default function Home() {
                       )
                     }
                   />
+                  <select
+                    className="w-28 rounded border bg-background px-2 py-1 text-xs"
+                    value={row.owner ?? WATCHLIST_OWNER_ALL}
+                    onChange={(e) =>
+                      setWatchlistRows((prev) =>
+                        prev.map((r, i) => (i === idx ? { ...r, owner: e.target.value } : r)),
+                      )
+                    }
+                  >
+                    <option value={WATCHLIST_OWNER_ALL}>전체</option>
+                    {ownerNames.map((name) => (
+                      <option key={`watch-owner-${name}`} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
                   <button
                     type="button"
                     className="ml-auto rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
@@ -5439,7 +5480,12 @@ export default function Home() {
                 <button
                   type="button"
                   className="cursor-pointer rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
-                  onClick={() => setWatchlistRows((prev) => [...prev, { symbol: "", name: "", group: "" }])}
+                  onClick={() =>
+                    setWatchlistRows((prev) => [
+                      ...prev,
+                      { symbol: "", name: "", group: "", owner: WATCHLIST_OWNER_ALL },
+                    ])
+                  }
                 >
                   + 종목 추가
                 </button>
