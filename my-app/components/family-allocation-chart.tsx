@@ -607,6 +607,10 @@ export function FamilyAllocationDonut({
       const base = chartData.filter(
         (d) => d.value > 0 && d.ticker !== "USD 현금" && d.ticker !== "KRW 현금",
       );
+      const baseByTicker = new Map<string, AllocationSlice>();
+      for (const item of base) {
+        baseByTicker.set(item.ticker.trim().toUpperCase(), item);
+      }
       if (mergedCashValue > 0) {
         base.push({
           name: "cash-merged",
@@ -621,7 +625,6 @@ export function FamilyAllocationDonut({
           changePct: null,
         });
       }
-      const seen = new Set(base.map((d) => d.ticker.trim().toUpperCase()));
       const groupedWatch = new Map<
         string,
         { ticker: string; displayName: string; allEntries: { name: string; symbol: string }[] }
@@ -632,11 +635,21 @@ export function FamilyAllocationDonut({
         const group = (row.group ?? "").trim();
         const ticker = group || symbol;
         const key = ticker.toUpperCase();
-        if (seen.has(key)) continue;
-        const prev = groupedWatch.get(key);
         const entry = { name: row.name.trim() || symbol, symbol };
+        const existingBase = baseByTicker.get(key);
+        if (existingBase) {
+          const duplicated = existingBase.allEntries.some(
+            (e) => e.symbol.trim().toUpperCase() === symbol,
+          );
+          if (!duplicated) existingBase.allEntries.push(entry);
+          continue;
+        }
+        const prev = groupedWatch.get(key);
         if (prev) {
-          prev.allEntries.push(entry);
+          const duplicated = prev.allEntries.some(
+            (e) => e.symbol.trim().toUpperCase() === symbol,
+          );
+          if (!duplicated) prev.allEntries.push(entry);
         } else {
           groupedWatch.set(key, {
             ticker,
