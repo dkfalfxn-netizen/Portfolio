@@ -645,7 +645,7 @@ export function FamilyAllocationDonut({
         {
           ticker: string;
           displayName: string;
-          allEntries: { name: string; symbol: string; weight: number | undefined }[];
+          allEntries: { name: string; symbol: string; weight: number }[];
         }
       >();
       for (const row of watchlistEntries ?? []) {
@@ -658,7 +658,7 @@ export function FamilyAllocationDonut({
         const entry = {
           name: normalize(row?.name) || rawSymbol || symbol,
           symbol,
-          weight: undefined,
+          weight: 0,
         };
         const existingBase = baseByTicker.get(key);
         if (existingBase) {
