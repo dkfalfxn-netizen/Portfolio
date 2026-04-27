@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ResponsiveContainer, Tooltip, Treemap } from "recharts";
+import {
+  HAS_LOCAL_CHANGES_KEY,
+  loadAllTargetStockWeights,
+  TARGET_WEIGHT_STORAGE_KEY,
+} from "@/lib/portfolio-target-weights";
 
 /** 네온 글로우용 팔레트 (한 단계 어둡게 — 채도는 유지) */
 const NEON_PALETTE = [
@@ -13,7 +18,6 @@ const NEON_PALETTE = [
   "#0D9488",
 ];
 
-const TARGET_WEIGHT_STORAGE_KEY = "portfolio_target_stock_weight_v1";
 /** 목표 비중 합계 100% 허용 오차 (%) */
 const TARGET_SUM_TOLERANCE = 0.05;
 
@@ -29,19 +33,6 @@ export type AllocationSlice = {
 
 function formatKrw(n: number) {
   return `₩${Math.round(n).toLocaleString()}`;
-}
-
-function loadAllTargets(): Record<string, Record<string, number>> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(TARGET_WEIGHT_STORAGE_KEY);
-    if (!raw) return {};
-    const p = JSON.parse(raw) as unknown;
-    if (typeof p !== "object" || p === null) return {};
-    return p as Record<string, Record<string, number>>;
-  } catch {
-    return {};
-  }
 }
 
 function NeonTooltip({
@@ -155,17 +146,30 @@ function NeonTreemapNode(props: {
 function TargetStockWeightNeu({
   ownerName,
   slices,
+  cloudSyncKey,
 }: {
   ownerName: string;
   slices: AllocationSlice[];
+  /** 8자 이상이면 «저장» 시 Supabase에도 반영 */
+  cloudSyncKey: string;
 }) {
   const skipSaveRef = useRef(true);
-  const [targetsByTicker, setTargetsByTicker] = useState<Record<string, number>>({});
+  const saveDebounceRef = useRef<number | null>(null);
+  const [targetsByTicker, setTargetsByTicker] = useState<Record<string, number>>(() => {
+    const all = loadAllTargetStockWeights();
+    return { ...(all[ownerName] ?? {}) };
+  });
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
+  const [serverSaveHint, setServerSaveHint] = useState<string | null>(null);
 
   useEffect(() => {
-    const all = loadAllTargets();
-    skipSaveRef.current = true;
-    setTargetsByTicker({ ...(all[ownerName] ?? {}) });
+    const onRefresh = () => {
+      const all = loadAllTargetStockWeights();
+      skipSaveRef.current = true;
+      setTargetsByTicker({ ...(all[ownerName] ?? {}) });
+    };
+    window.addEventListener("portfolio-target-weights-refresh", onRefresh);
+    return () => window.removeEventListener("portfolio-target-weights-refresh", onRefresh);
   }, [ownerName]);
 
   useEffect(() => {
@@ -173,13 +177,79 @@ function TargetStockWeightNeu({
       skipSaveRef.current = false;
       return;
     }
-    const t = window.setTimeout(() => {
-      const all = loadAllTargets();
+    if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+    saveDebounceRef.current = window.setTimeout(() => {
+      const all = loadAllTargetStockWeights();
       all[ownerName] = targetsByTicker;
-      window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
+      try {
+        window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
+        window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+      } catch {
+        setSaveStatus("err");
+        setServerSaveHint("이 브라우저에 저장할 수 없습니다(저장 공간/비공개 모드).");
+        return;
+      }
     }, 350);
-    return () => window.clearTimeout(t);
+    return () => {
+      if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+    };
   }, [ownerName, targetsByTicker]);
+
+  const saveTargetsToDiskNow = useCallback(() => {
+    if (saveDebounceRef.current) {
+      clearTimeout(saveDebounceRef.current);
+      saveDebounceRef.current = null;
+    }
+    const all = loadAllTargetStockWeights();
+    all[ownerName] = targetsByTicker;
+    try {
+      window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
+      window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    } catch {
+      setSaveStatus("err");
+      setServerSaveHint("이 브라우저에 저장할 수 없습니다(저장 공간/비공개 모드).");
+      return false;
+    }
+    return true;
+  }, [ownerName, targetsByTicker]);
+
+  const handleClickSave = useCallback(async () => {
+    if (!saveTargetsToDiskNow()) return;
+    setSaveStatus("saving");
+    setServerSaveHint(null);
+    if (cloudSyncKey.trim().length < 8) {
+      setSaveStatus("ok");
+      setServerSaveHint("이 브라우저에는 저장됐습니다. 다른 PC와 맞추려면 동기화 키(8자 이상)를 입력한 뒤 다시 저장하세요.");
+      return;
+    }
+    try {
+      const r = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "pushTargetWeights",
+          key: cloudSyncKey.trim(),
+          targetStockWeightByOwner: loadAllTargetStockWeights(),
+        }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { error?: string; ok?: boolean; updated_at?: string };
+      if (!r.ok) {
+        setSaveStatus("err");
+        setServerSaveHint(
+          j.error ??
+            (r.status === 404
+              ? "서버에 잔고가 아직 없습니다. 먼저 『서버로 올리기』로 잔고를 올린 뒤 저장하세요."
+              : "서버에 저장하지 못했습니다."),
+        );
+        return;
+      }
+      setSaveStatus("ok");
+      setServerSaveHint("이 브라우저와 서버(Supabase)에 저장되었습니다. 다른 기기에서는 『서버에서 불러오기』하세요.");
+    } catch {
+      setSaveStatus("err");
+      setServerSaveHint("네트워크 오류로 서버에 저장하지 못했습니다.");
+    }
+  }, [cloudSyncKey, saveTargetsToDiskNow]);
 
   const setTarget = useCallback((ticker: string, raw: string) => {
     const n = parseFloat(raw.replace(",", "."));
@@ -231,9 +301,28 @@ function TargetStockWeightNeu({
       }}
     >
       <p className="mb-1 text-[11px] font-semibold tracking-wide text-zinc-300">목표 주식 비중</p>
-      <p className="mb-3 text-[10px] leading-snug text-zinc-500">
+      <p className="mb-2 text-[10px] leading-snug text-zinc-500">
         종목별 목표(%)를 입력하세요. 막대 색은 목표 대비 상대 차이(±5%)에 따라 표시됩니다.
       </p>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void handleClickSave()}
+          disabled={saveStatus === "saving" || slices.length === 0}
+          className="rounded-lg border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-[10px] font-semibold text-sky-200 shadow-[0_0_12px_rgba(56,189,248,0.15)] transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saveStatus === "saving" ? "저장 중…" : "목표 비중 저장"}
+        </button>
+        {serverSaveHint ? (
+          <span
+            className={`max-w-[min(100%,20rem)] text-[9px] leading-snug ${
+              saveStatus === "err" ? "text-rose-300/95" : "text-emerald-200/90"
+            }`}
+          >
+            {serverSaveHint}
+          </span>
+        ) : null}
+      </div>
       <div className="mb-2 flex flex-wrap gap-3 text-[10px] text-zinc-500">
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-sm bg-sky-500" />
@@ -417,11 +506,14 @@ export function FamilyAllocationDonut({
   data,
   total,
   watchlistEntries,
+  cloudSyncKey = "",
 }: {
   ownerName: string;
   data: AllocationSlice[];
   total: number;
   watchlistEntries?: Array<{ symbol: string; name: string; group?: string }>;
+  /** 동기화 키(8자 이상) — 목표 비중을 서버에도 남길 때 사용 */
+  cloudSyncKey?: string;
 }) {
   const chartData = useMemo(() => [...data].sort((a, b) => b.value - a.value), [data]);
 
@@ -581,7 +673,7 @@ export function FamilyAllocationDonut({
           </div>
         </div>
 
-        <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} />
+        <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} cloudSyncKey={cloudSyncKey} />
       </div>
     </div>
   );

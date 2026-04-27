@@ -74,6 +74,7 @@ type PushBody = {
   holdingsSortByOwner?: unknown;
   ownerNames?: unknown;
   sellLogByOwner?: unknown;
+  targetStockWeightByOwner?: unknown;
 };
 
 type SellLogCurrency = "USD" | "EUR" | "KRW";
@@ -242,6 +243,25 @@ function sanitizeHoldingsSortForOwners(
   return out;
 }
 
+type TargetMap = Record<string, Record<string, number>>;
+
+function sanitizeTargetStockWeightsForOwners(raw: unknown, allowed: Set<string>): TargetMap {
+  const out: TargetMap = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [owner, inner] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof owner !== "string" || !owner.trim() || !allowed.has(owner)) continue;
+    if (!inner || typeof inner !== "object" || Array.isArray(inner)) continue;
+    const row: Record<string, number> = {};
+    for (const [ticker, v] of Object.entries(inner as Record<string, unknown>)) {
+      if (typeof ticker !== "string" || !ticker.trim()) continue;
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0 && n <= 100) row[ticker] = n;
+    }
+    if (Object.keys(row).length) out[owner] = row;
+  }
+  return out;
+}
+
 export async function POST(req: NextRequest) {
   let body: unknown;
   try {
@@ -274,7 +294,9 @@ export async function POST(req: NextRequest) {
   if (action === "pull") {
     const withSellLog = await admin
       .from("portfolio_snapshots")
-      .select("positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, updated_at")
+      .select(
+        "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, updated_at",
+      )
       .eq("sync_key", key)
       .maybeSingle();
     const fallback = withSellLog.error
@@ -292,6 +314,7 @@ export async function POST(req: NextRequest) {
           holdings_sort_by_owner?: unknown;
           owner_names?: unknown;
           sell_log_by_owner?: unknown;
+          target_stock_weight_by_owner?: unknown;
           updated_at?: string | null;
         }
       | null;
@@ -308,6 +331,7 @@ export async function POST(req: NextRequest) {
         holdings_sort_by_owner: {},
         sell_log_by_owner: {},
         owner_names: [],
+        target_stock_weight_by_owner: {},
         updated_at: null,
       });
     }
@@ -321,6 +345,10 @@ export async function POST(req: NextRequest) {
       holdings_sort_by_owner: sanitizeHoldingsSortForOwners(sortParsed, allowed),
       sell_log_by_owner: sanitizeSellLogForOwners(data.sell_log_by_owner, allowed),
       owner_names: ownerList,
+      target_stock_weight_by_owner: sanitizeTargetStockWeightsForOwners(
+        data.target_stock_weight_by_owner,
+        allowed,
+      ),
       updated_at: data.updated_at,
     });
   }
@@ -387,6 +415,21 @@ export async function POST(req: NextRequest) {
       sellLogOut = sanitizeSellLogForOwners(existing?.sell_log_by_owner ?? {}, allowed);
     }
 
+    let targetWeightsOut: TargetMap;
+    if ("targetStockWeightByOwner" in b && b.targetStockWeightByOwner != null) {
+      targetWeightsOut = sanitizeTargetStockWeightsForOwners(b.targetStockWeightByOwner, allowed);
+    } else {
+      const { data: existing } = await admin
+        .from("portfolio_snapshots")
+        .select("target_stock_weight_by_owner")
+        .eq("sync_key", key)
+        .maybeSingle();
+      targetWeightsOut = sanitizeTargetStockWeightsForOwners(
+        existing?.target_stock_weight_by_owner ?? {},
+        allowed,
+      );
+    }
+
     const updatedAt = new Date().toISOString();
     const payload = {
       sync_key: key,
@@ -395,6 +438,7 @@ export async function POST(req: NextRequest) {
       holdings_sort_by_owner: holdingsSortOut,
       owner_names: ownerNames,
       sell_log_by_owner: sellLogOut,
+      target_stock_weight_by_owner: targetWeightsOut,
       updated_at: updatedAt,
     };
     const withOwnerNames = await admin
@@ -410,6 +454,7 @@ export async function POST(req: NextRequest) {
                 positions: positionsOut,
                 cash_by_owner: cashOut,
                 holdings_sort_by_owner: holdingsSortOut,
+                target_stock_weight_by_owner: targetWeightsOut,
                 updated_at: updatedAt,
               },
               { onConflict: "sync_key" },
@@ -423,5 +468,56 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, updated_at: updatedAt });
   }
 
-  return NextResponse.json({ error: "action은 pull 또는 push 여야 합니다." }, { status: 400 });
+  if (action === "pushTargetWeights") {
+    const raw = (body as { targetStockWeightByOwner?: unknown }).targetStockWeightByOwner;
+    if (raw != null && (typeof raw !== "object" || Array.isArray(raw))) {
+      return NextResponse.json(
+        { error: "targetStockWeightByOwner 형식이 올바르지 않습니다." },
+        { status: 400 },
+      );
+    }
+    const { data: row, error: loadErr } = await admin
+      .from("portfolio_snapshots")
+      .select("owner_names, target_stock_weight_by_owner")
+      .eq("sync_key", key)
+      .maybeSingle();
+    if (loadErr) {
+      return NextResponse.json({ error: friendlyDbError(loadErr.message) }, { status: 500 });
+    }
+    if (!row) {
+      return NextResponse.json(
+        {
+          error: "서버에 잔고가 없습니다. 먼저 잔고를 『서버로 올리기』한 뒤 다시 시도하세요.",
+        },
+        { status: 404 },
+      );
+    }
+    const namesFromRow = parseOwnerNames((row as { owner_names?: unknown }).owner_names);
+    const allowed = new Set(namesFromRow);
+    if (allowed.size === 0 && raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const k of Object.keys(raw as Record<string, unknown>)) {
+        if (typeof k === "string" && k.trim()) allowed.add(k);
+      }
+    }
+    const nextSlice = sanitizeTargetStockWeightsForOwners(raw === undefined || raw === null ? {} : raw, allowed);
+    const prev = sanitizeTargetStockWeightsForOwners(
+      (row as { target_stock_weight_by_owner?: unknown }).target_stock_weight_by_owner ?? {},
+      new Set(allowed),
+    );
+    const merged: TargetMap = { ...prev, ...nextSlice };
+    const updatedAt = new Date().toISOString();
+    const { error: upErr } = await admin
+      .from("portfolio_snapshots")
+      .update({ target_stock_weight_by_owner: merged, updated_at: updatedAt })
+      .eq("sync_key", key);
+    if (upErr) {
+      return NextResponse.json({ error: friendlyDbError(upErr.message) }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, updated_at: updatedAt });
+  }
+
+  return NextResponse.json(
+    { error: "action은 pull, push, pushTargetWeights 중 하나여야 합니다." },
+    { status: 400 },
+  );
 }

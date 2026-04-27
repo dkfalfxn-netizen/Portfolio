@@ -22,6 +22,11 @@ import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import { LiquiditySection } from "@/components/liquidity-section";
 import { cn } from "@/lib/utils";
+import {
+  HAS_LOCAL_CHANGES_KEY,
+  loadAllTargetStockWeights,
+  mergeAndPersistTargetStockWeightsFromServer,
+} from "@/lib/portfolio-target-weights";
 import { todayKST } from "@/lib/date-utils";
 import type { LiquidityHistoryRow } from "@/components/liquidity-briefing-chart";
 import {
@@ -130,11 +135,6 @@ const DAILY_SNAPSHOTS_KEY = "portfolio_daily_snapshots_v1";
  * 로컬 시계가 아닌 서버 시각 기준이라 기기 간 시계 차이 문제가 없다.
  */
 const LAST_SYNC_TS_KEY = "portfolio_last_sync_ts_v1";
-/**
- * 사용자가 마지막 동기화 이후 로컬에서 데이터를 수정했으면 "1".
- * 페이지 로드·서버 Pull로 상태가 바뀔 때는 설정하지 않는다.
- */
-const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
 /**
  * 오늘 서버에 push한 날짜 ("YYYY-MM-DD") 와 그때의 totalValue.
  * 날짜가 같아도 totalValue가 1% 이상 달라지면 재push해 현금 변경을 반영한다.
@@ -1719,6 +1719,7 @@ export default function Home() {
         holdings_sort_by_owner?: unknown;
         sell_log_by_owner?: unknown;
         owner_names?: unknown;
+        target_stock_weight_by_owner?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -1762,6 +1763,7 @@ export default function Home() {
           setLastSyncedAt(clockToStore);
           setLastSellLogSyncedAt(clockToStore);
           setSellLogDirty(false);
+          mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
           // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
@@ -1776,6 +1778,7 @@ export default function Home() {
               holdingsSortByOwner: holdingsSort,
               sellLogByOwner,
               ownerNames: owners,
+              targetStockWeightByOwner: loadAllTargetStockWeights(),
             }),
           });
           const jPush = (await rPush.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -1819,6 +1822,7 @@ export default function Home() {
             holdingsSortByOwner: holdingsSort,
             sellLogByOwner,
             ownerNames: owners,
+            targetStockWeightByOwner: loadAllTargetStockWeights(),
           }),
         });
         const j2 = (await r2.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -1993,6 +1997,7 @@ export default function Home() {
           holdingsSortByOwner,
           sellLogByOwner: sellLog,
           ownerNames,
+          targetStockWeightByOwner: loadAllTargetStockWeights(),
         }),
       }).then(async (r) => {
         if (r.ok) {
@@ -2038,6 +2043,7 @@ export default function Home() {
         holdings_sort_by_owner?: unknown;
         sell_log_by_owner?: unknown;
         owner_names?: unknown;
+        target_stock_weight_by_owner?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -2069,6 +2075,7 @@ export default function Home() {
         setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
         setLastSellLogSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
         setSellLogDirty(false);
+        mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
       } else {
         setSyncMessage("서버에 아직 데이터가 없습니다. 먼저 이 기기에서 올리기를 해 보세요.");
       }
@@ -2098,6 +2105,7 @@ export default function Home() {
           holdingsSortByOwner,
           sellLogByOwner: sellLog,
           ownerNames,
+          targetStockWeightByOwner: loadAllTargetStockWeights(),
         }),
       });
       const j = (await r.json()) as { error?: string };
@@ -2325,6 +2333,9 @@ export default function Home() {
           holdingsSortByOwner: s.holdings_sort_by_owner ?? {},
           sellLogByOwner: s.sell_log_by_owner ?? {},
           ownerNames: s.owner_names ?? [],
+          ...("target_stock_weight_by_owner" in s && s.target_stock_weight_by_owner != null
+            ? { targetStockWeightByOwner: s.target_stock_weight_by_owner }
+            : {}),
         }),
       });
       const j = (await r.json()) as { error?: string };
@@ -3055,7 +3066,8 @@ export default function Home() {
           <section className="space-y-4">
             <h2 className="font-semibold">포트폴리오 비중 (가족·퇴직연금)</h2>
             <p className="text-xs text-muted-foreground">
-              왼쪽 트리맵은 비중(%)·당일 등락, 오른쪽은 종목별 목표 비중(%)과 달성 여부입니다. 목표 값은 이 브라우저에 저장됩니다.
+              왼쪽 트리맵은 비중(%)·당일 등락, 오른쪽은 종목별 목표 비중(%)과 달성 여부입니다. 「목표 비중 저장」으로 이
+              브라우저와 서버(동기화 키가 맞는 경우)에 둘 다 남깁니다. 다른 PC에서는 먼저 『서버에서 불러오기』하세요.
             </p>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               {allocationByOwner.map(({ ownerName, data, total }) => (
@@ -3072,6 +3084,7 @@ export default function Home() {
                         row.owners.includes(WATCHLIST_OWNER_ALL) ||
                         row.owners.includes(ownerName)),
                   )}
+                  cloudSyncKey={cloudSyncKey}
                 />
               ))}
             </div>
