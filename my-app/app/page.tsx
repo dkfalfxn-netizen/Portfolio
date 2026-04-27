@@ -3066,8 +3066,8 @@ export default function Home() {
           <section className="space-y-4">
             <h2 className="font-semibold">포트폴리오 비중 (가족·퇴직연금)</h2>
             <p className="text-xs text-muted-foreground">
-              왼쪽은 비중 트리맵, 오른쪽은 목표 대비 편차(Δ%p), 필요 매수·매도 금액, 입금 시뮬, 안전·공격 구분입니다. 데드존은
-              ±2%p, 「목표 비중 저장」으로 브라우저·서버(동기화 키)에 반영됩니다. 다른 PC에서는 『서버에서 불러오기』.
+              왼쪽 트리맵은 비중(%)·당일 등락, 오른쪽은 종목별 목표 비중(%)과 달성 여부입니다. 「목표 비중 저장」으로 이
+              브라우저와 서버(동기화 키가 맞는 경우)에 둘 다 남깁니다. 다른 PC에서는 먼저 『서버에서 불러오기』하세요.
             </p>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               {allocationByOwner.map(({ ownerName, data, total }) => (
@@ -3085,7 +3085,6 @@ export default function Home() {
                         row.owners.includes(ownerName)),
                   )}
                   cloudSyncKey={cloudSyncKey}
-                  usdKrw={typeof marketQuery.data?.usdKrw === "number" ? marketQuery.data.usdKrw : null}
                 />
               ))}
             </div>
