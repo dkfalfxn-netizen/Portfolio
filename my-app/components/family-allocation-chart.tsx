@@ -21,6 +21,15 @@ const NEON_PALETTE = [
 /** 목표 비중 합계 100% 허용 오차 (%) */
 const TARGET_SUM_TOLERANCE = 0.05;
 
+function formatSavedTime(): string {
+  return new Date().toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
 export type AllocationSlice = {
   name: string;
   displayName: string;
@@ -160,7 +169,8 @@ function TargetStockWeightNeu({
     return { ...(all[ownerName] ?? {}) };
   });
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
-  const [serverSaveHint, setServerSaveHint] = useState<string | null>(null);
+  const [savedAtText, setSavedAtText] = useState<string | null>(null);
+  const [saveFailedBrief, setSaveFailedBrief] = useState(false);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -186,7 +196,8 @@ function TargetStockWeightNeu({
         window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
       } catch {
         setSaveStatus("err");
-        setServerSaveHint("이 브라우저에 저장할 수 없습니다(저장 공간/비공개 모드).");
+        setSaveFailedBrief(true);
+        setSavedAtText(null);
         return;
       }
     }, 350);
@@ -207,7 +218,8 @@ function TargetStockWeightNeu({
       window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
     } catch {
       setSaveStatus("err");
-      setServerSaveHint("이 브라우저에 저장할 수 없습니다(저장 공간/비공개 모드).");
+      setSaveFailedBrief(true);
+      setSavedAtText(null);
       return false;
     }
     return true;
@@ -216,10 +228,11 @@ function TargetStockWeightNeu({
   const handleClickSave = useCallback(async () => {
     if (!saveTargetsToDiskNow()) return;
     setSaveStatus("saving");
-    setServerSaveHint(null);
+    setSaveFailedBrief(false);
+    setSavedAtText(null);
     if (cloudSyncKey.trim().length < 8) {
       setSaveStatus("ok");
-      setServerSaveHint("이 브라우저에는 저장됐습니다. 다른 PC와 맞추려면 동기화 키(8자 이상)를 입력한 뒤 다시 저장하세요.");
+      setSavedAtText(formatSavedTime());
       return;
     }
     try {
@@ -232,22 +245,18 @@ function TargetStockWeightNeu({
           targetStockWeightByOwner: loadAllTargetStockWeights(),
         }),
       });
-      const j = (await r.json().catch(() => ({}))) as { error?: string; ok?: boolean; updated_at?: string };
       if (!r.ok) {
         setSaveStatus("err");
-        setServerSaveHint(
-          j.error ??
-            (r.status === 404
-              ? "서버에 잔고가 아직 없습니다. 먼저 『서버로 올리기』로 잔고를 올린 뒤 저장하세요."
-              : "서버에 저장하지 못했습니다."),
-        );
+        setSaveFailedBrief(true);
+        setSavedAtText(null);
         return;
       }
       setSaveStatus("ok");
-      setServerSaveHint("이 브라우저와 서버(Supabase)에 저장되었습니다. 다른 기기에서는 『서버에서 불러오기』하세요.");
+      setSavedAtText(formatSavedTime());
     } catch {
       setSaveStatus("err");
-      setServerSaveHint("네트워크 오류로 서버에 저장하지 못했습니다.");
+      setSaveFailedBrief(true);
+      setSavedAtText(null);
     }
   }, [cloudSyncKey, saveTargetsToDiskNow]);
 
@@ -300,10 +309,6 @@ function TargetStockWeightNeu({
           "6px 6px 14px rgba(0,0,0,0.45), -4px -4px 12px rgba(255,255,255,0.03), inset 0 1px 0 rgba(255,255,255,0.04)",
       }}
     >
-      <p className="mb-1 text-[11px] font-semibold tracking-wide text-zinc-300">목표 주식 비중</p>
-      <p className="mb-2 text-[10px] leading-snug text-zinc-500">
-        종목별 목표(%)를 입력하세요. 막대 색은 목표 대비 상대 차이(±5%)에 따라 표시됩니다.
-      </p>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -313,14 +318,11 @@ function TargetStockWeightNeu({
         >
           {saveStatus === "saving" ? "저장 중…" : "목표 비중 저장"}
         </button>
-        {serverSaveHint ? (
-          <span
-            className={`max-w-[min(100%,20rem)] text-[9px] leading-snug ${
-              saveStatus === "err" ? "text-rose-300/95" : "text-emerald-200/90"
-            }`}
-          >
-            {serverSaveHint}
-          </span>
+        {savedAtText ? (
+          <span className="text-[9px] font-medium tabular-nums text-zinc-400">{savedAtText} 저장</span>
+        ) : null}
+        {saveStatus === "err" && saveFailedBrief && !savedAtText ? (
+          <span className="text-[9px] text-rose-300/90">저장 실패</span>
         ) : null}
       </div>
       <div className="mb-2 flex flex-wrap gap-3 text-[10px] text-zinc-500">
