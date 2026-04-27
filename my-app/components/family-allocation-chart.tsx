@@ -40,6 +40,15 @@ export type AllocationSlice = {
   changePct: number | null;
 };
 
+/** 현물 비중(%) 내림차순 — USD/KRW 현금 행은 제외 */
+function nonCashEntriesSortedByWeight(
+  allEntries: AllocationSlice["allEntries"],
+): AllocationSlice["allEntries"] {
+  return allEntries
+    .filter((e) => e.name !== "USD 현금" && e.name !== "KRW 현금")
+    .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
+}
+
 function formatKrw(n: number) {
   return `₩${Math.round(n).toLocaleString()}`;
 }
@@ -73,7 +82,7 @@ function NeonTooltip({
 }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
-  const entries = p.allEntries.filter((e) => e.name !== "USD 현금" && e.name !== "KRW 현금");
+  const entries = nonCashEntriesSortedByWeight(p.allEntries);
   const isGroup = entries.length > 1;
   const entryPctText = (w?: number) => `${(w ?? p.weight).toFixed(1)}%`;
   return (
@@ -337,6 +346,18 @@ function TargetStockWeightNeu({
     [slices, targetsByTicker],
   );
 
+  /** 목표 % 큰 그룹/종목이 먼저, 동률·미설정(0)은 현재 비중으로 보조 정렬 */
+  const orderedSlices = useMemo(
+    () =>
+      [...slices].sort((a, b) => {
+        const ta = targetsByTicker[a.ticker] ?? 0;
+        const tb = targetsByTicker[b.ticker] ?? 0;
+        if (Math.abs(tb - ta) > 1e-9) return tb - ta;
+        return b.weight - a.weight;
+      }),
+    [slices, targetsByTicker],
+  );
+
   const targetSumOk = Math.abs(targetSum - 100) <= TARGET_SUM_TOLERANCE;
   const showTargetSumError = hasAnyTarget && !targetSumOk;
 
@@ -421,7 +442,7 @@ function TargetStockWeightNeu({
         </p>
       ) : null}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(48px,1fr))] gap-x-1 gap-y-4 py-2 justify-items-center">
-        {slices.map((slice) => {
+        {orderedSlices.map((slice) => {
           const hasInputTarget = Object.prototype.hasOwnProperty.call(targetsByTicker, slice.ticker);
           const target = targetsByTicker[slice.ticker] ?? 0;
           const actual = slice.weight;
@@ -458,7 +479,7 @@ function TargetStockWeightNeu({
           else if (withinBand) statusLabel = "±5% 이내";
           else statusLabel = "미달";
 
-          const tooltipEntries = slice.allEntries.filter((e) => e.name !== "USD 현금" && e.name !== "KRW 현금");
+          const tooltipEntries = nonCashEntriesSortedByWeight(slice.allEntries);
           const isGrouped = tooltipEntries.length > 1;
           const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
 
