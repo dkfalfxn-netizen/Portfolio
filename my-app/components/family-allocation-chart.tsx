@@ -600,47 +600,84 @@ export function FamilyAllocationDonut({
 
   const stockSlicesForTargets = useMemo(
     () => {
+      const normalize = (value: unknown) =>
+        typeof value === "string" ? value.trim() : "";
+      const normalizeUpper = (value: unknown) => normalize(value).toUpperCase();
       const usdCash = chartData.find((d) => d.ticker === "USD 현금");
       const krwCash = chartData.find((d) => d.ticker === "KRW 현금");
       const mergedCashValue = (usdCash?.value ?? 0) + (krwCash?.value ?? 0);
       const mergedCashWeight = (usdCash?.weight ?? 0) + (krwCash?.weight ?? 0);
-      const base = chartData.filter(
-        (d) => d.value > 0 && d.ticker !== "USD 현금" && d.ticker !== "KRW 현금",
-      );
+      const base = chartData
+        .filter((d) => d.value > 0 && d.ticker !== "USD 현금" && d.ticker !== "KRW 현금")
+        .map((d) => ({
+          ...d,
+          allEntries: d.allEntries.map((entry) => ({
+            name: normalize(entry.name) || normalize(entry.symbol),
+            symbol: normalize(entry.symbol),
+            weight: entry.weight,
+          })),
+        }));
+      const baseByTicker = new Map(base.map((d) => [normalizeUpper(d.ticker), d]));
       if (mergedCashValue > 0) {
         base.push({
           name: "cash-merged",
           displayName: "현금(USD+KRW)",
           ticker: "현금",
           allEntries: [
-            ...(usdCash?.allEntries ?? []),
-            ...(krwCash?.allEntries ?? []),
+            ...(usdCash?.allEntries ?? []).map((entry) => ({
+              name: normalize(entry.name) || normalize(entry.symbol),
+              symbol: normalize(entry.symbol),
+              weight: entry.weight,
+            })),
+            ...(krwCash?.allEntries ?? []).map((entry) => ({
+              name: normalize(entry.name) || normalize(entry.symbol),
+              symbol: normalize(entry.symbol),
+              weight: entry.weight,
+            })),
           ],
           value: mergedCashValue,
           weight: mergedCashWeight,
           changePct: null,
         });
       }
-      const seen = new Set(base.map((d) => d.ticker.trim().toUpperCase()));
       const groupedWatch = new Map<
         string,
-        { ticker: string; displayName: string; allEntries: { name: string; symbol: string }[] }
+        {
+          ticker: string;
+          displayName: string;
+          allEntries: { name: string; symbol: string; weight: number | undefined }[];
+        }
       >();
       for (const row of watchlistEntries ?? []) {
-        const symbol = row.symbol.trim().toUpperCase();
+        const rawSymbol = normalize(row?.symbol);
+        const symbol = rawSymbol.toUpperCase();
         if (!symbol) continue;
-        const group = (row.group ?? "").trim();
+        const group = normalize(row?.group);
         const ticker = group || symbol;
-        const key = ticker.toUpperCase();
-        if (seen.has(key)) continue;
+        const key = normalizeUpper(ticker);
+        const entry = {
+          name: normalize(row?.name) || rawSymbol || symbol,
+          symbol,
+          weight: undefined,
+        };
+        const existingBase = baseByTicker.get(key);
+        if (existingBase) {
+          const duplicated = existingBase.allEntries.some(
+            (e) => normalizeUpper(e.symbol) === symbol,
+          );
+          if (!duplicated) existingBase.allEntries.push(entry);
+          continue;
+        }
         const prev = groupedWatch.get(key);
-        const entry = { name: row.name.trim() || symbol, symbol };
         if (prev) {
-          prev.allEntries.push(entry);
+          const duplicated = prev.allEntries.some(
+            (e) => normalizeUpper(e.symbol) === symbol,
+          );
+          if (!duplicated) prev.allEntries.push(entry);
         } else {
           groupedWatch.set(key, {
             ticker,
-            displayName: group || row.name.trim() || symbol,
+            displayName: group || normalize(row?.name) || symbol,
             allEntries: [entry],
           });
         }
