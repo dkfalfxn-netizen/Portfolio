@@ -44,6 +44,24 @@ function formatKrw(n: number) {
   return `₩${Math.round(n).toLocaleString()}`;
 }
 
+function shadeHexToWhite(hex: string, f: number): string {
+  const m = hex.replace("#", "");
+  if (m.length !== 6) return hex;
+  const r = parseInt(m.slice(0, 2), 16);
+  const g = parseInt(m.slice(2, 4), 16);
+  const b = parseInt(m.slice(4, 6), 16);
+  return `rgb(${Math.round(r + (255 - r) * f)},${Math.round(g + (255 - g) * f)},${Math.round(b + (255 - b) * f)})`;
+}
+
+function shadeHexToBlack(hex: string, f: number): string {
+  const m = hex.replace("#", "");
+  if (m.length !== 6) return hex;
+  const r = parseInt(m.slice(0, 2), 16);
+  const g = parseInt(m.slice(2, 4), 16);
+  const b = parseInt(m.slice(4, 6), 16);
+  return `rgb(${Math.round(r * (1 - f))},${Math.round(g * (1 - f))},${Math.round(b * (1 - f))})`;
+}
+
 function NeonTooltip({
   active,
   payload,
@@ -119,19 +137,55 @@ function NeonTreemapNode(props: {
 
   if (width < 22 || height < 16) return null;
 
+  const gradId = `tm3d-${idx}-${String(ticker).replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}-${Math.round(x)}-${Math.round(y)}`;
+  const cHi = shadeHexToWhite(c, 0.32);
+  const cLo = shadeHexToBlack(c, 0.38);
+  const cMid = c;
+
   return (
     <g>
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor={cHi} stopOpacity={1} />
+          <stop offset="48%" stopColor={cMid} stopOpacity={1} />
+          <stop offset="100%" stopColor={cLo} stopOpacity={1} />
+        </linearGradient>
+        <filter id={`${gradId}-sh`} x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="rgba(0,0,0,0.45)" />
+          <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor={c} floodOpacity="0.32" />
+        </filter>
+      </defs>
       <rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-        rx={4}
-        ry={4}
-        fill={c}
-        stroke="rgba(255,255,255,0.18)"
-        strokeWidth={1}
-        style={{ filter: `drop-shadow(0 0 6px ${c}) drop-shadow(0 0 14px ${c}55)` }}
+        x={x + 0.5}
+        y={y + 0.5}
+        width={width - 1}
+        height={height - 1}
+        rx={5}
+        ry={5}
+        fill={`url(#${gradId})`}
+        filter={`url(#${gradId}-sh)`}
+        stroke="rgba(0,0,0,0.28)"
+        strokeWidth={0.75}
+        style={{ paintOrder: "stroke fill" }}
+      />
+      <line
+        x1={x + 1.5}
+        y1={y + 1.5}
+        x2={x + width - 1.5}
+        y2={y + 1.5}
+        stroke="rgba(255,255,255,0.2)"
+        strokeWidth={0.6}
+        strokeLinecap="round"
+        opacity={0.85}
+      />
+      <line
+        x1={x + 1.5}
+        y1={y + 1.5}
+        x2={x + 1.5}
+        y2={y + height - 1.5}
+        stroke="rgba(255,255,255,0.12)"
+        strokeWidth={0.5}
+        opacity={0.75}
       />
       {width > 40 && height > 22 && (
         <text x={x + 5} y={y + 13} fill="white" fontSize={11} fontWeight={700}>
@@ -518,7 +572,10 @@ export function FamilyAllocationDonut({
   /** 동기화 키(8자 이상) — 목표 비중을 서버에도 남길 때 사용 */
   cloudSyncKey?: string;
 }) {
-  const chartData = useMemo(() => [...data].sort((a, b) => b.value - a.value), [data]);
+  const chartData = useMemo(
+    () => [...data].sort((a, b) => b.weight - a.weight || b.value - a.value),
+    [data],
+  );
 
   const stockSlicesForTargets = useMemo(
     () => {
@@ -578,7 +635,7 @@ export function FamilyAllocationDonut({
           changePct: null,
         }),
       );
-      return [...base, ...extra];
+      return [...base, ...extra].sort((a, b) => b.weight - a.weight || b.value - a.value);
     },
     [chartData, watchlistEntries],
   );
