@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { DailySnapshot } from "@/app/page";
+import { ymdKST } from "@/lib/date-utils";
 
 type LiveChange = {
   date: string;
@@ -33,18 +34,78 @@ type CellData = {
   compareNote: string | null;
 };
 
-function ymd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+/** YYYY-MM-DD 두 달력값의 일수 차 (타임존·서머타임과 무관하게 날짜만 비교, 스냅샷 문자열용) */
+function diffCalendarDays(a: string, b: string): number | null {
+  const pa = a.split("-");
+  const pb = b.split("-");
+  if (pa.length !== 3 || pb.length !== 3) return null;
+  const ya = Number(pa[0]);
+  const ma = Number(pa[1]);
+  const da = Number(pa[2]);
+  const yb = Number(pb[0]);
+  const mb = Number(pb[1]);
+  const db = Number(pb[2]);
+  if (![ya, ma, da, yb, mb, db].every(Number.isFinite)) return null;
+  const tA = Date.UTC(ya, ma - 1, da);
+  const tB = Date.UTC(yb, mb - 1, db);
+  return Math.round((tA - tB) / 86_400_000);
 }
 
-function diffDays(a: string, b: string): number | null {
-  const ad = new Date(`${a}T00:00:00`);
-  const bd = new Date(`${b}T00:00:00`);
-  if (Number.isNaN(ad.getTime()) || Number.isNaN(bd.getTime())) return null;
-  return Math.round((ad.getTime() - bd.getTime()) / (24 * 60 * 60 * 1000));
+/** 스냅샷 총변동과 자산단위 합계를 맞추기 위한 허용 오차(원) — 반올림·부동소수 누적 */
+const DELTA_MATCH_EPS = 2;
+
+function sumChangeKrw(rows: OwnerChange[]): number {
+  return rows.reduce((s, r) => s + r.changeKrw, 0);
+}
+
+/** ownerValues만으로 보유자 순위 변동 줄 (breakdown 불일치 시 합계 일치용) */
+function ownerValuesDeltaRows(cur: DailySnapshot, prev: DailySnapshot): OwnerChange[] {
+  const names = new Set([
+    ...Object.keys(cur.ownerValues ?? {}),
+    ...Object.keys(prev.ownerValues ?? {}),
+  ]);
+  const rows: OwnerChange[] = [];
+  for (const name of names) {
+    const c = cur.ownerValues?.[name] ?? 0;
+    const p = prev.ownerValues?.[name] ?? 0;
+    const changeKrw = c - p;
+    if (changeKrw === 0) continue;
+    rows.push({
+      name,
+      changeKrw,
+      changePct: p > 0 ? (changeKrw / p) * 100 : null,
+    });
+  }
+  rows.sort((x, y) => Math.abs(y.changeKrw) - Math.abs(x.changeKrw));
+  return rows;
+}
+
+/**
+ * breakdown 행 합이 당일 총 변동액과 맞지 않으면(그룹키 불일치 등) 보유자만 집계로 대체
+ */
+function reconcileOwnerChangeRows(
+  cur: DailySnapshot,
+  prev: DailySnapshot,
+  expectedTotalDelta: number,
+): OwnerChange[] {
+  const fromBreakdown = buildChangeRows(cur, prev);
+  if (
+    fromBreakdown.length > 0 &&
+    Math.abs(sumChangeKrw(fromBreakdown) - expectedTotalDelta) <= DELTA_MATCH_EPS
+  ) {
+    return fromBreakdown;
+  }
+  const fromOwners = ownerValuesDeltaRows(cur, prev);
+  if (fromOwners.length === 0) return fromBreakdown;
+  // 보유자 단위 합계가 총액과 더 맞으면 이쪽 사용, 아니면 breakdown 유지(해석은 어긋날 수 있음)
+  const ownSum = sumChangeKrw(fromOwners);
+  if (
+    Math.abs(ownSum - expectedTotalDelta) <= DELTA_MATCH_EPS ||
+    Math.abs(ownSum - expectedTotalDelta) < Math.abs(sumChangeKrw(fromBreakdown) - expectedTotalDelta)
+  ) {
+    return fromOwners;
+  }
+  return fromBreakdown;
 }
 
 function toKrw(n: number): string {
@@ -144,9 +205,9 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
     for (let i = 0; i < 42; i++) {
       const d = new Date(begin);
       d.setDate(begin.getDate() + i);
-      const key = ymd(d);
+      const key = ymdKST(d);
       const cur = byDate.get(key);
-      // 기록이 연속되지 않아도 직전 기록일과 비교해 달력에 변화량을 채웁니다.
+      /* 직전 스냅샷과 달력 날짜가 정확히 하루 차이일 때만 변동액 표시(그 사이 날짜가 비면 생략). 셀 키는 KST로 스냅샷 date와 동일 체계. */
       const prev = cur ? (prevSnapshotByDate.get(key) ?? null) : null;
 
       let changeKrw: number | null = null;
@@ -158,7 +219,7 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
         if (!prev) {
           compareNote = "전일 비교 불가(이전 기록 없음)";
         } else {
-          const dayDiff = diffDays(cur.date, prev.date);
+          const dayDiff = diffCalendarDays(cur.date, prev.date);
           if (dayDiff !== 1) {
             compareNote = "전일 비교 불가(기록 간격)";
           } else if (!(prev.totalValue > 0)) {
@@ -166,7 +227,7 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
           } else {
             changeKrw = cur.totalValue - prev.totalValue;
             changePct = (changeKrw / prev.totalValue) * 100;
-            ownerChanges.push(...buildChangeRows(cur, prev));
+            ownerChanges.push(...reconcileOwnerChangeRows(cur, prev, changeKrw));
           }
         }
       }
@@ -199,6 +260,12 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
     () => (tooltipCell ? aggregateOwnerTotals(tooltipCell.ownerChanges) : []),
     [tooltipCell],
   );
+
+  const tooltipOwnerSumMismatch = useMemo(() => {
+    if (!tooltipCell || tooltipCell.changeKrw == null || tooltipOwnerTotals.length === 0) return false;
+    const s = tooltipOwnerTotals.reduce((a, o) => a + o.changeKrw, 0);
+    return Math.abs(s - tooltipCell.changeKrw) > DELTA_MATCH_EPS;
+  }, [tooltipCell, tooltipOwnerTotals]);
 
   const hasAny = snapshots.length > 0;
 
@@ -271,7 +338,7 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
                   }}
                   onMouseLeave={() => setTooltip(null)}
                 >
-                  <p className="text-[10px] font-medium">{c.date.getDate()}</p>
+                  <p className="text-[10px] font-medium">{parseInt(c.key.slice(8, 10), 10)}</p>
                   {c.changeKrw != null ? (
                     <>
                       <p className={`mt-1 text-[10px] font-semibold ${c.changeKrw > 0 ? "text-red-500" : c.changeKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
@@ -330,6 +397,11 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
                   {toKrw(tooltipCell.changeKrw!)}
                 </span>
               </div>
+              {tooltipOwnerSumMismatch ? (
+                <p className="mt-2 text-[10px] text-amber-600/90 dark:text-amber-500/90">
+                  보유자별 합이 셀 총액과 불일치합니다. 스냅샷에 total과 owner 합이 어긋난 저장일 수 있습니다.
+                </p>
+              ) : null}
             </>
           ) : (
             <p className="text-muted-foreground">

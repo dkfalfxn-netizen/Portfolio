@@ -9,6 +9,11 @@ const TZ = "Asia/Seoul";
 
 /** 오늘 KST 날짜 (YYYY-MM-DD) */
 export function todayKST(at: Date = new Date()): string {
+  return ymdKST(at);
+}
+
+/** `Date` 시각이 가리키는 순간의 KST 달력 날짜 (YYYY-MM-DD). 스냅샷 키와 매칭할 때 사용 */
+export function ymdKST(at: Date): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: TZ,
     year: "numeric",
