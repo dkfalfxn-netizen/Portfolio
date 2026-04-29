@@ -75,6 +75,7 @@ type PushBody = {
   ownerNames?: unknown;
   sellLogByOwner?: unknown;
   targetStockWeightByOwner?: unknown;
+  ownerScratchpadByOwner?: unknown;
 };
 
 type SellLogCurrency = "USD" | "EUR" | "KRW";
@@ -245,6 +246,25 @@ function sanitizeHoldingsSortForOwners(
 
 type TargetMap = Record<string, Record<string, number>>;
 
+/** 보유자별 메모 문자열(jsonb): 보유자당 최대 길이 */
+const MAX_OWNER_SCRATCH_LEN = 50_000;
+
+function sanitizeOwnerScratchpadsForOwners(
+  raw: unknown,
+  allowed: Set<string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [owner, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof owner !== "string" || !owner.trim() || !allowed.has(owner)) continue;
+    if (typeof v !== "string") continue;
+    let s = v.replace(/\u0000/g, "");
+    if (s.length > MAX_OWNER_SCRATCH_LEN) s = s.slice(0, MAX_OWNER_SCRATCH_LEN);
+    out[owner] = s;
+  }
+  return out;
+}
+
 function sanitizeTargetStockWeightsForOwners(raw: unknown, allowed: Set<string>): TargetMap {
   const out: TargetMap = {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
@@ -295,7 +315,7 @@ export async function POST(req: NextRequest) {
     const withSellLog = await admin
       .from("portfolio_snapshots")
       .select(
-        "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, updated_at",
+        "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, updated_at",
       )
       .eq("sync_key", key)
       .maybeSingle();
@@ -315,6 +335,7 @@ export async function POST(req: NextRequest) {
           owner_names?: unknown;
           sell_log_by_owner?: unknown;
           target_stock_weight_by_owner?: unknown;
+          owner_scratchpad_by_owner?: unknown;
           updated_at?: string | null;
         }
       | null;
@@ -332,6 +353,7 @@ export async function POST(req: NextRequest) {
         sell_log_by_owner: {},
         owner_names: [],
         target_stock_weight_by_owner: {},
+        owner_scratchpad_by_owner: {},
         updated_at: null,
       });
     }
@@ -347,6 +369,10 @@ export async function POST(req: NextRequest) {
       owner_names: ownerList,
       target_stock_weight_by_owner: sanitizeTargetStockWeightsForOwners(
         data.target_stock_weight_by_owner,
+        allowed,
+      ),
+      owner_scratchpad_by_owner: sanitizeOwnerScratchpadsForOwners(
+        data.owner_scratchpad_by_owner,
         allowed,
       ),
       updated_at: data.updated_at,
@@ -446,6 +472,29 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let scratchPadsOut: Record<string, string>;
+    {
+      const incomingRaw =
+        "ownerScratchpadByOwner" in b && b.ownerScratchpadByOwner != null ? b.ownerScratchpadByOwner : null;
+      const incomingSanitized =
+        incomingRaw != null ? sanitizeOwnerScratchpadsForOwners(incomingRaw, allowed) : null;
+      const incomingIsEmpty = incomingSanitized == null || Object.keys(incomingSanitized).length === 0;
+
+      if (!incomingIsEmpty) {
+        scratchPadsOut = incomingSanitized!;
+      } else {
+        const { data: existing } = await admin
+          .from("portfolio_snapshots")
+          .select("owner_scratchpad_by_owner")
+          .eq("sync_key", key)
+          .maybeSingle();
+        scratchPadsOut = sanitizeOwnerScratchpadsForOwners(
+          existing?.owner_scratchpad_by_owner ?? {},
+          allowed,
+        );
+      }
+    }
+
     const updatedAt = new Date().toISOString();
     const payload = {
       sync_key: key,
@@ -455,6 +504,7 @@ export async function POST(req: NextRequest) {
       owner_names: ownerNames,
       sell_log_by_owner: sellLogOut,
       target_stock_weight_by_owner: targetWeightsOut,
+      owner_scratchpad_by_owner: scratchPadsOut,
       updated_at: updatedAt,
     };
     const withOwnerNames = await admin
@@ -471,6 +521,7 @@ export async function POST(req: NextRequest) {
                 cash_by_owner: cashOut,
                 holdings_sort_by_owner: holdingsSortOut,
                 target_stock_weight_by_owner: targetWeightsOut,
+                owner_scratchpad_by_owner: scratchPadsOut,
                 updated_at: updatedAt,
               },
               { onConflict: "sync_key" },
@@ -486,15 +537,26 @@ export async function POST(req: NextRequest) {
 
   if (action === "pushTargetWeights") {
     const raw = (body as { targetStockWeightByOwner?: unknown }).targetStockWeightByOwner;
+    const padBody = body as { ownerScratchpadByOwner?: unknown };
     if (raw != null && (typeof raw !== "object" || Array.isArray(raw))) {
       return NextResponse.json(
         { error: "targetStockWeightByOwner 형식이 올바르지 않습니다." },
         { status: 400 },
       );
     }
+    if (
+      "ownerScratchpadByOwner" in padBody &&
+      padBody.ownerScratchpadByOwner != null &&
+      (typeof padBody.ownerScratchpadByOwner !== "object" || Array.isArray(padBody.ownerScratchpadByOwner))
+    ) {
+      return NextResponse.json(
+        { error: "ownerScratchpadByOwner 형식이 올바르지 않습니다." },
+        { status: 400 },
+      );
+    }
     const { data: row, error: loadErr } = await admin
       .from("portfolio_snapshots")
-      .select("owner_names, target_stock_weight_by_owner")
+      .select("owner_names, target_stock_weight_by_owner, owner_scratchpad_by_owner")
       .eq("sync_key", key)
       .maybeSingle();
     if (loadErr) {
@@ -521,10 +583,29 @@ export async function POST(req: NextRequest) {
       new Set(allowed),
     );
     const merged: TargetMap = { ...prev, ...nextSlice };
+    const prevScratch = sanitizeOwnerScratchpadsForOwners(
+      (row as { owner_scratchpad_by_owner?: unknown }).owner_scratchpad_by_owner ?? {},
+      new Set(allowed),
+    );
+    let mergedScratch: Record<string, string>;
+    if (!Object.prototype.hasOwnProperty.call(padBody, "ownerScratchpadByOwner")) {
+      mergedScratch = prevScratch;
+    } else {
+      const rawPad = padBody.ownerScratchpadByOwner;
+      const nextPad = sanitizeOwnerScratchpadsForOwners(
+        rawPad === undefined || rawPad === null ? {} : rawPad,
+        allowed,
+      );
+      mergedScratch = { ...prevScratch, ...nextPad };
+    }
     const updatedAt = new Date().toISOString();
     const { error: upErr } = await admin
       .from("portfolio_snapshots")
-      .update({ target_stock_weight_by_owner: merged, updated_at: updatedAt })
+      .update({
+        target_stock_weight_by_owner: merged,
+        owner_scratchpad_by_owner: mergedScratch,
+        updated_at: updatedAt,
+      })
       .eq("sync_key", key);
     if (upErr) {
       return NextResponse.json({ error: friendlyDbError(upErr.message) }, { status: 500 });

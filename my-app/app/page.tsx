@@ -27,6 +27,7 @@ import {
   loadAllTargetStockWeights,
   mergeAndPersistTargetStockWeightsFromServer,
 } from "@/lib/portfolio-target-weights";
+import { mergeAndPersistOwnerScratchpadsFromServer, loadAllOwnerScratchpads } from "@/lib/portfolio-owner-scratchpad";
 import { todayKST } from "@/lib/date-utils";
 import type { LiquidityHistoryRow } from "@/components/liquidity-briefing-chart";
 import {
@@ -1720,6 +1721,7 @@ export default function Home() {
         sell_log_by_owner?: unknown;
         owner_names?: unknown;
         target_stock_weight_by_owner?: unknown;
+        owner_scratchpad_by_owner?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -1764,6 +1766,7 @@ export default function Home() {
           setLastSellLogSyncedAt(clockToStore);
           setSellLogDirty(false);
           mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
+          mergeAndPersistOwnerScratchpadsFromServer(j.owner_scratchpad_by_owner);
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
           // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
@@ -1779,6 +1782,7 @@ export default function Home() {
               sellLogByOwner,
               ownerNames: owners,
               targetStockWeightByOwner: loadAllTargetStockWeights(),
+              ownerScratchpadByOwner: loadAllOwnerScratchpads(),
             }),
           });
           const jPush = (await rPush.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -1823,6 +1827,7 @@ export default function Home() {
             sellLogByOwner,
             ownerNames: owners,
             targetStockWeightByOwner: loadAllTargetStockWeights(),
+            ownerScratchpadByOwner: loadAllOwnerScratchpads(),
           }),
         });
         const j2 = (await r2.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -1998,6 +2003,7 @@ export default function Home() {
           sellLogByOwner: sellLog,
           ownerNames,
           targetStockWeightByOwner: loadAllTargetStockWeights(),
+          ownerScratchpadByOwner: loadAllOwnerScratchpads(),
         }),
       }).then(async (r) => {
         if (r.ok) {
@@ -2044,6 +2050,7 @@ export default function Home() {
         sell_log_by_owner?: unknown;
         owner_names?: unknown;
         target_stock_weight_by_owner?: unknown;
+        owner_scratchpad_by_owner?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -2076,6 +2083,7 @@ export default function Home() {
         setLastSellLogSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
         setSellLogDirty(false);
         mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
+        mergeAndPersistOwnerScratchpadsFromServer(j.owner_scratchpad_by_owner);
       } else {
         setSyncMessage("서버에 아직 데이터가 없습니다. 먼저 이 기기에서 올리기를 해 보세요.");
       }
@@ -2106,6 +2114,7 @@ export default function Home() {
           sellLogByOwner: sellLog,
           ownerNames,
           targetStockWeightByOwner: loadAllTargetStockWeights(),
+          ownerScratchpadByOwner: loadAllOwnerScratchpads(),
         }),
       });
       const j = (await r.json()) as { error?: string };

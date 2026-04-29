@@ -7,6 +7,11 @@ import {
   loadAllTargetStockWeights,
   TARGET_WEIGHT_STORAGE_KEY,
 } from "@/lib/portfolio-target-weights";
+import {
+  loadAllOwnerScratchpads,
+  persistOneOwnerScratchpad,
+  pushTargetWeightsAndScratchpadsToServer,
+} from "@/lib/portfolio-owner-scratchpad";
 
 /** 네온 글로우용 팔레트 (한 단계 어둡게 — 채도는 유지) */
 const NEON_PALETTE = [
@@ -21,47 +26,50 @@ const NEON_PALETTE = [
 /** 목표 비중 합계 100% 허용 오차 (%) */
 const TARGET_SUM_TOLERANCE = 0.05;
 
-const OWNER_SCRATCHPAD_STORAGE_KEY = "portfolio-owner-scratchpad-v1";
-
-function OwnerScratchPad({ ownerName }: { ownerName: string }) {
+function OwnerScratchPad({
+  ownerName,
+  cloudSyncKey = "",
+}: {
+  ownerName: string;
+  /** 8자 이상이면 메모 변경 후 디바운스로 서버에도 반영 */
+  cloudSyncKey?: string;
+}) {
   const [text, setText] = useState("");
-  const saveTimer = useRef<number | null>(null);
+  const persistLocalTimerRef = useRef<number | null>(null);
+  const cloudTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(OWNER_SCRATCHPAD_STORAGE_KEY);
-      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-      setText(typeof parsed[ownerName] === "string" ? parsed[ownerName] : "");
-    } catch {
-      setText("");
-    }
+  const refreshFromStorage = useCallback(() => {
+    const all = loadAllOwnerScratchpads();
+    setText(typeof all[ownerName] === "string" ? all[ownerName] : "");
   }, [ownerName]);
 
   useEffect(() => {
+    refreshFromStorage();
+  }, [refreshFromStorage]);
+
+  useEffect(() => {
+    const onRefresh = () => refreshFromStorage();
+    window.addEventListener("portfolio-owner-scratchpads-refresh", onRefresh);
+    return () => window.removeEventListener("portfolio-owner-scratchpads-refresh", onRefresh);
+  }, [refreshFromStorage]);
+
+  useEffect(() => {
     return () => {
-      if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
+      if (persistLocalTimerRef.current != null) window.clearTimeout(persistLocalTimerRef.current);
+      if (cloudTimerRef.current != null) window.clearTimeout(cloudTimerRef.current);
     };
   }, []);
 
-  const persist = useCallback(
-    (value: string) => {
-      if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(() => {
-        saveTimer.current = null;
-        try {
-          const raw = window.localStorage.getItem(OWNER_SCRATCHPAD_STORAGE_KEY);
-          const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-          const next = { ...parsed };
-          if (value.length === 0) delete next[ownerName];
-          else next[ownerName] = value;
-          window.localStorage.setItem(OWNER_SCRATCHPAD_STORAGE_KEY, JSON.stringify(next));
-        } catch {
-          /* ignore quota */
-        }
-      }, 400);
-    },
-    [ownerName],
-  );
+  const flushCloud = useCallback(() => {
+    const key = cloudSyncKey.trim();
+    if (key.length < 8) return;
+    void pushTargetWeightsAndScratchpadsToServer(key);
+  }, [cloudSyncKey]);
+
+  const syncHint =
+    cloudSyncKey.trim().length >= 8
+      ? `숫자·식 메모 (${ownerName}) — 로컬·서버(동기화 키)`
+      : `숫자·식 메모 (${ownerName}) — 이 브라우저에만 저장`;
 
   return (
     <div className="mt-3 w-full min-w-0">
@@ -73,11 +81,20 @@ function OwnerScratchPad({ ownerName }: { ownerName: string }) {
         onChange={(e) => {
           const v = e.target.value;
           setText(v);
-          persist(v);
+          if (persistLocalTimerRef.current != null) window.clearTimeout(persistLocalTimerRef.current);
+          persistLocalTimerRef.current = window.setTimeout(() => {
+            persistLocalTimerRef.current = null;
+            persistOneOwnerScratchpad(ownerName, v);
+            if (cloudTimerRef.current != null) window.clearTimeout(cloudTimerRef.current);
+            cloudTimerRef.current = window.setTimeout(() => {
+              cloudTimerRef.current = null;
+              flushCloud();
+            }, 900);
+          }, 180);
         }}
         rows={5}
         spellCheck={false}
-        placeholder={`숫자·식 메모 (${ownerName}) — 브라우저에만 저장`}
+        placeholder={syncHint}
         className="min-h-[5.5rem] w-full resize-y rounded-lg border border-white/12 bg-[#0d1118]/95 px-2 py-1.5 text-[11px] leading-snug text-zinc-200 placeholder:text-zinc-600 outline-none ring-sky-500/30 focus:ring-1"
         style={{
           boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.45), inset -1px -1px 3px rgba(255,255,255,0.03)",
@@ -383,16 +400,8 @@ function TargetStockWeightNeu({
       return;
     }
     try {
-      const r = await fetch("/api/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "pushTargetWeights",
-          key: cloudSyncKey.trim(),
-          targetStockWeightByOwner: loadAllTargetStockWeights(),
-        }),
-      });
-      if (!r.ok) {
+      const ok = await pushTargetWeightsAndScratchpadsToServer(cloudSyncKey.trim());
+      if (!ok) {
         setSaveStatus("err");
         setSaveFailedBrief(true);
         setSavedAtText(null);
@@ -962,7 +971,7 @@ export function FamilyAllocationDonut({
               </Treemap>
             </ResponsiveContainer>
           </div>
-          <OwnerScratchPad ownerName={ownerName} />
+          <OwnerScratchPad ownerName={ownerName} cloudSyncKey={cloudSyncKey} />
         </div>
 
         <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} cloudSyncKey={cloudSyncKey} total={total} />

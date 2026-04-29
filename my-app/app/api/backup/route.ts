@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   const withSellLog = await admin
     .from("portfolio_snapshots")
     .select(
-      "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, updated_at",
+      "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, updated_at",
     )
     .eq("sync_key", key)
     .maybeSingle();
@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
         owner_names?: unknown;
         sell_log_by_owner?: unknown;
         target_stock_weight_by_owner?: unknown;
+        owner_scratchpad_by_owner?: unknown;
         updated_at?: string | null;
       }
     | null;
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
     owner_names: snapshotRow.owner_names ?? [],
     sell_log_by_owner: snapshotRow.sell_log_by_owner ?? {},
     target_stock_weight_by_owner: snapshotRow.target_stock_weight_by_owner ?? {},
+    owner_scratchpad_by_owner: snapshotRow.owner_scratchpad_by_owner ?? {},
     source_updated_at: snapshotRow.updated_at ?? null,
   };
 
