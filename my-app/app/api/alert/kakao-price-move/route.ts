@@ -225,14 +225,6 @@ function toBriefingItems(items: AlertItem[]): BriefingItem[] {
 }
 
 type WatchlistRow = { symbol: string; name?: string };
-type LiquidityBriefingRow = {
-  report_date: string;
-  net_liquidity_pct: number | null;
-  dxy_pct: number | null;
-  us10y_pct: number | null;
-  vix_pct: number | null;
-  ai_summary: string | null;
-};
 
 function parseWatchlist(raw: unknown): WatchlistRow[] {
   if (!Array.isArray(raw)) return [];
@@ -246,38 +238,6 @@ function parseWatchlist(raw: unknown): WatchlistRow[] {
     out.push({ symbol: sym, ...(name ? { name } : {}) });
   }
   return out;
-}
-
-function fmtSignedPct(v: number | null | undefined, digits = 2): string {
-  if (typeof v !== "number" || !Number.isFinite(v)) return "N/A";
-  const sign = v > 0 ? "+" : "";
-  return `${sign}${v.toFixed(digits)}%`;
-}
-
-async function buildLiquidityAddonBlock(
-  admin: NonNullable<ReturnType<typeof createSupabaseAdmin>>,
-): Promise<string> {
-  const date = todayKST();
-  const { data } = await admin
-    .from("liquidity_briefings")
-    .select("report_date, net_liquidity_pct, dxy_pct, us10y_pct, vix_pct, ai_summary")
-    .lte("report_date", date)
-    .order("report_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const row = data as LiquidityBriefingRow | null;
-  if (!row) return "";
-  return [
-    "",
-    "🌊 <b>유동성 지표 요약</b>",
-    `기준일: ${row.report_date}`,
-    `순유동성: ${fmtSignedPct(row.net_liquidity_pct)}`,
-    `DXY: ${fmtSignedPct(row.dxy_pct)} · 미10년물: ${fmtSignedPct(row.us10y_pct)} · VIX: ${fmtSignedPct(row.vix_pct)}`,
-    row.ai_summary ? `코멘트: ${row.ai_summary}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
 }
 
 export async function GET(req: NextRequest) {
@@ -537,9 +497,6 @@ export async function GET(req: NextRequest) {
       miniTrends,
       holdTransitions,
     });
-    if (briefingSlot === "0930") {
-      text += await buildLiquidityAddonBlock(admin!);
-    }
     const send = await sendTelegramMessage(text);
     if (!send.ok) {
       return NextResponse.json({ error: send.error ?? "텔레그램 전송 실패" }, { status: 500 });
@@ -845,7 +802,6 @@ export async function POST(req: NextRequest) {
       miniTrends,
       holdTransitions,
     });
-    text += await buildLiquidityAddonBlock(admin!);
     const send = await sendTelegramMessage(text);
     if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
     return null;

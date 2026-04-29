@@ -500,9 +500,6 @@ export function buildTelegramBriefingHtml(opts: {
   const moverGroups = sortGroupsByAbsMagnitude(
     allGroups.filter((g) => g.avg !== null && Math.abs(g.avg) >= 2),
   );
-  const restGroups = allGroups.filter(
-    (g) => g.avg === null || !Number.isFinite(g.avg) || Math.abs(g.avg) < 2,
-  );
 
   let moversBlock = "";
   if (moverGroups.length > 0) {
@@ -514,11 +511,6 @@ export function buildTelegramBriefingHtml(opts: {
     moversBlock = `\n\n<b>🔥 주요 변동 종목 (±2% 이상)</b>\n${lines.join("\n")}`;
   } else {
     moversBlock = `\n\n<b>🔥 주요 변동 종목 (±2% 이상)</b>\n<i>(해당 없음)</i>`;
-  }
-
-  let restFoot = "";
-  if (restGroups.length > 0) {
-    restFoot = `\n\n📌 <i>그 외 ${restGroups.length}개 구간은 ±2% 미만 — 앱에서 상세 확인</i>`;
   }
 
   /** HOLD→전환 종목을 BUY / SELL 한 줄로 묶음 */
@@ -556,7 +548,6 @@ export function buildTelegramBriefingHtml(opts: {
     `${portfolioLine}` +
     `${ownerBlock}` +
     `${moversBlock}` +
-    `${restFoot}` +
     `${signalBlock}` +
     `${cronFooter}`;
 
