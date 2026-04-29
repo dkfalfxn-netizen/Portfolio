@@ -340,11 +340,8 @@ async function buildWatchlistTelegramBlock(entries: WatchlistRow[]): Promise<str
     const label = e.name && e.name.length > 0 ? e.name : e.symbol;
     const sig = await analyzeFourSignals(e.symbol, label);
     const line =
-      `● ${sig.name} (<code>${sig.symbol}</code>)\n` +
-      `<b>${overallLabelKo(sig.overall)}</b>\n` +
-      `MA:${sig.ma} RSI:${sig.rsi} BB:${sig.bb} VOL:${sig.vol}\n` +
-      `${sig.summaryKo}` +
-      (sig.rsi14 != null ? ` (RSI ${sig.rsi14.toFixed(1)})` : "") +
+      `• ${sig.name} (<code>${sig.symbol}</code>)\n` +
+      `<b>${overallLabelKo(sig.overall)}</b>` +
       (sig.error ? `\n⚠️ ${sig.error}` : "") +
       "\n\n";
     t += line;
