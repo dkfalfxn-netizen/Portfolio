@@ -7,6 +7,7 @@ import {
   collectHoldTransitions,
   computeLivePortfolioKrw,
   computeOwnerDailyReturnsHybrid,
+  computeQuoteWeightedPortfolioReturnPct,
   type BriefingItem,
   type QuoteWeightedOwnerInput,
 } from "@/lib/briefing-message";
@@ -68,15 +69,6 @@ function isMarketTradingDay(group: MarketGroup, at: Date): boolean {
   return isUsEquityTradingSessionDay(at);
 }
 const TARGET_OWNERS = new Set(["김승주", "강희진"]);
-
-/** 브리핑「보유자별 요약」에 일중 종목등락 가중을 반영할 보유자명 (관심 알림 타깃과 별개) */
-const OWNER_NAMES_FOR_DAILY_RETURN = new Set([
-  "김승주",
-  "강희진",
-  "김도율",
-  "김찬율",
-  "퇴직연금",
-]);
 
 async function fetchYahooQuote(symbol: string): Promise<Quote> {
   try {
@@ -199,11 +191,12 @@ function normalizeDbPositions(raw: unknown): Array<{
     const x = p as Record<string, unknown>;
     const sym = typeof x.symbol === "string" ? x.symbol : "";
     if (!sym) continue;
+    const symNorm = sym.trim();
     const q = typeof x.quantity === "number" && Number.isFinite(x.quantity) ? x.quantity : 0;
     const cp = typeof x.currentPrice === "number" && Number.isFinite(x.currentPrice) ? x.currentPrice : 0;
     const cur = x.currency === "USD" || x.currency === "EUR" || x.currency === "KRW" ? x.currency : "KRW";
     const owner = typeof x.owner === "string" ? x.owner.trim() : "";
-    out.push({ symbol: sym, quantity: q, currentPrice: cp, currency: cur, owner });
+    out.push({ symbol: symNorm, quantity: q, currentPrice: cp, currency: cur, owner });
   }
   return out;
 }
@@ -287,39 +280,6 @@ async function buildLiquidityAddonBlock(
     .join("\n");
 }
 
-function overallLabelKo(o: FourSignalsResult["overall"]): string {
-  switch (o) {
-    case "STRONG_BUY":
-      return "강한 매수 참고";
-    case "BUY":
-      return "매수 참고";
-    case "WAIT":
-      return "관망";
-    case "CAUTION":
-      return "주의";
-    case "HOLD":
-    default:
-      return "HOLD";
-  }
-}
-
-async function buildWatchlistTelegramBlock(entries: WatchlistRow[]): Promise<string> {
-  if (entries.length === 0) return "";
-  let t = "";
-  for (const e of entries) {
-    const label = e.name && e.name.length > 0 ? e.name : e.symbol;
-    const sig = await analyzeFourSignals(e.symbol, label);
-    const line =
-      `• ${sig.name} (<code>${sig.symbol}</code>)\n` +
-      `<b>${overallLabelKo(sig.overall)}</b>` +
-      (sig.error ? `\n⚠️ ${sig.error}` : "") +
-      "\n\n";
-    t += line;
-    await new Promise((r) => setTimeout(r, 120));
-  }
-  return t.trimEnd();
-}
-
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -373,9 +333,8 @@ export async function GET(req: NextRequest) {
   }
 
   const snaps = [snap];
-  const watchEntries = parseWatchlist(snap.watchlist);
-
   const dateKst = todayKST();
+
   const yst = yesterdayKST();
   const now = new Date();
   const marketOpen = {
@@ -426,7 +385,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const portfolioChangeVsYesterdayPct =
+  const snapPortfolioChangePct =
     hasYesterdayPortfolio && yesterdayPortfolioSum > 0
       ? ((todayLiveKrw - yesterdayPortfolioSum) / yesterdayPortfolioSum) * 100
       : null;
@@ -517,7 +476,6 @@ export async function GET(req: NextRequest) {
   const cashForHybrid = normalizeCash(snap.cash_by_owner);
   const quoteWeights: QuoteWeightedOwnerInput[] = [];
   for (const row of posForHybrid) {
-    if (!OWNER_NAMES_FOR_DAILY_RETURN.has(row.owner.trim())) continue;
     const qRow = await memoizedQuote(row.symbol);
     const pctRow =
       qRow.price && qRow.previousClose && qRow.previousClose > 0
@@ -529,6 +487,22 @@ export async function GET(req: NextRequest) {
     ownerYesterdayTotals.size > 0
       ? Object.fromEntries([...ownerYesterdayTotals.entries()].map(([k, v]) => [k.trim(), v]))
       : undefined;
+
+  const quotePortfolioChangePct = computeQuoteWeightedPortfolioReturnPct(
+    posForHybrid,
+    cashForHybrid,
+    quotes,
+    usdKrw,
+    eurKrw,
+    quoteWeights,
+  );
+
+  const portfolioChangeVsYesterdayPct =
+    quotePortfolioChangePct !== null &&
+    (snapPortfolioChangePct === null || Math.abs(snapPortfolioChangePct) < 0.005)
+      ? quotePortfolioChangePct
+      : snapPortfolioChangePct ?? quotePortfolioChangePct;
+
   const ownerDailyReturns = computeOwnerDailyReturnsHybrid(
     posForHybrid,
     cashForHybrid,
@@ -539,17 +513,10 @@ export async function GET(req: NextRequest) {
     yesterdayRecord,
   );
 
-  const domesticWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "DOMESTIC");
-  const overseasWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "OVERSEAS");
-
-  const eligibleWatchCount =
-    (marketOpen.DOMESTIC ? domesticWatchEntries.length : 0) +
-    (marketOpen.OVERSEAS ? overseasWatchEntries.length : 0);
-
-  if (items.length === 0 && eligibleWatchCount === 0) {
+  if (items.length === 0) {
     return NextResponse.json({
       ok: true,
-      message: "발송할 내용 없음 (영업일/보유·관심 기준)",
+      message: "발송할 내용 없음 (영업일/보유 종목 없음 또는 이미 발송됨)",
       count: 0,
       briefing_slot: briefingSlot,
       marketOpen,
@@ -591,35 +558,14 @@ export async function GET(req: NextRequest) {
   const holdingsSendError = await sendHoldings(items);
   if (holdingsSendError) return holdingsSendError;
 
-  async function sendWatchlistByMarket(entries: WatchlistRow[], label: string): Promise<Response | null> {
-    if (entries.length === 0) return null;
-    const block = await buildWatchlistTelegramBlock(entries);
-    if (!block) return null;
-    const text = `⭐ <b>${label} 관심종목</b>\n\n${block}`;
-    const send = await sendTelegramMessage(text);
-    if (!send.ok) {
-      return NextResponse.json({ error: send.error ?? `${label} 관심종목 텔레그램 전송 실패` }, { status: 500 });
-    }
-    return null;
-  }
-
-  if (marketOpen.DOMESTIC) {
-    const watchSendError = await sendWatchlistByMarket(domesticWatchEntries, "국내주식");
-    if (watchSendError) return watchSendError;
-  }
-  if (marketOpen.OVERSEAS) {
-    const watchSendError = await sendWatchlistByMarket(overseasWatchEntries, "해외주식");
-    if (watchSendError) return watchSendError;
-  }
-
   return NextResponse.json({
     ok: true,
     sentHoldings: items.length,
     sentHoldingsDomestic: items.filter((item) => marketGroupOfSymbol(item.symbol) === "DOMESTIC").length,
     sentHoldingsOverseas: items.filter((item) => marketGroupOfSymbol(item.symbol) === "OVERSEAS").length,
-    sentWatchlist: eligibleWatchCount,
-    sentWatchlistDomestic: marketOpen.DOMESTIC ? domesticWatchEntries.length : 0,
-    sentWatchlistOverseas: marketOpen.OVERSEAS ? overseasWatchEntries.length : 0,
+    sentWatchlist: 0,
+    sentWatchlistDomestic: 0,
+    sentWatchlistOverseas: 0,
     briefing_slot: briefingSlot,
     marketOpen,
   });
@@ -811,112 +757,106 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // dry_run: false → 실제 전송
-  if (items.length === 0 && watchlistPreview.length === 0) {
-    return NextResponse.json({ ok: true, dry_run: false, message: "발송할 내용 없음 (영업일/보유·관심 기준)", count: 0, marketOpen });
-  }
-
-  const domesticWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "DOMESTIC");
-  const overseasWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "OVERSEAS");
-
-  if (items.length > 0) {
-    const syms = [...new Set([...symbolMap.keys()].map((k) => k.split("::")[1]).filter(Boolean))];
-    const { quotes, usdKrw: pUsd, eurKrw: pEur } = await fetchPrices(syms);
-    const usdK = pUsd ?? 1400;
-    const eurK = pEur ?? 1500;
-    const posNorm = normalizeDbPositions(snap.positions);
-    const cashNorm = normalizeCash(snap.cash_by_owner);
-    const todayLiveKrw = computeLivePortfolioKrw(posNorm, cashNorm, quotes, usdK, eurK);
-
-    const { data: ydayRow } = await admin
-      .from("portfolio_daily_snapshots")
-      .select("total_value, owner_values")
-      .eq("sync_key", syncKey)
-      .eq("date", yesterdayKST())
-      .maybeSingle();
-    const yVal = ydayRow?.total_value != null && Number.isFinite(Number(ydayRow.total_value))
-      ? Number(ydayRow.total_value)
-      : null;
-    const portfolioChangeVsYesterdayPct =
-      yVal !== null && yVal > 0 ? ((todayLiveKrw - yVal) / yVal) * 100 : null;
-    const yOwners =
-      ydayRow?.owner_values && typeof ydayRow.owner_values === "object" && !Array.isArray(ydayRow.owner_values)
-        ? (ydayRow.owner_values as Record<string, unknown>)
-        : null;
-    const yesterdayRecordManual =
-      yOwners && typeof yOwners === "object"
-        ? Object.fromEntries(
-            Object.entries(yOwners)
-              .map(([k, v]) => [k.trim(), Number(v)] as [string, number])
-              .filter(([, n]) => Number.isFinite(n)),
-          )
-        : undefined;
-    const quoteWeightsManual: QuoteWeightedOwnerInput[] = [];
-    for (const row of posNorm) {
-      if (!OWNER_NAMES_FOR_DAILY_RETURN.has(row.owner.trim())) continue;
-      const qRow = await postMemoizedQuote(row.symbol);
-      const pctRow =
-        qRow.price && qRow.previousClose && qRow.previousClose > 0
-          ? ((qRow.price - qRow.previousClose) / qRow.previousClose) * 100
-          : null;
-      quoteWeightsManual.push({ ownerLabel: row.owner.trim(), symbol: row.symbol, changePct: pctRow });
-    }
-    const ownerDailyReturns = computeOwnerDailyReturnsHybrid(
-      posNorm,
-      cashNorm,
-      quotes,
-      usdK,
-      eurK,
-      quoteWeightsManual,
-      yesterdayRecordManual,
-    );
-
-    async function sendHoldings(itemsForMessage: AlertItem[]): Promise<Response | null> {
-      if (itemsForMessage.length === 0) return null;
-      const briefingItems = toBriefingItems(itemsForMessage);
-      const miniTrends = await collectMiniTrends(briefingItems);
-      const holdTransitions = await collectHoldTransitions(briefingItems);
-      let text = buildTelegramBriefingHtml({
-        slotLabel: BRIEFING_SLOT_LABELS.manual,
-        dateLabel: mmddKST(),
-        portfolioChangeVsYesterdayPct,
-        ownerDailyReturns,
-        items: briefingItems,
-        miniTrends,
-        holdTransitions,
-      });
-      text += await buildLiquidityAddonBlock(admin!);
-      const send = await sendTelegramMessage(text);
-      if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
-      return null;
-    }
-
-    const holdingsSendError = await sendHoldings(items);
-    if (holdingsSendError) return holdingsSendError;
-
-    await admin.from("price_move_alert_logs").upsert(logRows, {
-      onConflict: "sync_key,symbol,date,briefing_slot",
+  // dry_run: false → 실제 전송 (관심종목 별도 텔레그램은 발송하지 않음)
+  if (items.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      dry_run: false,
+      message: "발송할 내용 없음 (보유 종목 없음 또는 이미 발송됨)",
+      count: 0,
+      marketOpen,
     });
   }
 
-  async function sendWatchlistByMarket(entries: WatchlistRow[], label: string): Promise<Response | null> {
-    if (entries.length === 0) return null;
-    const block = await buildWatchlistTelegramBlock(entries);
-    if (!block) return null;
-    const text = `⭐ <b>${label} 관심종목</b>\n\n${block}`;
-    const sendW = await sendTelegramMessage(text);
-    if (!sendW.ok) return NextResponse.json({ ok: false, error: sendW.error }, { status: 500 });
+  const posNorm = normalizeDbPositions(snap.positions);
+  const allSyms = [...new Set(posNorm.map((p) => p.symbol))];
+  const { quotes, usdKrw: pUsd, eurKrw: pEur } = await fetchPrices(allSyms);
+  const usdK = pUsd ?? 1400;
+  const eurK = pEur ?? 1500;
+  const cashNorm = normalizeCash(snap.cash_by_owner);
+  const todayLiveKrw = computeLivePortfolioKrw(posNorm, cashNorm, quotes, usdK, eurK);
+
+  const { data: ydayRow } = await admin
+    .from("portfolio_daily_snapshots")
+    .select("total_value, owner_values")
+    .eq("sync_key", syncKey)
+    .eq("date", yesterdayKST())
+    .maybeSingle();
+  const yVal = ydayRow?.total_value != null && Number.isFinite(Number(ydayRow.total_value))
+    ? Number(ydayRow.total_value)
+    : null;
+  const snapPortfolioChangePct = yVal !== null && yVal > 0 ? ((todayLiveKrw - yVal) / yVal) * 100 : null;
+  const yOwners =
+    ydayRow?.owner_values && typeof ydayRow.owner_values === "object" && !Array.isArray(ydayRow.owner_values)
+      ? (ydayRow.owner_values as Record<string, unknown>)
+      : null;
+  const yesterdayRecordManual =
+    yOwners && typeof yOwners === "object"
+      ? Object.fromEntries(
+          Object.entries(yOwners)
+            .map(([k, v]) => [k.trim(), Number(v)] as [string, number])
+            .filter(([, n]) => Number.isFinite(n)),
+        )
+      : undefined;
+  const quoteWeightsManual: QuoteWeightedOwnerInput[] = [];
+  for (const row of posNorm) {
+    const qRow = await postMemoizedQuote(row.symbol);
+    const pctRow =
+      qRow.price && qRow.previousClose && qRow.previousClose > 0
+        ? ((qRow.price - qRow.previousClose) / qRow.previousClose) * 100
+        : null;
+    quoteWeightsManual.push({ ownerLabel: row.owner.trim(), symbol: row.symbol, changePct: pctRow });
+  }
+  const quotePortfolioChangePct = computeQuoteWeightedPortfolioReturnPct(
+    posNorm,
+    cashNorm,
+    quotes,
+    usdK,
+    eurK,
+    quoteWeightsManual,
+  );
+  const portfolioChangeVsYesterdayPct =
+    quotePortfolioChangePct !== null &&
+    (snapPortfolioChangePct === null || Math.abs(snapPortfolioChangePct) < 0.005)
+      ? quotePortfolioChangePct
+      : snapPortfolioChangePct ?? quotePortfolioChangePct;
+
+  const ownerDailyReturns = computeOwnerDailyReturnsHybrid(
+    posNorm,
+    cashNorm,
+    quotes,
+    usdK,
+    eurK,
+    quoteWeightsManual,
+    yesterdayRecordManual,
+  );
+
+  async function sendHoldings(itemsForMessage: AlertItem[]): Promise<Response | null> {
+    if (itemsForMessage.length === 0) return null;
+    const briefingItems = toBriefingItems(itemsForMessage);
+    const miniTrends = await collectMiniTrends(briefingItems);
+    const holdTransitions = await collectHoldTransitions(briefingItems);
+    let text = buildTelegramBriefingHtml({
+      slotLabel: BRIEFING_SLOT_LABELS.manual,
+      dateLabel: mmddKST(),
+      portfolioChangeVsYesterdayPct,
+      ownerDailyReturns,
+      items: briefingItems,
+      miniTrends,
+      holdTransitions,
+    });
+    text += await buildLiquidityAddonBlock(admin!);
+    const send = await sendTelegramMessage(text);
+    if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });
     return null;
   }
 
-  if (marketOpen.DOMESTIC) {
-    const watchSendError = await sendWatchlistByMarket(domesticWatchEntries, "국내주식");
-    if (watchSendError) return watchSendError;
-  }
-  if (marketOpen.OVERSEAS) {
-    const watchSendError = await sendWatchlistByMarket(overseasWatchEntries, "해외주식");
-    if (watchSendError) return watchSendError;
-  }
+  const holdingsSendError = await sendHoldings(items);
+  if (holdingsSendError) return holdingsSendError;
+
+  await admin.from("price_move_alert_logs").upsert(logRows, {
+    onConflict: "sync_key,symbol,date,briefing_slot",
+  });
 
   return NextResponse.json({
     ok: true,
@@ -924,9 +864,9 @@ export async function POST(req: NextRequest) {
     sentHoldings: items.length,
     sentHoldingsDomestic: items.filter((item) => marketGroupOfSymbol(item.symbol) === "DOMESTIC").length,
     sentHoldingsOverseas: items.filter((item) => marketGroupOfSymbol(item.symbol) === "OVERSEAS").length,
-    sentWatchlist: (marketOpen.DOMESTIC ? domesticWatchEntries.length : 0) + (marketOpen.OVERSEAS ? overseasWatchEntries.length : 0),
-    sentWatchlistDomestic: marketOpen.DOMESTIC ? domesticWatchEntries.length : 0,
-    sentWatchlistOverseas: marketOpen.OVERSEAS ? overseasWatchEntries.length : 0,
+    sentWatchlist: 0,
+    sentWatchlistDomestic: 0,
+    sentWatchlistOverseas: 0,
     marketOpen,
     items,
   });

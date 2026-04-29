@@ -121,13 +121,76 @@ export function computeLivePortfolioKrw(
 
 export type QuoteWeightedOwnerInput = { ownerLabel: string; symbol: string; changePct: number | null };
 
+export function mergeQuoteWeightsDedupe(rows: QuoteWeightedOwnerInput[]): QuoteWeightedOwnerInput[] {
+  const m = new Map<string, QuoteWeightedOwnerInput>();
+  for (const it of rows) {
+    const k = normOwnerSym(it.ownerLabel, it.symbol);
+    if (!m.has(k)) m.set(k, { ownerLabel: it.ownerLabel.trim(), symbol: it.symbol.trim(), changePct: it.changePct });
+  }
+  return [...m.values()];
+}
+
+function normOwnerSym(owner: string, symbol: string): string {
+  return `${owner.trim()}:::${symbol.trim().toUpperCase()}`;
+}
+
+function quotePriceForSymbol(
+  quotes: PricesResult["quotes"],
+  symbol: string,
+  fallback: number,
+): number {
+  const s = symbol.trim();
+  const q = quotes[s] ?? quotes[s.toUpperCase()];
+  const px = typeof q?.price === "number" && Number.isFinite(q.price) && q.price > 0 ? q.price : null;
+  return px ?? fallback;
+}
+
+/**
+ * 전체 포트폴리오: 보유 주식 구간의 일중 손익(KRW) 합 / 전체 NAV. (현금·시세 실패 구간은 등락 0%로 반영)
+ */
+export function computeQuoteWeightedPortfolioReturnPct(
+  positions: DbPos[],
+  cashByOwner: Record<string, { usd: number; krw: number }>,
+  quotes: PricesResult["quotes"],
+  usdKrw: number,
+  eurKrw: number,
+  quotedItems: QuoteWeightedOwnerInput[],
+): number | null {
+  const navTotal = Object.values(
+    computeOwnerNavKrwMap(positions, cashByOwner, quotes, usdKrw, eurKrw),
+  ).reduce((a, b) => a + b, 0);
+  if (!(navTotal > 0)) return null;
+
+  const merged = mergeQuoteWeightsDedupe(quotedItems);
+  let gainKrw = 0;
+  for (const it of merged) {
+    const owner = it.ownerLabel.trim();
+    const symU = it.symbol.trim().toUpperCase();
+    const posRows = positions.filter(
+      (p) => p.owner.trim() === owner && p.symbol.trim().toUpperCase() === symU,
+    );
+    if (posRows.length === 0) continue;
+    const r = typeof it.changePct === "number" && Number.isFinite(it.changePct) ? it.changePct : 0;
+    for (const p of posRows) {
+      const price = quotePriceForSymbol(quotes, p.symbol, p.currentPrice);
+      const v =
+        p.currency === "USD"
+          ? p.quantity * price * usdKrw
+          : p.currency === "EUR"
+            ? p.quantity * price * eurKrw
+            : p.quantity * price;
+      if (!Number.isFinite(v) || v <= 0) continue;
+      gainKrw += v * (r / 100);
+    }
+  }
+  return (gainKrw / navTotal) * 100;
+}
+
 /**
  * 보유자별 오늘 변동 추정(%).
  *
- * - 보유 종목마다 조회된 전일 대비 등락(changePct)×당일 평가액 비중 가중평균 (현금은 등락 0%).
- * - 전일 DB `owner_values`와 오늘 NAV가 동일하게 잘못 맞물리면 순스냅 비교만 쓸 때 전부 0%로 나올 수 있어,
- *   **가중값이 존재하는 보유자**는 해당 일중 추정치를 우선 표시합니다.
- * - 해당 보유자에 종목 등락 입력이 하나도 없을 때만 (전일 대비 순자산 %) 스냅 비교를 씁니다.
+ * - 보유 종목마다 전일 대비 등락(changePct)×당일 평가액 가중 (현금 0%). **모든 보유자·종목**을 `quotedItems`에 넣는 것을 권장.
+ * - 가중 손익이 0에 가깝고 전일 스냅 대비 %가 의미 있으면 스냅을 보조로 사용.
  */
 export function computeOwnerDailyReturnsHybrid(
   positions: DbPos[],
@@ -141,35 +204,32 @@ export function computeOwnerDailyReturnsHybrid(
   const liveNav = computeOwnerNavKrwMap(positions, cashByOwner, quotes, usdKrw, eurKrw);
   const yMap = yesterdayByOwner && typeof yesterdayByOwner === "object" ? yesterdayByOwner : null;
 
-  const posByOwnerSymbol = new Map<string, DbPos>();
-  for (const row of positions) {
-    posByOwnerSymbol.set(`${row.owner.trim()}:::${row.symbol}`, row);
-  }
+  const mergedItems = mergeQuoteWeightsDedupe(quotedItems);
 
   const gainKrwFromQuotes = new Map<string, number>();
-  const ownersWithMatchedPositions = new Set<string>();
+  const ownersTouched = new Set<string>();
 
-  for (const it of quotedItems) {
+  for (const it of mergedItems) {
     const owner = it.ownerLabel.trim();
-    const keyPs = `${owner}:::${it.symbol}`;
-    const p = posByOwnerSymbol.get(keyPs);
-    if (!p) continue;
-    ownersWithMatchedPositions.add(owner);
+    const symU = it.symbol.trim().toUpperCase();
+    const rows = positions.filter(
+      (p) => p.owner.trim() === owner && p.symbol.trim().toUpperCase() === symU,
+    );
+    if (rows.length === 0) continue;
+    ownersTouched.add(owner);
 
-    const q = quotes[it.symbol.trim()];
-    const price =
-      typeof q?.price === "number" && Number.isFinite(q.price) && q.price > 0 ? q.price : p.currentPrice;
-    const v =
-      p.currency === "USD"
-        ? p.quantity * price * usdKrw
-        : p.currency === "EUR"
-          ? p.quantity * price * eurKrw
-          : p.quantity * price;
-    if (!Number.isFinite(v) || v <= 0) continue;
-
-    const pct = it.changePct;
-    const r = typeof pct === "number" && Number.isFinite(pct) ? pct : 0;
-    gainKrwFromQuotes.set(owner, (gainKrwFromQuotes.get(owner) ?? 0) + v * (r / 100));
+    const r = typeof it.changePct === "number" && Number.isFinite(it.changePct) ? it.changePct : 0;
+    for (const p of rows) {
+      const price = quotePriceForSymbol(quotes, p.symbol, p.currentPrice);
+      const v =
+        p.currency === "USD"
+          ? p.quantity * price * usdKrw
+          : p.currency === "EUR"
+            ? p.quantity * price * eurKrw
+            : p.quantity * price;
+      if (!Number.isFinite(v) || v <= 0) continue;
+      gainKrwFromQuotes.set(owner, (gainKrwFromQuotes.get(owner) ?? 0) + v * (r / 100));
+    }
   }
 
   const ownersSorted = [...Object.keys(liveNav)].sort((a, b) => {
@@ -192,15 +252,18 @@ export function computeOwnerDailyReturnsHybrid(
           })(yMap[owner])
         : null;
 
-    if (ownersWithMatchedPositions.has(owner)) {
-      const g = gainKrwFromQuotes.get(owner) ?? 0;
-      const quotePct = (g / nav) * 100;
-      return { owner, changePct: quotePct };
+    if (!ownersTouched.has(owner)) {
+      if (snapPct !== null && Number.isFinite(snapPct)) return { owner, changePct: snapPct };
+      return { owner, changePct: null };
     }
-    if (snapPct !== null && Number.isFinite(snapPct)) {
+
+    const g = gainKrwFromQuotes.get(owner) ?? 0;
+    const quotePct = (g / nav) * 100;
+
+    if (Math.abs(g) <= 1e-3 && snapPct !== null && Number.isFinite(snapPct) && Math.abs(snapPct) >= 0.005) {
       return { owner, changePct: snapPct };
     }
-    return { owner, changePct: null };
+    return { owner, changePct: quotePct };
   });
 }
 
