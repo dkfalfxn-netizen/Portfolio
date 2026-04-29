@@ -313,6 +313,14 @@ function formatKrwCompact(n: number): string {
   return `${sign}${Math.round(abs).toLocaleString()}원`;
 }
 
+/** 목표 % 표시용 — 정수면 소수 생략 */
+function fmtTargetPctLabel(targetPct: number): string {
+  if (!Number.isFinite(targetPct)) return "—";
+  const rounded = Math.round(targetPct * 10) / 10;
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return String(Math.round(rounded));
+  return rounded.toFixed(1);
+}
+
 function TargetStockWeightNeu({
   ownerName,
   slices,
@@ -660,26 +668,31 @@ function TargetStockWeightNeu({
                   ? "0 0 14px rgba(248, 113, 113, 0.5), 0 0 6px rgba(220, 38, 38, 0.35)"
                   : "0 0 14px rgba(52, 211, 153, 0.45), 0 0 6px rgba(22, 163, 74, 0.32)";
 
-          /** 목표 − 현재 (음수면 부족, 양수면 과다) — %포인트 표기용 */
+          /** 목표 − 목표값(%p) 편차: actual − target */
           const deltaPp = hasPositiveTarget ? actual - target : 0;
+          const tgtLabel = fmtTargetPctLabel(target);
 
-          let deviationMain: string;
-          let deviationSub: string | undefined;
+          let goalLine: string;
+          let deltaLine: string;
+
           if (!hasInputTarget) {
-            deviationMain = `현재 ${actual.toFixed(1)}%`;
-            deviationSub = "목표 입력 시 편차(%p)";
+            goalLine = "목표 — ·";
+            deltaLine = `현재 ${actual.toFixed(1)}%`;
           } else if (isOverTargetWhenZero) {
-            deviationMain = `목표 0% · +${actual.toFixed(1)}%p 초과`;
+            goalLine = "목표 0% ·";
+            deltaLine = `+${actual.toFixed(1)}%p (초과)`;
           } else if (!hasPositiveTarget) {
-            deviationMain = `현재 ${actual.toFixed(1)}%`;
-            deviationSub = "목표 미설정 또는 0%";
+            goalLine = "목표 0% ·";
+            deltaLine = `현재 ${actual.toFixed(1)}%`;
           } else if (withinBand) {
-            deviationMain = `목표 대비 ${deltaPp >= 0 ? "+" : ""}${deltaPp.toFixed(1)}%p`;
-            deviationSub = "±5% 이내";
+            goalLine = `목표 ${tgtLabel}% ·`;
+            deltaLine = `${deltaPp >= 0 ? "+" : ""}${deltaPp.toFixed(1)}%p (±5% 이내)`;
           } else if (belowBand) {
-            deviationMain = `${(-deltaPp).toFixed(1)}%p 부족`;
+            goalLine = `목표 ${tgtLabel}% ·`;
+            deltaLine = `${deltaPp.toFixed(1)}%p (부족)`;
           } else {
-            deviationMain = `${deltaPp.toFixed(1)}%p 초과`;
+            goalLine = `목표 ${tgtLabel}% ·`;
+            deltaLine = `+${deltaPp.toFixed(1)}%p (초과)`;
           }
 
           const tooltipEntries = nonCashEntriesSortedByWeight(slice.allEntries);
@@ -755,27 +768,27 @@ function TargetStockWeightNeu({
                   />
                 ) : null}
               </div>
-              <div
-                className={`text-center text-[8px] tabular-nums leading-tight ${
-                  !hasInputTarget
-                    ? "text-zinc-400"
-                    : withinBand
-                      ? "text-sky-400"
-                      : belowBand
-                        ? "text-red-400"
-                        : "text-emerald-400"
-                }`}
-              >
-                {deviationMain}
-                {deviationSub ? (
-                  <span
-                    className={`mt-0.5 block text-[7px] font-normal ${
-                      !hasInputTarget ? "text-zinc-600" : "opacity-95"
-                    }`}
-                  >
-                    {deviationSub}
-                  </span>
-                ) : null}
+              <div className="w-full text-center tabular-nums leading-tight">
+                <span
+                  className={`block text-[7px] ${
+                    !hasInputTarget
+                      ? "text-zinc-500"
+                      : withinBand
+                        ? "text-sky-400/85"
+                        : belowBand
+                          ? "text-red-400/85"
+                          : "text-emerald-400/85"
+                  }`}
+                >
+                  {goalLine}
+                </span>
+                <span
+                  className={`mt-1 block text-[8px] font-semibold tracking-tight ${
+                    !hasInputTarget ? "text-zinc-400" : withinBand ? "text-sky-400" : belowBand ? "text-red-400" : "text-emerald-400"
+                  }`}
+                >
+                  {deltaLine}
+                </span>
               </div>
               <textarea
                 rows={2}
