@@ -192,7 +192,7 @@ function fmtPriceCompactForMobile(item: BriefingItem): string {
 
 /**
  * 텔레그램 HTML 브리핑 (parse_mode: HTML).
- * 총액 미표시·전일 대비 포트폴리오 %만. 종목 목록은 모바일 줄바꿈을 피하기 위해 종목당 2줄·폭 제한 `<pre>`.
+ * 가독성을 위해 섹션별 줄바꿈·이모지·굵게 위주 구성 (<pre> 대량 나열 없음).
  */
 export function buildTelegramBriefingHtml(opts: {
   slotLabel?: string;
@@ -213,58 +213,6 @@ export function buildTelegramBriefingHtml(opts: {
     items,
     holdTransitions,
   } = opts;
-
-  const timeLine = slotLabel ? `⏰ ${escapeHtml(slotLabel)}\n` : "";
-  const cronHint =
-    "자동 발송(KST): <b>01:00 · 09:30 · 12:00 · 15:40 · 23:00</b> (<code>vercel.json</code> Cron)\n";
-
-  let portfolioPctLine = "";
-  if (portfolioChangeVsYesterdayPct !== null && Number.isFinite(portfolioChangeVsYesterdayPct)) {
-    const p = portfolioChangeVsYesterdayPct;
-    const arrow = p >= 0 ? "▲" : "▼";
-    portfolioPctLine = `전일 대비 포트폴리오 수익률: <b>${arrow} ${p >= 0 ? "+" : ""}${p.toFixed(2)}%</b>\n`;
-  } else {
-    portfolioPctLine =
-      "전일 대비 포트폴리오 수익률: <i>전일 일별 스냅 없음 (저장 후 비교 가능)</i>\n";
-  }
-
-  let ownerSummaryBlock = "";
-  if (ownerDailyReturns && ownerDailyReturns.length > 0) {
-    const rows = [...ownerDailyReturns].sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
-    const lines = rows.map((r) => {
-      if (r.changePct === null || !Number.isFinite(r.changePct)) {
-        return `· ${escapeHtml(r.owner)}: <i>전일 스냅 없음</i>`;
-      }
-      const arrow = r.changePct >= 0 ? "▲" : "▼";
-      return `· ${escapeHtml(r.owner)}: <b>${arrow} ${r.changePct >= 0 ? "+" : ""}${r.changePct.toFixed(2)}%</b>`;
-    });
-    ownerSummaryBlock = `👤 <b>보유자별 전일 대비 수익률</b>\n${lines.join("\n")}\n\n`;
-  }
-
-  const header =
-    `${timeLine}${cronHint}` +
-    `📊 <b>포트폴리오 브리핑</b> (${escapeHtml(dateLabel)})\n` +
-    `${portfolioPctLine}${ownerSummaryBlock}`;
-
-  // 보유자별로 그룹화한 뒤, 각 그룹의 평균 등락률 기준으로 주요변동/기타 분류
-  // (종목 단위 분류 시 동일 그룹이 두 섹션에 중복 노출되는 문제 방지)
-  function groupByOwner(rows: BriefingItem[]): Array<{ owner: string; rows: BriefingItem[] }> {
-    const map = new Map<string, BriefingItem[]>();
-    for (const row of rows) {
-      const owner = (row.ownerLabel ?? "").trim() || "기타";
-      const prev = map.get(owner);
-      if (prev) prev.push(row);
-      else map.set(owner, [row]);
-    }
-    return [...map.entries()]
-      .map(([owner, ownerRows]) => ({ owner, rows: ownerRows }))
-      .sort((a, b) => {
-        const ao = ownerOrderIndex(a.owner);
-        const bo = ownerOrderIndex(b.owner);
-        if (ao !== bo) return ao - bo;
-        return a.owner.localeCompare(b.owner, "ko");
-      });
-  }
 
   function groupByChartLabel(rows: BriefingItem[]): Array<{ label: string; rows: BriefingItem[] }> {
     const map = new Map<string, BriefingItem[]>();
@@ -294,89 +242,132 @@ export function buildTelegramBriefingHtml(opts: {
     });
   }
 
-  function sortGroupsDesc(groups: GroupWithAvg[]): GroupWithAvg[] {
+  function sortGroupsByAbsMagnitude(groups: GroupWithAvg[]): GroupWithAvg[] {
     return [...groups].sort((a, b) => {
       const af = a.avg !== null && Number.isFinite(a.avg);
       const bf = b.avg !== null && Number.isFinite(b.avg);
       if (!af && !bf) return 0;
       if (!af) return 1;
       if (!bf) return -1;
-      return b.avg! - a.avg!;
+      return Math.abs(b.avg!) - Math.abs(a.avg!);
     });
   }
 
-  function fmtGroupLine(g: GroupWithAvg): string {
-    const arrow = g.avg === null ? "•" : g.avg >= 0 ? "▲" : "▼";
-    const pctText = g.avg === null ? "등락 데이터 없음" : `평균 ${g.avg >= 0 ? "+" : ""}${g.avg.toFixed(2)}%`;
-    return `${iconForGroupLabel(g.label)} ${g.label} (${pctText} ${arrow})`;
+  /** 보유자 보유종목 등락 중 |평균| 최대 그룹으로 짧은 괄호 설명 */
+  function inferOwnerDriverPhrase(owner: string, slice: BriefingItem[]): string | null {
+    const mine = slice.filter((i) => (i.ownerLabel ?? "").trim() === owner);
+    if (mine.length === 0) return null;
+    const gs = computeGroupsWithAvg(mine).filter((g) => g.avg !== null && Number.isFinite(g.avg));
+    if (gs.length === 0) return null;
+    let best = gs[0]!;
+    for (const g of gs) {
+      if (Math.abs(g.avg!) > Math.abs(best.avg!)) best = g;
+    }
+    const label = escapeHtml(best.label.trim());
+    if (best.avg! >= 0.2) return `${label} 강세`;
+    if (best.avg! <= -0.2) return `${label} 조정`;
+    return label;
   }
 
-  // 그룹 평균 ±2% 기준으로 주요변동/기타 분리 (그룹 단위 분류)
-  const moverLines: string[] = [];
-  const restLines: string[] = [];
+  const timeLine = slotLabel ? `⏰ <i>${escapeHtml(slotLabel)}</i>\n\n` : "";
+  const cronFooter =
+    "\n\n<i>📡 자동(KST): 01:00 · 09:30 · 12:00 · 15:40 · 23:00</i>";
 
-  for (const ownerGroup of groupByOwner(items)) {
-    const allGroups = computeGroupsWithAvg(ownerGroup.rows);
-    const moverGroups = sortGroupsDesc(allGroups.filter((g) => g.avg !== null && Math.abs(g.avg) >= 2));
-    const restGroups = sortGroupsDesc(allGroups.filter((g) => g.avg === null || Math.abs(g.avg) < 2));
-
-    if (moverGroups.length > 0) {
-      moverLines.push(`👤 ${ownerGroup.owner}`);
-      moverLines.push(...moverGroups.map(fmtGroupLine));
-      moverLines.push("");
-    }
-    if (restGroups.length > 0) {
-      restLines.push(`👤 ${ownerGroup.owner}`);
-      restLines.push(...restGroups.map(fmtGroupLine));
-      restLines.push("");
-    }
-  }
-  while (moverLines.length > 0 && moverLines[moverLines.length - 1] === "") moverLines.pop();
-  while (restLines.length > 0 && restLines[restLines.length - 1] === "") restLines.pop();
-
-  const tableParts: string[] = [];
-  tableParts.push("🚨 주요 변동 (전일대비 ±2% 이상)");
-  if (moverLines.length > 0) {
-    tableParts.push(...moverLines);
+  let portfolioLine = "";
+  if (portfolioChangeVsYesterdayPct !== null && Number.isFinite(portfolioChangeVsYesterdayPct)) {
+    const p = portfolioChangeVsYesterdayPct;
+    const arrow = p >= 0 ? "▲" : "▼";
+    portfolioLine = `전체 수익률: <b>${arrow} ${p >= 0 ? "+" : ""}${p.toFixed(2)}%</b>`;
   } else {
-    tableParts.push("(해당 없음)");
+    portfolioLine = "전체 수익률: <i>전일 일별 스냅 없음 (저장 후 비교 가능)</i>";
   }
 
-  if (restLines.length > 0) {
-    tableParts.push("");
-    tableParts.push("📋 기타 그룹 (±2% 미만)");
-    tableParts.push(...restLines);
-  }
-
-  // 텔레그램 <pre> 마지막 줄이 하단 경계에 붙어 잘려 보이는 현상 방지용 여백 1줄
-  const tablePlain = `${tableParts.join("\n")}\n`;
-  const preBlock = `<pre>${escapeHtml(tablePlain)}</pre>\n`;
-
-  const restSummary = "";
-
-  let holdBlock = "";
-  if (holdTransitions.length > 0) {
-    const lines: string[] = [
-      `<b>🔄 HOLD에서 전환된 지표</b>`,
-      `<i>전일까지 일봉만 반영 시 HOLD → 최신 일봉 포함 시 BUY/SELL (앱과 동일 MA·RSI·BB·VOL)</i>`,
-      "",
-    ];
-    for (const h of holdTransitions) {
-      lines.push(
-        `· <b>${escapeHtml(h.name)}</b> (<code>${escapeHtml(h.symbol)}</code>)`,
-      );
-      for (const r of h.rows) {
-        lines.push(
-          `  ${escapeHtml(r.key)}→<b>${r.to}</b>: ${escapeHtml(r.summary)}`,
-        );
+  let ownerBlock = "";
+  if (ownerDailyReturns && ownerDailyReturns.length > 0) {
+    const sorted = [...ownerDailyReturns].sort((a, b) => {
+      const ao = ownerOrderIndex(a.owner);
+      const bo = ownerOrderIndex(b.owner);
+      if (ao !== bo) return ao - bo;
+      return a.owner.localeCompare(b.owner, "ko");
+    });
+    const lines = sorted.map((r) => {
+      if (r.changePct === null || !Number.isFinite(r.changePct)) {
+        return `• ${escapeHtml(r.owner)}: <i>전일 스냅 없음</i>`;
       }
-      // 종목 단위로 한 줄 띄워 가독성 향상
-      lines.push("");
-    }
-    holdBlock = `\n\n${lines.join("\n")}`;
+      const arrow = r.changePct >= 0 ? "▲" : "▼";
+      const hint = inferOwnerDriverPhrase(r.owner, items);
+      const tail = hint ? ` <i>(${hint})</i>` : "";
+      return `• ${escapeHtml(r.owner)}: <b>${arrow} ${r.changePct >= 0 ? "+" : ""}${r.changePct.toFixed(2)}%</b>${tail}`;
+    });
+    ownerBlock = `\n\n<b>👤 보유자별 요약</b>\n${lines.join("\n")}`;
   }
 
-  return `${header}<b>보유 종목</b>\n${preBlock}${restSummary}${holdBlock}`;
+  /** 전 종목 통합 그룹 — 차트 라벨(섹터) 단위 평균등락 */
+  const allGroups = computeGroupsWithAvg(items);
+  const moverGroups = sortGroupsByAbsMagnitude(
+    allGroups.filter((g) => g.avg !== null && Math.abs(g.avg) >= 2),
+  );
+  const restGroups = allGroups.filter(
+    (g) => g.avg === null || !Number.isFinite(g.avg) || Math.abs(g.avg) < 2,
+  );
+
+  let moversBlock = "";
+  if (moverGroups.length > 0) {
+    const lines = moverGroups.map((g) => {
+      const arrow = g.avg! >= 0 ? "▲" : "▼";
+      const signed = `${g.avg! >= 0 ? "+" : ""}${g.avg!.toFixed(2)}%`;
+      return `${iconForGroupLabel(g.label)} <b>${escapeHtml(g.label)}</b>: ${signed} ${arrow}`;
+    });
+    moversBlock = `\n\n<b>🔥 주요 변동 종목 (±2% 이상)</b>\n${lines.join("\n")}`;
+  } else {
+    moversBlock = `\n\n<b>🔥 주요 변동 종목 (±2% 이상)</b>\n<i>(해당 없음)</i>`;
+  }
+
+  let restFoot = "";
+  if (restGroups.length > 0) {
+    restFoot = `\n\n📌 <i>그 외 ${restGroups.length}개 구간은 ±2% 미만 — 앱에서 상세 확인</i>`;
+  }
+
+  /** HOLD→전환 종목을 BUY / SELL 한 줄로 묶음 */
+  let signalBlock = "";
+  if (holdTransitions.length > 0) {
+    const buyShown: string[] = [];
+    const sellShown: string[] = [];
+    for (const h of holdTransitions) {
+      const pretty =
+        `${escapeHtml(h.name.trim() || h.symbol)} (<code>${escapeHtml(h.symbol)}</code>)`;
+      const hasBuy = h.rows.some((row) => row.to === "BUY");
+      const hasSell = h.rows.some((row) => row.to === "SELL");
+      if (hasBuy) buyShown.push(pretty);
+      if (hasSell) sellShown.push(pretty);
+    }
+    const buyUnique = [...new Set(buyShown)];
+    const sellUnique = [...new Set(sellShown)];
+
+    signalBlock =
+      `\n\n<b>🎯 매매 시그널 (MA·RSI·BB·VOL 기준)</b>\n` +
+      `<i>전일 HOLD → 오늘 BUY·SELL로 바뀐 종목만</i>`;
+
+    if (buyUnique.length === 0 && sellUnique.length === 0) {
+      signalBlock += "\n<i>(표시 가능한 전환 없음)</i>";
+    } else {
+      signalBlock +=
+        `\n🟢 <b>BUY</b>: ${buyUnique.length ? buyUnique.join(", ") : "—"}\n` +
+        `🔴 <b>SELL</b>: ${sellUnique.length ? sellUnique.join(", ") : "—"}`;
+    }
+  }
+
+  const header =
+    `${timeLine}` +
+    `📊 <b>포트폴리오 데일리 리포트</b> (${escapeHtml(dateLabel)})\n\n` +
+    `${portfolioLine}` +
+    `${ownerBlock}` +
+    `${moversBlock}` +
+    `${restFoot}` +
+    `${signalBlock}` +
+    `${cronFooter}`;
+
+  return header;
 }
 
 /** Yahoo 6개월 일봉 — 시그널용 */
