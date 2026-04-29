@@ -5044,8 +5044,17 @@ export default function Home() {
                                 : String(Math.round(match?.purchaseUsdKrw ?? usdKrw));
                           const patchOwnerKey = nextOwner || owner;
                           setSellLogOwnerForSection(nextOwner);
+                          // 다른 보유자 슬롯에 병합할 때 종목·입력값이 빈 기본값만 잡혀 초기화되지 않도록 현재 폼을 함께 전달
                           setForm2(
                             {
+                              symbol: form.symbol,
+                              name: form.name,
+                              date: form.date,
+                              qty: form.qty,
+                              sellPrice: form.sellPrice,
+                              note: form.note,
+                              currency: form.currency,
+                              editingId: form.editingId,
                               selectedOwners: nextOwner ? [nextOwner] : [],
                               ownerOverrides: {},
                               avgPrice: match ? String(match.avgPrice) : form.avgPrice,
