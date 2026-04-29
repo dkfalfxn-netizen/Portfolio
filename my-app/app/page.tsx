@@ -4737,15 +4737,34 @@ export default function Home() {
                   ]),
                 ).values(),
               ).sort((a, b) => a.symbol.localeCompare(b.symbol));
-              const form = sellLogForm[owner] ?? {
+              const defaultSellLogBlank = (sectionOwnerKey: string) => ({
                 date: new Date().toISOString().slice(0, 10),
-                symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
-                currency: "USD" as const, fxRate: String(Math.round(usdKrw)),
-                note: "", selectedOwners: [owner], ownerOverrides: {}, editingId: null,
-              };
-              const setForm2 = (patch: Partial<typeof form>) => {
-                setSellLogForm((prev) => ({ ...prev, [owner]: { ...(prev[owner] ?? form), ...patch } }));
-                setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
+                symbol: "",
+                name: "",
+                qty: "",
+                sellPrice: "",
+                avgPrice: "",
+                currency: "USD" as const,
+                fxRate: String(Math.round(usdKrw)),
+                note: "",
+                selectedOwners: [sectionOwnerKey] as OwnerName[],
+                ownerOverrides: {},
+                editingId: null as string | null,
+              });
+
+              const form = sellLogForm[owner] ?? defaultSellLogBlank(owner);
+
+              /** 폼 상태는 보유자(섹션)별 분리 저장. `sellLogOwnerForSection`을 바꿀 때는 `formOwnerKey`에 새 키를 넘기지 않으면 버그(틀린 보유자 슬롯에 쓸 수 있음) */
+              const setForm2 = (
+                patch: Partial<typeof form>,
+                formOwnerKey = owner,
+              ) => {
+                setSellLogForm((prev) => {
+                  const prevForm = prev[formOwnerKey];
+                  const base = prevForm ?? defaultSellLogBlank(formOwnerKey);
+                  return { ...prev, [formOwnerKey]: { ...base, ...patch } };
+                });
+                setSellLogErrorByOwner((prevErr) => ({ ...prevErr, [formOwnerKey]: "" }));
               };
               const selectedSymbol = form.symbol.trim().toUpperCase();
               const ownersWithTicker = selectedSymbol
@@ -4763,7 +4782,7 @@ export default function Home() {
               };
               const handleTickerChange = (nextSymbol: string) => {
                 const selected = ownerTickerOptions.find((x) => x.symbol === nextSymbol);
-                if (!selected) return setForm2({ symbol: nextSymbol });
+                if (!selected) return setForm2({ symbol: nextSymbol }, owner);
                 const ownersForSymbol = ownerNames.filter((name) =>
                   positions.some((p) => p.owner === name && p.symbol === selected.symbol),
                 );
@@ -4778,15 +4797,18 @@ export default function Home() {
                       ? String(Math.round(ownerPos?.purchaseEurKrw ?? eurKrw))
                       : String(Math.round(ownerPos?.purchaseUsdKrw ?? usdKrw));
                 setSellLogOwnerForSection(nextOwner);
-                setForm2({
-                  symbol: selected.symbol,
-                  name: selected.name,
-                  avgPrice: ownerPos ? String(ownerPos.avgPrice) : String(selected.avgPrice),
-                  currency: selected.currency,
-                  fxRate: ownerFxRate || nextFxRate,
-                  selectedOwners: ownersForSymbol.length > 0 ? [ownersForSymbol[0]] : [],
-                  ownerOverrides: {},
-                });
+                setForm2(
+                  {
+                    symbol: selected.symbol,
+                    name: selected.name,
+                    avgPrice: ownerPos ? String(ownerPos.avgPrice) : String(selected.avgPrice),
+                    currency: selected.currency,
+                    fxRate: ownerFxRate || nextFxRate,
+                    selectedOwners: ownersForSymbol.length > 0 ? [ownersForSymbol[0]] : [],
+                    ownerOverrides: {},
+                  },
+                  nextOwner,
+                );
               };
               const handleSave = () => {
                 const symbol = form.symbol.trim().toUpperCase();
@@ -5020,13 +5042,17 @@ export default function Home() {
                               : form.currency === "EUR"
                                 ? String(Math.round(match?.purchaseEurKrw ?? eurKrw))
                                 : String(Math.round(match?.purchaseUsdKrw ?? usdKrw));
+                          const patchOwnerKey = nextOwner || owner;
                           setSellLogOwnerForSection(nextOwner);
-                          setForm2({
-                            selectedOwners: nextOwner ? [nextOwner] : [],
-                            ownerOverrides: {},
-                            avgPrice: match ? String(match.avgPrice) : form.avgPrice,
-                            fxRate: matchedFxRate,
-                          });
+                          setForm2(
+                            {
+                              selectedOwners: nextOwner ? [nextOwner] : [],
+                              ownerOverrides: {},
+                              avgPrice: match ? String(match.avgPrice) : form.avgPrice,
+                              fxRate: matchedFxRate,
+                            },
+                            patchOwnerKey,
+                          );
                         }}
                       >
                         <option value="">{selectedSymbol ? "보유자 선택" : "먼저 티커를 선택해 주세요."}</option>
