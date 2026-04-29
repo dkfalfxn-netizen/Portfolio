@@ -543,18 +543,21 @@ function TargetStockWeightNeu({
           <span className="text-[9px] text-rose-300/90">저장 실패</span>
         ) : null}
       </div>
-      <div className="mb-2 flex flex-wrap gap-3 text-[10px] text-zinc-500">
+      <div className="mb-2 flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-sm bg-sky-500" />
           ±5% 이내
         </span>
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-sm bg-red-500" />
-          5% 이상 낮음
+          목표 미달 (빨강 막대)
         </span>
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-sm bg-emerald-500" />
-          5% 이상 높음
+          목표 초과 (초록 막대)
+        </span>
+        <span className="ml-auto shrink-0 text-[9px] text-zinc-500">
+          눈금 0→100% 포트폴리오 비중 · <span className="border-l border-dashed border-zinc-400/70 pl-2">목표점선</span>
         </span>
       </div>
       {showTargetSumError ? (
@@ -637,36 +640,36 @@ function TargetStockWeightNeu({
         </div>
       )}
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(76px,1fr))] gap-x-2 gap-y-6 py-2 justify-items-center">
+      <p className="mb-3 text-[11px] font-semibold tracking-tight text-zinc-100">포트폴리오 비중 리밸런싱</p>
+
+      <div className="flex flex-col divide-y divide-white/[0.06] pb-1">
         {orderedSlices.map((slice) => {
           const hasInputTarget = Object.prototype.hasOwnProperty.call(targetsByTicker, slice.ticker);
           const target = targetsByTicker[slice.ticker] ?? 0;
           const actual = slice.weight;
           const hasPositiveTarget = target > 0;
           const isOverTargetWhenZero = hasInputTarget && !hasPositiveTarget && actual > 0;
-          const ratio = hasPositiveTarget ? actual / target : 0;
-          const fillPct = hasPositiveTarget ? Math.min(ratio * 100, 100) : isOverTargetWhenZero ? 100 : 0;
-          /** 목표 대비 상대 편차 (actual−target)/target — ±5% 이내 파랑, 미만 빨강, 초과 초록 */
+
+          /** 목표 대비 상대 편차 (actual−target)/target */
           const relDev = hasPositiveTarget ? (actual - target) / target : 0;
           const withinBand = hasPositiveTarget && Math.abs(relDev) <= 0.05;
           const belowBand = hasPositiveTarget && relDev < -0.05;
-          const aboveBand = (hasPositiveTarget && relDev > 0.05) || isOverTargetWhenZero;
-          /** 이전 막대 의미(±5%·미달·초과) 유지 + 그라데이션 톤(리빌드 전 스타일 기준) */
-          const fillGradient = !(hasPositiveTarget || isOverTargetWhenZero)
-            ? "transparent"
+
+          const fillGradientH = !(hasPositiveTarget || isOverTargetWhenZero)
+            ? undefined
             : withinBand
-              ? "linear-gradient(to top, rgb(29, 78, 216) 0%, rgb(37, 99, 235) 32%, rgb(14, 165, 233) 72%, rgb(125, 211, 252) 100%)"
+              ? "linear-gradient(to right, rgb(29, 78, 216) 0%, rgb(37, 99, 235) 38%, rgb(14, 165, 233) 72%, rgb(125, 211, 252) 100%)"
               : belowBand
-                ? "linear-gradient(to top, rgb(153, 27, 27) 0%, rgb(220, 38, 38) 40%, rgb(248, 113, 113) 85%, rgb(254, 202, 202) 100%)"
-                : "linear-gradient(to top, rgb(20, 83, 45) 0%, rgb(22, 163, 74) 38%, rgb(52, 211, 153) 78%, rgb(190, 242, 100) 100%)";
+                ? "linear-gradient(to right, rgb(153, 27, 27) 0%, rgb(220, 38, 38) 45%, rgb(248, 113, 113) 90%, rgb(254, 202, 202) 100%)"
+                : "linear-gradient(to right, rgb(20, 83, 45) 0%, rgb(22, 163, 74) 40%, rgb(52, 211, 153) 78%, rgb(190, 242, 100) 100%)";
           const barGlow =
             !(hasPositiveTarget || isOverTargetWhenZero)
               ? undefined
               : withinBand
-                ? "0 0 14px rgba(56, 189, 248, 0.42), 0 0 6px rgba(37, 99, 235, 0.32)"
+                ? "0 0 12px rgba(56, 189, 248, 0.38)"
                 : belowBand
-                  ? "0 0 14px rgba(248, 113, 113, 0.5), 0 0 6px rgba(220, 38, 38, 0.35)"
-                  : "0 0 14px rgba(52, 211, 153, 0.45), 0 0 6px rgba(22, 163, 74, 0.32)";
+                  ? "0 0 12px rgba(248, 113, 113, 0.48)"
+                  : "0 0 12px rgba(52, 211, 153, 0.42)";
 
           /** 목표 − 목표값(%p) 편차: actual − target */
           const deltaPp = hasPositiveTarget ? actual - target : 0;
@@ -674,35 +677,46 @@ function TargetStockWeightNeu({
 
           let goalLine: string;
           let deltaLine: string;
+          let compactStatus: string;
 
           if (!hasInputTarget) {
             goalLine = "목표 — ·";
             deltaLine = `현재 ${actual.toFixed(1)}%`;
+            compactStatus = `현재 ${actual.toFixed(1)}%`;
           } else if (isOverTargetWhenZero) {
             goalLine = "목표 0% ·";
             deltaLine = `+${actual.toFixed(1)}%p (초과)`;
+            compactStatus = `▼ +${actual.toFixed(1)}%p 초과`;
           } else if (!hasPositiveTarget) {
             goalLine = "목표 0% ·";
             deltaLine = `현재 ${actual.toFixed(1)}%`;
+            compactStatus = `현재 ${actual.toFixed(1)}%`;
           } else if (withinBand) {
             goalLine = `목표 ${tgtLabel}% ·`;
             deltaLine = `${deltaPp >= 0 ? "+" : ""}${deltaPp.toFixed(1)}%p (±5% 이내)`;
+            compactStatus = `${deltaPp >= 0 ? "+" : ""}${deltaPp.toFixed(1)}%p (±5% 이내)`;
           } else if (belowBand) {
             goalLine = `목표 ${tgtLabel}% ·`;
             deltaLine = `${deltaPp.toFixed(1)}%p (부족)`;
+            compactStatus = `▲ ${deltaPp.toFixed(1)}%p 부족`;
           } else {
             goalLine = `목표 ${tgtLabel}% ·`;
             deltaLine = `+${deltaPp.toFixed(1)}%p (초과)`;
+            compactStatus = `▼ +${deltaPp.toFixed(1)}%p 초과`;
           }
+
+          const fillWpct = Math.min(Math.max(actual, 0), 100);
+          const markerLeftPct =
+            hasInputTarget && Number.isFinite(target) ? Math.min(Math.max(target, 0), 100) : null;
 
           const tooltipEntries = nonCashEntriesSortedByWeight(slice.allEntries);
           const isGrouped = tooltipEntries.length > 1;
           const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
 
           return (
-            <div key={slice.name} className="group relative flex w-full max-w-[92px] flex-col items-center gap-1">
+            <div key={slice.name} className="group relative py-4">
               {tooltipEntries.length > 0 ? (
-                <div className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-20 hidden w-max min-w-[140px] -translate-x-1/2 rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
+                <div className="pointer-events-none absolute right-4 top-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md lg:right-8 group-hover:block">
                   {isGrouped ? (
                     <div className="space-y-1">
                       <p className="font-bold text-cyan-400">{slice.ticker}</p>
@@ -727,69 +741,123 @@ function TargetStockWeightNeu({
                   )}
                 </div>
               ) : null}
-              <label className="flex w-full flex-col items-center justify-center gap-0.5 mx-auto">
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={0.1}
-                  placeholder="—"
-                  aria-label={`${slice.ticker} 목표 비중 %`}
-                  className="block w-[2.75rem] shrink-0 rounded-md border border-white/10 bg-zinc-900/80 px-1 py-0.5 text-center text-[10px] tabular-nums leading-none text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none mx-auto"
-                  style={{
-                    boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
-                    textAlign: "center",
-                  }}
-                  value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
-                  onChange={(e) => setTarget(slice.ticker, e.target.value)}
-                />
-              </label>
-              <span className="line-clamp-2 min-h-[1.75rem] w-full break-all text-center text-[8px] font-semibold leading-tight text-zinc-200" title={slice.displayName}>
-                {slice.ticker}
-              </span>
-              <div
-                className="relative h-[118px] w-[4px] shrink-0 rounded-full"
-                style={{
-                  background: "#12161f",
-                  boxShadow:
-                    "inset 2px 2px 4px rgba(0,0,0,0.55), inset -1px -1px 4px rgba(255,255,255,0.05)",
-                }}
-              >
-                {hasPositiveTarget || isOverTargetWhenZero ? (
-                  <div
-                    className="absolute bottom-[1px] left-[1px] right-[1px] rounded-full transition-[height] duration-300"
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                <div className="flex min-w-[7rem] max-w-[140px] flex-col gap-1 sm:max-w-none">
+                  <span
+                    className="text-[13px] font-bold leading-snug tracking-tight text-zinc-100 sm:text-[12px]"
+                    title={slice.displayName}
+                  >
+                    {slice.ticker}
+                  </span>
+                  <label className="sr-only" htmlFor={`target-pct-${slice.name}`}>
+                    {slice.ticker} 목표 비중
+                  </label>
+                  <input
+                    id={`target-pct-${slice.name}`}
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    placeholder="목표%"
+                    aria-label={`${slice.ticker} 목표 비중 %`}
+                    className="block w-full max-w-[4.75rem] rounded-md border border-white/10 bg-zinc-900/90 px-2 py-1 text-center text-[12px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     style={{
-                      height: `calc(${fillPct}% - 2px)`,
-                      minHeight: hasPositiveTarget ? (ratio > 0 ? 2 : 0) : isOverTargetWhenZero ? 2 : 0,
-                      maxHeight: "calc(100% - 6px)",
-                      background: fillGradient,
-                      boxShadow: barGlow,
+                      boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
+                      textAlign: "center",
                     }}
+                    value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
+                    onChange={(e) => setTarget(slice.ticker, e.target.value)}
                   />
-                ) : null}
+                </div>
+
+                <div className="relative min-h-[58px] min-w-[120px] flex-1 self-stretch pb-11">
+                  <div className="pointer-events-none absolute bottom-[34px] left-0 right-0 flex justify-between text-[9px] font-medium tabular-nums tracking-tight text-zinc-600">
+                    <span>0</span>
+                    <span className="-translate-x-px">25</span>
+                    <span>50</span>
+                    <span>75</span>
+                    <span>100%</span>
+                  </div>
+
+                  {[0, 25, 50, 75, 100].map((tick) => (
+                    <div
+                      key={`tick-${slice.name}-${tick}`}
+                      className="pointer-events-none absolute bottom-8 top-10 z-[1] w-px bg-zinc-700/50"
+                      style={{
+                        left: `${tick}%`,
+                        transform:
+                          tick === 0 ? "translateX(0)" : tick === 100 ? "translateX(-100%)" : "translateX(-50%)",
+                      }}
+                      aria-hidden
+                    />
+                  ))}
+
+                  {markerLeftPct != null ? (
+                    <div
+                      className="pointer-events-none absolute bottom-9 top-5 z-[4] border-l border-dashed border-zinc-200/85"
+                      style={{ left: `${markerLeftPct}%`, transform: "translateX(-50%)" }}
+                      title={`목표 (${tgtLabel}%)`}
+                      aria-hidden
+                    />
+                  ) : null}
+
+                  <div className="absolute bottom-[6px] left-0 right-0 z-[2] px-px">
+                    <div
+                      className="rounded-full py-px pt-px pb-px pl-px pr-px shadow-[inset_3px_3px_6px_rgba(0,0,0,0.55),inset_-2px_-2px_5px_rgba(255,255,255,0.04)]"
+                      style={{
+                        background: "#151a21",
+                      }}
+                    >
+                      <div className="h-[11px] overflow-hidden rounded-full">
+                        {fillGradientH ? (
+                          <div
+                            className="h-[9px] rounded-full transition-[width] duration-300 ease-out"
+                            style={{
+                              width: `${fillWpct}%`,
+                              maxWidth: "100%",
+                              boxShadow: barGlow ?? undefined,
+                              backgroundImage: fillGradientH,
+                            }}
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex w-full shrink-0 flex-col justify-start gap-1 text-right text-[11px] sm:w-[154px] sm:shrink">
+                  <p
+                    className={`truncate font-semibold tabular-nums leading-tight ${
+                      !hasInputTarget
+                        ? "text-zinc-500"
+                        : withinBand
+                          ? "text-sky-400"
+                          : belowBand
+                            ? "text-red-400"
+                            : "text-emerald-400"
+                    }`}
+                  >
+                    {compactStatus}
+                  </p>
+                  <div className="block text-[10px] leading-snug tracking-tight text-zinc-400">
+                    <p className="text-zinc-500">{goalLine}</p>
+                    <p
+                      className={`mt-0.5 font-medium ${
+                        !hasInputTarget
+                          ? "text-zinc-500"
+                          : withinBand
+                            ? "text-sky-400/95"
+                            : belowBand
+                              ? "text-red-400/95"
+                              : "text-emerald-400/95"
+                      }`}
+                    >
+                      {deltaLine}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="w-full text-center tabular-nums leading-tight">
-                <span
-                  className={`block text-[7px] ${
-                    !hasInputTarget
-                      ? "text-zinc-500"
-                      : withinBand
-                        ? "text-sky-400/85"
-                        : belowBand
-                          ? "text-red-400/85"
-                          : "text-emerald-400/85"
-                  }`}
-                >
-                  {goalLine}
-                </span>
-                <span
-                  className={`mt-1 block text-[8px] font-semibold tracking-tight ${
-                    !hasInputTarget ? "text-zinc-400" : withinBand ? "text-sky-400" : belowBand ? "text-red-400" : "text-emerald-400"
-                  }`}
-                >
-                  {deltaLine}
-                </span>
-              </div>
+
               <textarea
                 rows={2}
                 aria-label={`${slice.ticker} 간단 메모`}
@@ -801,7 +869,7 @@ function TargetStockWeightNeu({
                   queuePersistAssetNote(slice.ticker, v);
                 }}
                 placeholder="메모·계산"
-                className="mt-1 w-full max-w-[88px] min-h-[3.25rem] resize-y rounded border border-white/[0.08] bg-[#0f131a]/98 px-1 py-0.5 text-left text-[8px] leading-snug text-zinc-400 outline-none placeholder:text-zinc-600 focus:border-sky-500/35 focus:ring-1 focus:ring-sky-500/25"
+                className="mt-2 w-full min-h-[3.25rem] resize-y rounded border border-white/[0.08] bg-[#0f131a]/98 px-2 py-1 text-left text-[9px] leading-snug text-zinc-400 outline-none placeholder:text-zinc-600 focus:border-sky-500/35 focus:ring-1 focus:ring-sky-500/25 sm:mt-1"
                 style={{
                   boxShadow:
                     "inset 2px 2px 4px rgba(0,0,0,0.4), inset -1px -1px 2px rgba(255,255,255,0.02)",
