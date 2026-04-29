@@ -215,15 +215,30 @@ function NeonTreemapNode(props: {
   );
 }
 
+function formatKrwCompact(n: number): string {
+  const abs = Math.abs(n);
+  const sign = n > 0 ? "+" : n < 0 ? "-" : "";
+  if (abs >= 1_0000_0000) {
+    return `${sign}${(abs / 1_0000_0000).toFixed(1)}억`;
+  }
+  if (abs >= 10_000) {
+    return `${sign}${Math.round(abs / 10_000).toLocaleString()}만`;
+  }
+  return `${sign}${Math.round(abs).toLocaleString()}원`;
+}
+
 function TargetStockWeightNeu({
   ownerName,
   slices,
   cloudSyncKey,
+  total,
 }: {
   ownerName: string;
   slices: AllocationSlice[];
   /** 8자 이상이면 «저장» 시 Supabase에도 반영 */
   cloudSyncKey: string;
+  /** 보유자 총 평가금액 (KRW) — 리밸런싱 금액 계산에 사용 */
+  total: number;
 }) {
   const skipSaveRef = useRef(true);
   const saveDebounceRef = useRef<number | null>(null);
@@ -361,6 +376,22 @@ function TargetStockWeightNeu({
   const targetSumOk = Math.abs(targetSum - 100) <= TARGET_SUM_TOLERANCE;
   const showTargetSumError = hasAnyTarget && !targetSumOk;
 
+  /** 리밸런싱 필요 금액 (목표비중이 100%에 맞을 때만 계산) */
+  const rebalanceItems = useMemo(() => {
+    if (!targetSumOk || !hasAnyTarget || !(total > 0)) return [];
+    return slices
+      .map((sl) => {
+        const target = targetsByTicker[sl.ticker] ?? 0;
+        if (target <= 0 && sl.value <= 0) return null;
+        const targetKrw = total * target / 100;
+        const diffKrw = targetKrw - sl.value;
+        if (Math.abs(diffKrw) < 1000) return null; // 1천 원 이하 차이는 표시 생략
+        return { ticker: sl.ticker, diffKrw, targetKrw, currentKrw: sl.value };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => Math.abs(b.diffKrw) - Math.abs(a.diffKrw));
+  }, [targetSumOk, hasAnyTarget, total, slices, targetsByTicker]);
+
   if (slices.length === 0) {
     return (
       <div
@@ -441,6 +472,30 @@ function TargetStockWeightNeu({
           목표 비중 합계 <span className="tabular-nums font-semibold">{targetSum.toFixed(1)}%</span> — 100%에 맞습니다.
         </p>
       ) : null}
+      {rebalanceItems.length > 0 && (
+        <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+          <p className="mb-2 text-[10px] font-semibold text-zinc-400 tracking-wide">리밸런싱 필요 금액</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            {rebalanceItems.map((item) => (
+              <div key={item.ticker} className="flex items-center justify-between gap-2 text-[10px]">
+                <span className="truncate font-semibold text-zinc-300">{item.ticker}</span>
+                <span
+                  className={`tabular-nums font-bold shrink-0 ${
+                    item.diffKrw > 0 ? "text-red-400" : "text-blue-400"
+                  }`}
+                >
+                  {item.diffKrw > 0 ? "매수 " : "매도 "}
+                  {formatKrwCompact(Math.abs(item.diffKrw))}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[9px] text-zinc-600">
+            총액 {formatKrw(Math.round(total))} 기준 · 매수(빨강) / 매도(파랑)
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-[repeat(auto-fill,minmax(48px,1fr))] gap-x-1 gap-y-4 py-2 justify-items-center">
         {orderedSlices.map((slice) => {
           const hasInputTarget = Object.prototype.hasOwnProperty.call(targetsByTicker, slice.ticker);
@@ -791,7 +846,7 @@ export function FamilyAllocationDonut({
           </div>
         </div>
 
-        <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} cloudSyncKey={cloudSyncKey} />
+        <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} cloudSyncKey={cloudSyncKey} total={total} />
       </div>
     </div>
   );
