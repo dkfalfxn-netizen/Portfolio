@@ -21,6 +21,74 @@ const NEON_PALETTE = [
 /** 목표 비중 합계 100% 허용 오차 (%) */
 const TARGET_SUM_TOLERANCE = 0.05;
 
+const OWNER_SCRATCHPAD_STORAGE_KEY = "portfolio-owner-scratchpad-v1";
+
+function OwnerScratchPad({ ownerName }: { ownerName: string }) {
+  const [text, setText] = useState("");
+  const saveTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(OWNER_SCRATCHPAD_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+      setText(typeof parsed[ownerName] === "string" ? parsed[ownerName] : "");
+    } catch {
+      setText("");
+    }
+  }, [ownerName]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
+    };
+  }, []);
+
+  const persist = useCallback(
+    (value: string) => {
+      if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(() => {
+        saveTimer.current = null;
+        try {
+          const raw = window.localStorage.getItem(OWNER_SCRATCHPAD_STORAGE_KEY);
+          const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+          const next = { ...parsed };
+          if (value.length === 0) delete next[ownerName];
+          else next[ownerName] = value;
+          window.localStorage.setItem(OWNER_SCRATCHPAD_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          /* ignore quota */
+        }
+      }, 400);
+    },
+    [ownerName],
+  );
+
+  return (
+    <div className="mt-3 w-full min-w-0">
+      <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+        메모·계산용
+      </p>
+      <textarea
+        value={text}
+        onChange={(e) => {
+          const v = e.target.value;
+          setText(v);
+          persist(v);
+        }}
+        rows={5}
+        spellCheck={false}
+        placeholder={`숫자·식 메모 (${ownerName}) — 브라우저에만 저장`}
+        className="min-h-[5.5rem] w-full resize-y rounded-lg border border-white/12 bg-[#0d1118]/95 px-2 py-1.5 text-[11px] leading-snug text-zinc-200 placeholder:text-zinc-600 outline-none ring-sky-500/30 focus:ring-1"
+        style={{
+          boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.45), inset -1px -1px 3px rgba(255,255,255,0.03)",
+          fontFamily: 'ui-monospace, "Cascadia Code", monospace',
+        }}
+        aria-label={`${ownerName} 메모·계산용 칸`}
+      />
+    </div>
+  );
+}
+
 function formatSavedTime(): string {
   return new Date().toLocaleTimeString("ko-KR", {
     hour: "2-digit",
@@ -557,12 +625,29 @@ function TargetStockWeightNeu({
                   ? "0 0 14px rgba(248, 113, 113, 0.5), 0 0 6px rgba(220, 38, 38, 0.35)"
                   : "0 0 14px rgba(52, 211, 153, 0.45), 0 0 6px rgba(22, 163, 74, 0.32)";
 
-          let statusLabel: string;
-          if (!hasInputTarget) statusLabel = "목표 입력";
-          else if (!hasPositiveTarget) statusLabel = actual > 0 ? "초과" : "0%";
-          else if (aboveBand) statusLabel = "초과";
-          else if (withinBand) statusLabel = "±5% 이내";
-          else statusLabel = "미달";
+          /** 목표 − 현재 (음수면 부족, 양수면 과다) — %포인트 표기용 */
+          const deltaPp = hasPositiveTarget ? actual - target : 0;
+
+          let deviationMain: string;
+          let deviationSub: string | undefined;
+          if (!hasInputTarget) {
+            deviationMain = `현재 ${actual.toFixed(1)}%`;
+            deviationSub = "목표를 입력하면 편차(%p)";
+          } else if (isOverTargetWhenZero) {
+            deviationMain = `목표 0% · +${actual.toFixed(1)}%p (초과)`;
+          } else if (!hasPositiveTarget) {
+            deviationMain = `현재 ${actual.toFixed(1)}%`;
+            deviationSub = "목표 미설정 또는 0%";
+          } else if (withinBand) {
+            deviationMain = `목표 대비 ${deltaPp >= 0 ? "+" : ""}${deltaPp.toFixed(1)}%p`;
+            deviationSub = "±5% 이내";
+          } else if (belowBand) {
+            deviationMain = `${(-deltaPp).toFixed(1)}%p 부족`;
+            deviationSub = undefined;
+          } else {
+            deviationMain = `${deltaPp.toFixed(1)}%p 초과`;
+            deviationSub = undefined;
+          }
 
           const tooltipEntries = nonCashEntriesSortedByWeight(slice.allEntries);
           const isGrouped = tooltipEntries.length > 1;
@@ -596,7 +681,7 @@ function TargetStockWeightNeu({
                   )}
                 </div>
               ) : null}
-              <label className="flex w-full flex-col gap-0.5">
+              <label className="flex w-full flex-col items-center gap-0.5">
                 <input
                   type="number"
                   min={0}
@@ -604,9 +689,10 @@ function TargetStockWeightNeu({
                   step={0.1}
                   placeholder="—"
                   aria-label={`${slice.ticker} 목표 비중 %`}
-                  className="w-full rounded-md border border-white/10 bg-zinc-900/80 px-0.5 py-0.5 text-center text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 placeholder:text-zinc-600 focus:ring-1"
+                  className="w-[2.875rem] max-w-full rounded-md border border-white/10 bg-zinc-900/80 py-0.5 text-center text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   style={{
                     boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
+                    textAlign: "center",
                   }}
                   value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
                   onChange={(e) => setTarget(slice.ticker, e.target.value)}
@@ -616,16 +702,16 @@ function TargetStockWeightNeu({
                 {slice.ticker}
               </span>
               <div
-                className="relative h-[118px] w-[18px] shrink-0 rounded-full"
+                className="relative h-[118px] w-[9px] shrink-0 rounded-full"
                 style={{
                   background: "#12161f",
                   boxShadow:
-                    "inset 3px 3px 6px rgba(0,0,0,0.55), inset -2px -2px 6px rgba(255,255,255,0.05)",
+                    "inset 2px 2px 4px rgba(0,0,0,0.55), inset -1px -1px 4px rgba(255,255,255,0.05)",
                 }}
               >
                 {hasPositiveTarget || isOverTargetWhenZero ? (
                   <div
-                    className="absolute bottom-0.5 left-0.5 right-0.5 rounded-full transition-[height] duration-300"
+                    className="absolute bottom-0.5 left-px right-px rounded-full transition-[height] duration-300"
                     style={{
                       height: `calc(${fillPct}% - 3px)`,
                       minHeight: hasPositiveTarget ? (ratio > 0 ? 4 : 0) : isOverTargetWhenZero ? 4 : 0,
@@ -647,14 +733,16 @@ function TargetStockWeightNeu({
                         : "text-emerald-400"
                 }`}
               >
-                현재 {actual.toFixed(1)}%
-                <span
-                  className={`mt-0.5 block font-medium ${
-                    !hasInputTarget ? "text-zinc-600" : withinBand ? "text-sky-400" : belowBand ? "text-red-400" : "text-emerald-400"
-                  }`}
-                >
-                  {statusLabel}
-                </span>
+                {deviationMain}
+                {deviationSub ? (
+                  <span
+                    className={`mt-0.5 block text-[7px] font-normal ${
+                      !hasInputTarget ? "text-zinc-600" : "opacity-95"
+                    }`}
+                  >
+                    {deviationSub}
+                  </span>
+                ) : null}
               </div>
             </div>
           );
@@ -874,6 +962,7 @@ export function FamilyAllocationDonut({
               </Treemap>
             </ResponsiveContainer>
           </div>
+          <OwnerScratchPad ownerName={ownerName} />
         </div>
 
         <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} cloudSyncKey={cloudSyncKey} total={total} />
