@@ -12,7 +12,6 @@ import {
   persistOneOwnerScratchpad,
   pushTargetWeightsAndScratchpadsToServer,
 } from "@/lib/portfolio-owner-scratchpad";
-import { loadOwnerAssetQuicknotes, persistOwnerAssetQuicknote } from "@/lib/portfolio-asset-quicknotes";
 
 /** 네온 글로우용 팔레트 (한 단계 어둡게 — 채도는 유지) */
 const NEON_PALETTE = [
@@ -344,31 +343,6 @@ function TargetStockWeightNeu({
   const [savedAtText, setSavedAtText] = useState<string | null>(null);
   const [saveFailedBrief, setSaveFailedBrief] = useState(false);
   const [splitCount, setSplitCount] = useState<string>("1");
-  const [assetQuickNotesByTicker, setAssetQuickNotesByTicker] = useState<Record<string, string>>({});
-  const assetNoteTimers = useRef<Map<string, number>>(new Map());
-
-  useEffect(() => {
-    setAssetQuickNotesByTicker(loadOwnerAssetQuicknotes(ownerName));
-  }, [ownerName]);
-
-  useEffect(() => {
-    return () => {
-      assetNoteTimers.current.forEach((t) => window.clearTimeout(t));
-      assetNoteTimers.current.clear();
-    };
-  }, []);
-
-  const queuePersistAssetNote = useCallback((ticker: string, text: string) => {
-    const prev = assetNoteTimers.current.get(ticker);
-    if (prev != null) window.clearTimeout(prev);
-    assetNoteTimers.current.set(
-      ticker,
-      window.setTimeout(() => {
-        assetNoteTimers.current.delete(ticker);
-        persistOwnerAssetQuicknote(ownerName, ticker, text);
-      }, 400),
-    );
-  }, [ownerName]);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -543,21 +517,21 @@ function TargetStockWeightNeu({
           <span className="text-[9px] text-rose-300/90">저장 실패</span>
         ) : null}
       </div>
-      <div className="mb-2 flex flex-wrap items-center gap-3">
+      <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[8px] leading-tight text-zinc-400 sm:text-[9px]">
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-sm bg-sky-500" />
+          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-sky-500" />
           ±5% 이내
         </span>
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-sm bg-red-500" />
+          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-red-500" />
           목표 미달 (빨강 막대)
         </span>
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-sm bg-emerald-500" />
+          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-emerald-500" />
           목표 초과 (초록 막대)
         </span>
-        <span className="ml-auto shrink-0 text-[9px] text-zinc-500">
-          눈금 0→100% 포트폴리오 비중 · <span className="border-l border-dashed border-zinc-400/70 pl-2">목표점선</span>
+        <span className="ml-auto shrink-0 text-zinc-500">
+          눈금 0→100% 포트폴리오 비중 · <span className="border-l border-dashed border-zinc-400/70 pl-1.5">목표점선</span>
         </span>
       </div>
       {showTargetSumError ? (
@@ -716,7 +690,7 @@ function TargetStockWeightNeu({
           return (
             <div key={slice.name} className="group relative py-2.5">
               {tooltipEntries.length > 0 ? (
-                <div className="pointer-events-none absolute left-[5.5rem] top-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block sm:left-[7rem]">
+                <div className="pointer-events-none absolute left-0 top-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
                   {isGrouped ? (
                     <div className="space-y-1">
                       <p className="font-bold text-cyan-400">{slice.ticker}</p>
@@ -742,25 +716,6 @@ function TargetStockWeightNeu({
                 </div>
               ) : null}
               <div className="flex items-stretch gap-2 sm:gap-2.5">
-                <textarea
-                  rows={2}
-                  aria-label={`${slice.ticker} 간단 메모`}
-                  spellCheck={false}
-                  value={assetQuickNotesByTicker[slice.ticker] ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setAssetQuickNotesByTicker((p) => ({ ...p, [slice.ticker]: v }));
-                    queuePersistAssetNote(slice.ticker, v);
-                  }}
-                  placeholder="메모"
-                  className="box-border h-[58px] w-[4.25rem] shrink-0 resize-none rounded border border-white/[0.1] bg-[#0c0f16] px-1 py-0.5 text-left text-[8px] leading-snug text-zinc-400 outline-none placeholder:text-zinc-700 focus:border-sky-500/40 focus:ring-1 focus:ring-sky-500/20 sm:h-[52px] sm:w-[4.75rem] sm:text-[9px]"
-                  style={{
-                    boxShadow:
-                      "inset 2px 2px 4px rgba(0,0,0,0.45), inset -1px -1px 2px rgba(255,255,255,0.02)",
-                    fontFamily: 'ui-monospace, "Cascadia Code", monospace',
-                  }}
-                />
-
                 <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
                   <div className="flex w-[4.75rem] shrink-0 flex-col justify-center gap-0.5 sm:w-[5.25rem]">
                     <span
