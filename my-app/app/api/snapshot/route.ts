@@ -270,20 +270,36 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, date: today, ownerValues, breakdownValues, totalValue });
 }
 
+export type SaveAllSnapshotsResult = {
+  total: number;
+  succeeded: number;
+  failed: number;
+  errors: { syncKey: string; reason: string }[];
+};
+
 /**
  * 크론 또는 외부 호출: 모든 sync_key에 대해 오늘 스냅샷 저장
  * (alert/check 크론이 내부적으로 호출합니다)
  */
-export async function saveAllSnapshots(): Promise<void> {
+export async function saveAllSnapshots(): Promise<SaveAllSnapshotsResult> {
+  const result: SaveAllSnapshotsResult = { total: 0, succeeded: 0, failed: 0, errors: [] };
   const admin = createSupabaseAdmin();
-  if (!admin) return;
+  if (!admin) {
+    result.errors.push({ syncKey: "__admin__", reason: "Supabase admin 클라이언트 초기화 실패" });
+    return result;
+  }
 
-  const { data: snaps } = await admin
+  const { data: snaps, error: fetchErr } = await admin
     .from("portfolio_snapshots")
     .select("sync_key, positions, cash_by_owner");
 
-  if (!snaps || snaps.length === 0) return;
+  if (fetchErr) {
+    result.errors.push({ syncKey: "__fetch__", reason: fetchErr.message });
+    return result;
+  }
+  if (!snaps || snaps.length === 0) return result;
 
+  result.total = snaps.length;
   const today = todayKST();
 
   await Promise.all(
@@ -292,6 +308,13 @@ export async function saveAllSnapshots(): Promise<void> {
         const positions = Array.isArray(snap.positions) ? (snap.positions as Position[]) : [];
         const cashByOwner = ((snap.cash_by_owner as Record<string, CashEntry>) ?? {});
         const { ownerValues, breakdownValues, totalValue, usdKrw } = await calcOwnerValues(positions, cashByOwner);
+
+        if (!(totalValue > 0)) {
+          result.failed++;
+          result.errors.push({ syncKey: snap.sync_key, reason: "totalValue가 0 이하 (시세 조회 실패 추정)" });
+          return;
+        }
+
         const withBreakdown = await admin.from("portfolio_daily_snapshots").upsert({
           sync_key: snap.sync_key,
           date: today,
@@ -301,17 +324,29 @@ export async function saveAllSnapshots(): Promise<void> {
           usd_krw: usdKrw,
         });
         if (withBreakdown.error) {
-          await admin.from("portfolio_daily_snapshots").upsert({
+          const fallback = await admin.from("portfolio_daily_snapshots").upsert({
             sync_key: snap.sync_key,
             date: today,
             owner_values: ownerValues,
             total_value: totalValue,
             usd_krw: usdKrw,
           });
+          if (fallback.error) {
+            result.failed++;
+            result.errors.push({ syncKey: snap.sync_key, reason: fallback.error.message });
+            return;
+          }
         }
-      } catch {
-        // 개별 실패는 전체 크론을 막지 않음
+        result.succeeded++;
+      } catch (e) {
+        result.failed++;
+        result.errors.push({
+          syncKey: snap.sync_key,
+          reason: e instanceof Error ? e.message : String(e),
+        });
       }
     }),
   );
+
+  return result;
 }

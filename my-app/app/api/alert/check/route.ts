@@ -8,7 +8,7 @@ import {
   type DailyRatioRow,
 } from "@/lib/resend";
 import type { AlertRule } from "@/app/api/alert/config/route";
-import { saveAllSnapshots } from "@/app/api/snapshot/route";
+import { saveAllSnapshots, type SaveAllSnapshotsResult } from "@/app/api/snapshot/route";
 import { todayKST } from "@/lib/date-utils";
 
 type Position = {
@@ -150,7 +150,12 @@ async function handleCheck(syncKey?: string | null) {
    * 오늘(KST) 일별 평가 스냅샷을 `portfolio_daily_snapshots`에 저장합니다.
    * (이전에는 알림 규칙이 0건이면 여기까지 도달하지 못해 방문 없이 기록이 안 되는 버그가 있었음)
    */
-  await saveAllSnapshots().catch(() => {});
+  let snapshotResult: SaveAllSnapshotsResult = { total: 0, succeeded: 0, failed: 0, errors: [] };
+  try {
+    snapshotResult = await saveAllSnapshots();
+  } catch (e) {
+    snapshotResult.errors.push({ syncKey: "__unexpected__", reason: e instanceof Error ? e.message : String(e) });
+  }
 
   /** sync_key가 주어지면 해당 계정만, 없으면 전체 alert_configs 순회 */
   const query =
@@ -165,6 +170,7 @@ async function handleCheck(syncKey?: string | null) {
       ok: true,
       message: "설정된 알림 규칙이 없습니다. 일별 자산 스냅샷은 서버에 저장되었습니다.",
       snapshotsSaved: true,
+      snapshotResult,
     });
   }
 
@@ -231,7 +237,7 @@ async function handleCheck(syncKey?: string | null) {
     });
   }
 
-  return NextResponse.json({ ok: true, results, snapshotsSaved: true });
+  return NextResponse.json({ ok: true, results, snapshotsSaved: true, snapshotResult });
 }
 
 /** Vercel Cron은 GET으로 호출 */

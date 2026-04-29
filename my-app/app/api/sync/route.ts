@@ -416,18 +416,34 @@ export async function POST(req: NextRequest) {
     }
 
     let targetWeightsOut: TargetMap;
-    if ("targetStockWeightByOwner" in b && b.targetStockWeightByOwner != null) {
-      targetWeightsOut = sanitizeTargetStockWeightsForOwners(b.targetStockWeightByOwner, allowed);
-    } else {
-      const { data: existing } = await admin
-        .from("portfolio_snapshots")
-        .select("target_stock_weight_by_owner")
-        .eq("sync_key", key)
-        .maybeSingle();
-      targetWeightsOut = sanitizeTargetStockWeightsForOwners(
-        existing?.target_stock_weight_by_owner ?? {},
-        allowed,
-      );
+    {
+      // 클라이언트에서 보낸 값이 있어도, 비어있으면 서버 기존값을 보존합니다.
+      // (빈 localStorage를 가진 다른 기기의 auto-push가 서버 목표 비중을 덮어쓰는 버그 방지)
+      const incomingRaw =
+        "targetStockWeightByOwner" in b && b.targetStockWeightByOwner != null
+          ? b.targetStockWeightByOwner
+          : null;
+      const incomingSanitized = incomingRaw != null
+        ? sanitizeTargetStockWeightsForOwners(incomingRaw, allowed)
+        : null;
+      const incomingIsEmpty =
+        incomingSanitized == null || Object.keys(incomingSanitized).length === 0;
+
+      if (!incomingIsEmpty) {
+        // 클라이언트에 실제 데이터가 있는 경우: 클라이언트 값 사용
+        targetWeightsOut = incomingSanitized!;
+      } else {
+        // 클라이언트 값이 비어있는 경우: 서버 기존값을 그대로 유지
+        const { data: existing } = await admin
+          .from("portfolio_snapshots")
+          .select("target_stock_weight_by_owner")
+          .eq("sync_key", key)
+          .maybeSingle();
+        targetWeightsOut = sanitizeTargetStockWeightsForOwners(
+          existing?.target_stock_weight_by_owner ?? {},
+          allowed,
+        );
+      }
     }
 
     const updatedAt = new Date().toISOString();
