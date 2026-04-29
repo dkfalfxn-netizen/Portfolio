@@ -983,6 +983,9 @@ export default function Home() {
   const [sellLogDirty, setSellLogDirty] = useState(false);
   const [latestBackupAt, setLatestBackupAt] = useState<string | null>(null);
   const [hasLoadedLatestBackup, setHasLoadedLatestBackup] = useState(false);
+  /** 백업 선택 복원용: 파싱된 백업 파일 데이터 */
+  const [pendingBackups, setPendingBackups] = useState<Array<{ id?: string; created_at: string; snapshot: Record<string, unknown> }> | null>(null);
+  const [pendingBackupFileKey, setPendingBackupFileKey] = useState<string>("");
   const [serverHealth, setServerHealth] = useState<"loading" | "ok" | "error">("loading");
   const pushDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
@@ -2258,18 +2261,12 @@ export default function Home() {
     }
   }
 
-  /** 내려받은 백업 JSON(가장 최근 항목)을 서버 메인 잔고에 push한 뒤 불러오기로 화면을 맞춥니다. */
+  /** 백업 JSON 파일을 읽어 선택 목록을 띄웁니다. 실제 복원은 handleRestoreSpecificBackup에서. */
   async function handleRestoreFromBackupFile(ev: ChangeEvent<HTMLInputElement>) {
     const input = ev.target;
     const file = input.files?.[0];
     input.value = "";
     if (!file) return;
-
-    const key = cloudSyncKey.trim();
-    if (key.length < 8) {
-      setSyncMessage("동기화 키를 8자 이상 저장해 주세요.");
-      return;
-    }
 
     let text: string;
     try {
@@ -2302,37 +2299,63 @@ export default function Home() {
       return;
     }
 
-    const first = root.backups[0];
-    if (!first || typeof first !== "object") {
-      setSyncMessage("백업 항목이 올바르지 않습니다.");
+    const parsed = (root.backups as unknown[]).filter(
+      (b): b is { id?: string; created_at: string; snapshot: Record<string, unknown> } =>
+        b !== null &&
+        typeof b === "object" &&
+        typeof (b as { created_at?: unknown }).created_at === "string" &&
+        typeof (b as { snapshot?: unknown }).snapshot === "object",
+    );
+
+    if (parsed.length === 0) {
+      setSyncMessage("백업 항목을 파싱하지 못했습니다.");
       return;
     }
 
-    const snap = (first as { snapshot?: unknown }).snapshot;
-    if (!snap || typeof snap !== "object") {
-      setSyncMessage("백업 스냅샷이 비어 있습니다.");
+    setPendingBackups(parsed);
+    setPendingBackupFileKey(typeof root.sync_key === "string" ? root.sync_key.trim() : "");
+    setSyncMessage("");
+  }
+
+  /** 선택한 인덱스의 백업을 서버에 push한 뒤 화면을 갱신합니다. */
+  async function handleRestoreSpecificBackup(idx: number) {
+    const backups = pendingBackups;
+    if (!backups || idx < 0 || idx >= backups.length) return;
+
+    const key = cloudSyncKey.trim();
+    if (key.length < 8) {
+      setSyncMessage("동기화 키를 8자 이상 저장해 주세요.");
       return;
     }
 
-    const s = snap as Record<string, unknown>;
-    const fileKey = typeof root.sync_key === "string" ? root.sync_key.trim() : "";
+    const fileKey = pendingBackupFileKey;
     if (fileKey && fileKey !== key) {
       const okKey = window.confirm(
         [
-          "파일에 적힌 동기화 키와 지금 이 기기에 저장된 키가 다릅니다.",
+          "파일에 적힌 동기화 키와 현재 이 기기 키가 다릅니다.",
           `파일 키 끝 4자: …${fileKey.slice(-4)}`,
           `현재 키 끝 4자: …${key.slice(-4)}`,
           "",
-          "지금 저장된 키로 서버에 올릴까요? (잘못 고르면 다른 키의 서버 데이터를 덮어쓸 수 있습니다.)",
+          "현재 키로 서버에 올릴까요? (잘못 고르면 다른 키의 데이터를 덮어씁니다.)",
         ].join("\n"),
       );
       if (!okKey) return;
     }
 
+    const entry = backups[idx];
+    const kstTime = new Date(entry.created_at).toLocaleString("ko-KR", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
     const ok = window.confirm(
       [
-        "파일 안의 가장 최근 백업(목록 첫 번째)만 사용합니다.",
-        "그 내용으로 서버 메인 잔고를 덮어쓴 뒤, 이 화면도 서버에서 다시 불러옵니다.",
+        `백업 시각: ${kstTime} (KST)`,
+        "",
+        "이 시점의 백업으로 서버 메인 잔고를 덮어쓴 뒤, 화면을 서버에서 다시 불러옵니다.",
         "",
         "복원할까요?",
       ].join("\n"),
@@ -2341,6 +2364,7 @@ export default function Home() {
 
     setSyncBusy(true);
     try {
+      const s = entry.snapshot;
       const r = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2355,6 +2379,9 @@ export default function Home() {
           ...("target_stock_weight_by_owner" in s && s.target_stock_weight_by_owner != null
             ? { targetStockWeightByOwner: s.target_stock_weight_by_owner }
             : {}),
+          ...("owner_scratchpad_by_owner" in s && s.owner_scratchpad_by_owner != null
+            ? { ownerScratchpadByOwner: s.owner_scratchpad_by_owner }
+            : {}),
         }),
       });
       const j = (await r.json()) as { error?: string };
@@ -2362,8 +2389,9 @@ export default function Home() {
         setSyncMessage(j.error ?? "복원(서버 반영)에 실패했습니다.");
         return;
       }
+      setPendingBackups(null);
       await handlePullCloud();
-      setSyncMessage("백업 파일을 반영했습니다. 서버와 화면을 맞춰 두었습니다.");
+      setSyncMessage(`${kstTime} 백업으로 복원했습니다.`);
       void refreshLatestBackupAt();
     } catch {
       setSyncMessage("네트워크 오류입니다.");
@@ -5837,16 +5865,59 @@ export default function Home() {
                 </label>
               </div>
               <p className="text-xs text-muted-foreground">
-                「백업」은 <strong className="font-medium text-foreground">서버에 이미 올라간</strong> 잔고를
-                별도 백업 테이블에 <strong className="font-medium text-foreground">한 줄씩 추가</strong>
-                합니다(이 기기만 고친 내용은 서버 반영 후에 포함). 메인 동기화 데이터는 덮어쓰지 않습니다. 같은
-                동기화 키의 백업은 <strong className="font-medium text-foreground">최대 1년</strong>치만 남기고
-                그보다 오래된 백업 행만 지웁니다. 「백업 내려받기」는 먼저 서버 잔고를 백업 테이블에 한 줄
-                추가한 뒤, 쌓인 백업(최대 500건)을 JSON 파일로 저장합니다. 내려받은 파일은 PC에 남으며 웹이
-                자동으로 지우지는 않습니다. 「백업에서 복원」은 그 JSON을 고르면{" "}
-                <strong className="font-medium text-foreground">목록 첫 번째(가장 최근) 백업</strong>만 서버
-                메인 잔고에 반영합니다.
+                「백업」은 서버에 올라간 잔고를 백업 테이블에 한 줄씩 추가합니다(최대 1년, 500건). 「백업 내려받기」는 먼저 백업을 저장한 뒤 JSON으로 다운로드. 「백업에서 복원」은 JSON을 업로드하면 <strong className="font-medium text-foreground">시점 목록이 표시되며 원하는 시점을 선택해 복원</strong>할 수 있습니다.
               </p>
+
+              {/* 백업 시점 선택 복원 UI */}
+              {pendingBackups && pendingBackups.length > 0 && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-950/30 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-amber-200">
+                      복원할 시점을 선택하세요 ({pendingBackups.length}건)
+                    </p>
+                    <button
+                      type="button"
+                      className="text-[10px] text-zinc-500 hover:text-zinc-300 transition"
+                      onClick={() => { setPendingBackups(null); setSyncMessage(""); }}
+                    >
+                      취소
+                    </button>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+                    {pendingBackups.map((b, idx) => {
+                      const kstTime = new Date(b.created_at).toLocaleString("ko-KR", {
+                        timeZone: "Asia/Seoul",
+                        year: "numeric", month: "2-digit", day: "2-digit",
+                        hour: "2-digit", minute: "2-digit", second: "2-digit",
+                      });
+                      const posCount = Array.isArray((b.snapshot as { positions?: unknown }).positions)
+                        ? (b.snapshot.positions as unknown[]).length
+                        : "?";
+                      const srcAt = typeof (b.snapshot as { source_updated_at?: unknown }).source_updated_at === "string"
+                        ? new Date((b.snapshot as { source_updated_at: string }).source_updated_at).toLocaleString("ko-KR", {
+                            timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit",
+                            hour: "2-digit", minute: "2-digit",
+                          })
+                        : null;
+                      return (
+                        <button
+                          key={b.id ?? idx}
+                          type="button"
+                          disabled={syncBusy}
+                          onClick={() => void handleRestoreSpecificBackup(idx)}
+                          className="w-full flex items-center justify-between gap-3 rounded border border-white/10 bg-zinc-900/60 px-3 py-1.5 text-left text-xs hover:bg-zinc-800 transition disabled:opacity-50"
+                        >
+                          <span className="font-mono tabular-nums text-zinc-200">{kstTime}</span>
+                          <span className="shrink-0 text-zinc-500">
+                            {posCount}종목{srcAt ? ` · 데이터 ${srcAt}` : ""}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-amber-400/80">⚠ 선택 시 서버 메인 잔고를 해당 시점으로 덮어씁니다.</p>
+                </div>
+              )}
               {syncMessage ? (
                 <p className="text-xs text-muted-foreground">{syncMessage}</p>
               ) : null}
