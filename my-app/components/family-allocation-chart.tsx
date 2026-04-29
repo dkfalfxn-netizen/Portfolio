@@ -12,6 +12,7 @@ import {
   persistOneOwnerScratchpad,
   pushTargetWeightsAndScratchpadsToServer,
 } from "@/lib/portfolio-owner-scratchpad";
+import { loadOwnerAssetQuicknotes, persistOwnerAssetQuicknote } from "@/lib/portfolio-asset-quicknotes";
 
 /** 네온 글로우용 팔레트 (한 단계 어둡게 — 채도는 유지) */
 const NEON_PALETTE = [
@@ -335,6 +336,31 @@ function TargetStockWeightNeu({
   const [savedAtText, setSavedAtText] = useState<string | null>(null);
   const [saveFailedBrief, setSaveFailedBrief] = useState(false);
   const [splitCount, setSplitCount] = useState<string>("1");
+  const [assetQuickNotesByTicker, setAssetQuickNotesByTicker] = useState<Record<string, string>>({});
+  const assetNoteTimers = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    setAssetQuickNotesByTicker(loadOwnerAssetQuicknotes(ownerName));
+  }, [ownerName]);
+
+  useEffect(() => {
+    return () => {
+      assetNoteTimers.current.forEach((t) => window.clearTimeout(t));
+      assetNoteTimers.current.clear();
+    };
+  }, []);
+
+  const queuePersistAssetNote = useCallback((ticker: string, text: string) => {
+    const prev = assetNoteTimers.current.get(ticker);
+    if (prev != null) window.clearTimeout(prev);
+    assetNoteTimers.current.set(
+      ticker,
+      window.setTimeout(() => {
+        assetNoteTimers.current.delete(ticker);
+        persistOwnerAssetQuicknote(ownerName, ticker, text);
+      }, 400),
+    );
+  }, [ownerName]);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -603,7 +629,7 @@ function TargetStockWeightNeu({
         </div>
       )}
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(48px,1fr))] gap-x-1 gap-y-4 py-2 justify-items-center">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(76px,1fr))] gap-x-2 gap-y-6 py-2 justify-items-center">
         {orderedSlices.map((slice) => {
           const hasInputTarget = Object.prototype.hasOwnProperty.call(targetsByTicker, slice.ticker);
           const target = targetsByTicker[slice.ticker] ?? 0;
@@ -641,9 +667,9 @@ function TargetStockWeightNeu({
           let deviationSub: string | undefined;
           if (!hasInputTarget) {
             deviationMain = `현재 ${actual.toFixed(1)}%`;
-            deviationSub = "목표를 입력하면 편차(%p)";
+            deviationSub = "목표 입력 시 편차(%p)";
           } else if (isOverTargetWhenZero) {
-            deviationMain = `목표 0% · +${actual.toFixed(1)}%p (초과)`;
+            deviationMain = `목표 0% · +${actual.toFixed(1)}%p 초과`;
           } else if (!hasPositiveTarget) {
             deviationMain = `현재 ${actual.toFixed(1)}%`;
             deviationSub = "목표 미설정 또는 0%";
@@ -652,10 +678,8 @@ function TargetStockWeightNeu({
             deviationSub = "±5% 이내";
           } else if (belowBand) {
             deviationMain = `${(-deltaPp).toFixed(1)}%p 부족`;
-            deviationSub = undefined;
           } else {
             deviationMain = `${deltaPp.toFixed(1)}%p 초과`;
-            deviationSub = undefined;
           }
 
           const tooltipEntries = nonCashEntriesSortedByWeight(slice.allEntries);
@@ -663,7 +687,7 @@ function TargetStockWeightNeu({
           const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
 
           return (
-            <div key={slice.name} className="group relative flex w-full max-w-[56px] flex-col items-center gap-1">
+            <div key={slice.name} className="group relative flex w-full max-w-[92px] flex-col items-center gap-1">
               {tooltipEntries.length > 0 ? (
                 <div className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-20 hidden w-max min-w-[140px] -translate-x-1/2 rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
                   {isGrouped ? (
@@ -690,7 +714,7 @@ function TargetStockWeightNeu({
                   )}
                 </div>
               ) : null}
-              <label className="flex w-full flex-col items-center gap-0.5">
+              <label className="flex w-full flex-col items-center justify-center gap-0.5 mx-auto">
                 <input
                   type="number"
                   min={0}
@@ -698,7 +722,7 @@ function TargetStockWeightNeu({
                   step={0.1}
                   placeholder="—"
                   aria-label={`${slice.ticker} 목표 비중 %`}
-                  className="w-[2.875rem] max-w-full rounded-md border border-white/10 bg-zinc-900/80 py-0.5 text-center text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  className="block w-[2.75rem] shrink-0 rounded-md border border-white/10 bg-zinc-900/80 px-1 py-0.5 text-center text-[10px] tabular-nums leading-none text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none mx-auto"
                   style={{
                     boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
                     textAlign: "center",
@@ -711,7 +735,7 @@ function TargetStockWeightNeu({
                 {slice.ticker}
               </span>
               <div
-                className="relative h-[118px] w-[9px] shrink-0 rounded-full"
+                className="relative h-[118px] w-[4px] shrink-0 rounded-full"
                 style={{
                   background: "#12161f",
                   boxShadow:
@@ -720,10 +744,10 @@ function TargetStockWeightNeu({
               >
                 {hasPositiveTarget || isOverTargetWhenZero ? (
                   <div
-                    className="absolute bottom-0.5 left-px right-px rounded-full transition-[height] duration-300"
+                    className="absolute bottom-[1px] left-[1px] right-[1px] rounded-full transition-[height] duration-300"
                     style={{
-                      height: `calc(${fillPct}% - 3px)`,
-                      minHeight: hasPositiveTarget ? (ratio > 0 ? 4 : 0) : isOverTargetWhenZero ? 4 : 0,
+                      height: `calc(${fillPct}% - 2px)`,
+                      minHeight: hasPositiveTarget ? (ratio > 0 ? 2 : 0) : isOverTargetWhenZero ? 2 : 0,
                       maxHeight: "calc(100% - 6px)",
                       background: fillGradient,
                       boxShadow: barGlow,
@@ -753,6 +777,24 @@ function TargetStockWeightNeu({
                   </span>
                 ) : null}
               </div>
+              <textarea
+                rows={2}
+                aria-label={`${slice.ticker} 간단 메모`}
+                spellCheck={false}
+                value={assetQuickNotesByTicker[slice.ticker] ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setAssetQuickNotesByTicker((p) => ({ ...p, [slice.ticker]: v }));
+                  queuePersistAssetNote(slice.ticker, v);
+                }}
+                placeholder="메모·계산"
+                className="mt-1 w-full max-w-[88px] min-h-[3.25rem] resize-y rounded border border-white/[0.08] bg-[#0f131a]/98 px-1 py-0.5 text-left text-[8px] leading-snug text-zinc-400 outline-none placeholder:text-zinc-600 focus:border-sky-500/35 focus:ring-1 focus:ring-sky-500/25"
+                style={{
+                  boxShadow:
+                    "inset 2px 2px 4px rgba(0,0,0,0.4), inset -1px -1px 2px rgba(255,255,255,0.02)",
+                  fontFamily: 'ui-monospace, "Cascadia Code", monospace',
+                }}
+              />
             </div>
           );
         })}
