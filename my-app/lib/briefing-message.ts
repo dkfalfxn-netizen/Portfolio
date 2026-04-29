@@ -46,7 +46,54 @@ type DbPos = {
   owner: string;
 };
 
-/** 시세 스냅샷으로 전체 포트폴리오 원화 평가액 (여러 계정 합산용으로 호출 가능) */
+const OWNER_DISPLAY_ORDER = ["김승주", "강희진"] as const;
+
+function ownerDisplayOrderIndex(owner: string): number {
+  const idx = OWNER_DISPLAY_ORDER.indexOf(owner as (typeof OWNER_DISPLAY_ORDER)[number]);
+  return idx >= 0 ? idx : Number.MAX_SAFE_INTEGER;
+}
+
+/** 보유자별 원화 순자산(NAV). 전체 포트 순자산은 이 맵 값들의 합과 같음 */
+export function computeOwnerNavKrwMap(
+  positions: DbPos[],
+  cashByOwner: Record<string, { usd: number; krw: number }>,
+  quotes: PricesResult["quotes"],
+  usdKrw: number,
+  eurKrw: number,
+): Record<string, number> {
+  const lookupCash = (canonical: string): { usd: number; krw: number } => {
+    const direct = cashByOwner[canonical];
+    if (direct) return direct;
+    for (const [k, v] of Object.entries(cashByOwner)) {
+      if (k.trim() === canonical) return v;
+    }
+    return { usd: 0, krw: 0 };
+  };
+
+  const owners = [
+    ...new Set([
+      ...positions.map((p) => p.owner.trim()),
+      ...Object.keys(cashByOwner).map((k) => k.trim()),
+    ]),
+  ];
+  const out: Record<string, number> = {};
+  for (const owner of owners) {
+    const cash = lookupCash(owner);
+    let sum = cash.krw + cash.usd * usdKrw;
+    for (const p of positions) {
+      if (p.owner.trim() !== owner) continue;
+      const q = quotes[p.symbol];
+      const price =
+        typeof q?.price === "number" && Number.isFinite(q.price) && q.price > 0 ? q.price : p.currentPrice;
+      if (p.currency === "USD") sum += p.quantity * price * usdKrw;
+      else if (p.currency === "EUR") sum += p.quantity * price * eurKrw;
+      else sum += p.quantity * price;
+    }
+    out[owner] = sum;
+  }
+  return out;
+}
+
 export function computeLivePortfolioKrw(
   positions: DbPos[],
   cashByOwner: Record<string, { usd: number; krw: number }>,
@@ -70,6 +117,91 @@ export function computeLivePortfolioKrw(
     }
   }
   return sum;
+}
+
+export type QuoteWeightedOwnerInput = { ownerLabel: string; symbol: string; changePct: number | null };
+
+/**
+ * 보유자별 오늘 변동 추정(%).
+ *
+ * - 보유 종목마다 조회된 전일 대비 등락(changePct)×당일 평가액 비중 가중평균 (현금은 등락 0%).
+ * - 전일 DB `owner_values`와 오늘 NAV가 동일하게 잘못 맞물리면 순스냅 비교만 쓸 때 전부 0%로 나올 수 있어,
+ *   **가중값이 존재하는 보유자**는 해당 일중 추정치를 우선 표시합니다.
+ * - 해당 보유자에 종목 등락 입력이 하나도 없을 때만 (전일 대비 순자산 %) 스냅 비교를 씁니다.
+ */
+export function computeOwnerDailyReturnsHybrid(
+  positions: DbPos[],
+  cashByOwner: Record<string, { usd: number; krw: number }>,
+  quotes: PricesResult["quotes"],
+  usdKrw: number,
+  eurKrw: number,
+  quotedItems: QuoteWeightedOwnerInput[],
+  yesterdayByOwner: Record<string, number> | null | undefined,
+): OwnerDailyReturn[] {
+  const liveNav = computeOwnerNavKrwMap(positions, cashByOwner, quotes, usdKrw, eurKrw);
+  const yMap = yesterdayByOwner && typeof yesterdayByOwner === "object" ? yesterdayByOwner : null;
+
+  const posByOwnerSymbol = new Map<string, DbPos>();
+  for (const row of positions) {
+    posByOwnerSymbol.set(`${row.owner.trim()}:::${row.symbol}`, row);
+  }
+
+  const gainKrwFromQuotes = new Map<string, number>();
+  const ownersWithMatchedPositions = new Set<string>();
+
+  for (const it of quotedItems) {
+    const owner = it.ownerLabel.trim();
+    const keyPs = `${owner}:::${it.symbol}`;
+    const p = posByOwnerSymbol.get(keyPs);
+    if (!p) continue;
+    ownersWithMatchedPositions.add(owner);
+
+    const q = quotes[it.symbol.trim()];
+    const price =
+      typeof q?.price === "number" && Number.isFinite(q.price) && q.price > 0 ? q.price : p.currentPrice;
+    const v =
+      p.currency === "USD"
+        ? p.quantity * price * usdKrw
+        : p.currency === "EUR"
+          ? p.quantity * price * eurKrw
+          : p.quantity * price;
+    if (!Number.isFinite(v) || v <= 0) continue;
+
+    const pct = it.changePct;
+    const r = typeof pct === "number" && Number.isFinite(pct) ? pct : 0;
+    gainKrwFromQuotes.set(owner, (gainKrwFromQuotes.get(owner) ?? 0) + v * (r / 100));
+  }
+
+  const ownersSorted = [...Object.keys(liveNav)].sort((a, b) => {
+    const ao = ownerDisplayOrderIndex(a);
+    const bo = ownerDisplayOrderIndex(b);
+    if (ao !== bo) return ao - bo;
+    return a.localeCompare(b, "ko");
+  });
+
+  return ownersSorted.map((owner): OwnerDailyReturn => {
+    const nav = liveNav[owner] ?? 0;
+    if (!(nav > 0)) return { owner, changePct: null };
+
+    const snapPct =
+      yMap !== null
+        ? ((raw) => {
+            const v = typeof raw === "number" ? raw : Number(raw);
+            if (!Number.isFinite(v) || v <= 0) return null;
+            return ((nav - v) / v) * 100;
+          })(yMap[owner])
+        : null;
+
+    if (ownersWithMatchedPositions.has(owner)) {
+      const g = gainKrwFromQuotes.get(owner) ?? 0;
+      const quotePct = (g / nav) * 100;
+      return { owner, changePct: quotePct };
+    }
+    if (snapPct !== null && Number.isFinite(snapPct)) {
+      return { owner, changePct: snapPct };
+    }
+    return { owner, changePct: null };
+  });
 }
 
 export function escapeHtml(s: string): string {
@@ -169,10 +301,8 @@ function iconForGroupLabel(label: string): string {
   return "🧩";
 }
 
-const OWNER_DISPLAY_ORDER = ["김승주", "강희진"] as const;
 function ownerOrderIndex(owner: string): number {
-  const idx = OWNER_DISPLAY_ORDER.indexOf(owner as (typeof OWNER_DISPLAY_ORDER)[number]);
-  return idx >= 0 ? idx : Number.MAX_SAFE_INTEGER;
+  return ownerDisplayOrderIndex(owner);
 }
 
 /** 가격 표기 (원화는 전액·쉼표) */

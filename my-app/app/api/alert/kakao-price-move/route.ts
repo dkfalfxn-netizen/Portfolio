@@ -6,7 +6,9 @@ import {
   collectMiniTrends,
   collectHoldTransitions,
   computeLivePortfolioKrw,
+  computeOwnerDailyReturnsHybrid,
   type BriefingItem,
+  type QuoteWeightedOwnerInput,
 } from "@/lib/briefing-message";
 import { isKrxCommodity, toYahooSymbol } from "@/lib/finance-symbols";
 import { todayKST, yesterdayKST, mmddKST } from "@/lib/date-utils";
@@ -31,8 +33,6 @@ type Quote = {
   previousClose: number | null;
 };
 
-type OwnerValueMap = Record<string, number>;
-
 type AlertItem = {
   syncKey: string;
   symbol: string;
@@ -45,7 +45,6 @@ type AlertItem = {
 };
 
 type MarketGroup = "DOMESTIC" | "OVERSEAS";
-
 function resolveAlertGroupLabel(p: Position): string {
   const chartGroup = typeof p.chartGroup === "string" ? p.chartGroup.trim() : "";
   if (chartGroup) return chartGroup;
@@ -69,6 +68,15 @@ function isMarketTradingDay(group: MarketGroup, at: Date): boolean {
   return isUsEquityTradingSessionDay(at);
 }
 const TARGET_OWNERS = new Set(["김승주", "강희진"]);
+
+/** 브리핑「보유자별 요약」에 일중 종목등락 가중을 반영할 보유자명 (관심 알림 타깃과 별개) */
+const OWNER_NAMES_FOR_DAILY_RETURN = new Set([
+  "김승주",
+  "강희진",
+  "김도율",
+  "김찬율",
+  "퇴직연금",
+]);
 
 async function fetchYahooQuote(symbol: string): Promise<Quote> {
   try {
@@ -194,45 +202,9 @@ function normalizeDbPositions(raw: unknown): Array<{
     const q = typeof x.quantity === "number" && Number.isFinite(x.quantity) ? x.quantity : 0;
     const cp = typeof x.currentPrice === "number" && Number.isFinite(x.currentPrice) ? x.currentPrice : 0;
     const cur = x.currency === "USD" || x.currency === "EUR" || x.currency === "KRW" ? x.currency : "KRW";
-    const owner = typeof x.owner === "string" ? x.owner : "";
+    const owner = typeof x.owner === "string" ? x.owner.trim() : "";
     out.push({ symbol: sym, quantity: q, currentPrice: cp, currency: cur, owner });
   }
-  return out;
-}
-
-function computeOwnerLiveValuesKrw(
-  positions: Array<{
-    symbol: string;
-    quantity: number;
-    currentPrice: number;
-    currency: "USD" | "EUR" | "KRW";
-    owner: string;
-  }>,
-  cashByOwner: CashByOwner,
-  quotes: Record<string, { price?: number | null } | undefined>,
-  usdKrw: number,
-  eurKrw: number,
-): OwnerValueMap {
-  const owners = [...new Set([...positions.map((p) => p.owner), ...Object.keys(cashByOwner)])];
-  const out: OwnerValueMap = {};
-
-  for (const owner of owners) {
-    const cash = cashByOwner[owner] ?? { usd: 0, krw: 0 };
-    let sum = cash.krw + cash.usd * usdKrw;
-    for (const p of positions) {
-      if (p.owner !== owner) continue;
-      const q = quotes[p.symbol];
-      const price =
-        typeof q?.price === "number" && Number.isFinite(q.price) && q.price > 0
-          ? q.price
-          : p.currentPrice;
-      if (p.currency === "USD") sum += p.quantity * price * usdKrw;
-      else if (p.currency === "EUR") sum += p.quantity * price * eurKrw;
-      else sum += p.quantity * price;
-    }
-    out[owner] = sum;
-  }
-
   return out;
 }
 
@@ -333,9 +305,7 @@ function overallLabelKo(o: FourSignalsResult["overall"]): string {
 
 async function buildWatchlistTelegramBlock(entries: WatchlistRow[]): Promise<string> {
   if (entries.length === 0) return "";
-  const now = mmddKST();
-  let t = `⭐ <b>관심종목 매수 타이밍 참고</b> (${now})\n`;
-  t += "MA·RSI·볼린저·거래량 기준 (참고용, 투자 권유 아님)\n\n";
+  let t = "";
   for (const e of entries) {
     const label = e.name && e.name.length > 0 ? e.name : e.symbol;
     const sig = await analyzeFourSignals(e.symbol, label);
@@ -426,16 +396,11 @@ export async function GET(req: NextRequest) {
   let todayLiveKrw = 0;
   let yesterdayPortfolioSum = 0;
   let hasYesterdayPortfolio = false;
-  const ownerLiveTotals = new Map<string, number>();
   const ownerYesterdayTotals = new Map<string, number>();
   for (const snap of snaps) {
     const pos = normalizeDbPositions(snap.positions);
     const cash = normalizeCash(snap.cash_by_owner);
     todayLiveKrw += computeLivePortfolioKrw(pos, cash, quotes, usdKrw, eurKrw);
-    const ownerLive = computeOwnerLiveValuesKrw(pos, cash, quotes, usdKrw, eurKrw);
-    for (const [owner, value] of Object.entries(ownerLive)) {
-      ownerLiveTotals.set(owner, (ownerLiveTotals.get(owner) ?? 0) + value);
-    }
 
     const { data: yday } = await admin
       .from("portfolio_daily_snapshots")
@@ -465,13 +430,6 @@ export async function GET(req: NextRequest) {
     hasYesterdayPortfolio && yesterdayPortfolioSum > 0
       ? ((todayLiveKrw - yesterdayPortfolioSum) / yesterdayPortfolioSum) * 100
       : null;
-  const ownerDailyReturns = [...ownerLiveTotals.entries()]
-    .map(([owner, today]) => {
-      const y = ownerYesterdayTotals.get(owner);
-      const changePct = y !== undefined && y > 0 ? ((today - y) / y) * 100 : null;
-      return { owner, changePct };
-    })
-    .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
 
   const sentSet = new Set<string>();
   const { data: logs } = await admin
@@ -491,6 +449,16 @@ export async function GET(req: NextRequest) {
     change_pct: number | null;
     briefing_slot: string;
   }> = [];
+
+  const quoteMemoBySymbol = new Map<string, Quote>();
+  async function memoizedQuote(inputSymbol: string): Promise<Quote> {
+    const k = inputSymbol.trim().toUpperCase();
+    const hit = quoteMemoBySymbol.get(k);
+    if (hit !== undefined) return hit;
+    const q = await fetchQuoteForSymbol(inputSymbol);
+    quoteMemoBySymbol.set(k, q);
+    return q;
+  }
 
   for (const snap of snaps) {
     const syncKey = String(snap.sync_key);
@@ -519,10 +487,11 @@ export async function GET(req: NextRequest) {
       const dedupeKey = `${syncKey}:${ownerSymbol}:${dateKst}:${briefingSlot}`;
       if (sentSet.has(dedupeKey)) continue;
 
-      const q = await fetchQuoteForSymbol(symbol);
-      const pct = (q.price && q.previousClose && q.previousClose > 0)
-        ? ((q.price - q.previousClose) / q.previousClose) * 100
-        : null;
+      const q = await memoizedQuote(symbol);
+      const pct =
+        q.price && q.previousClose && q.previousClose > 0
+          ? ((q.price - q.previousClose) / q.previousClose) * 100
+          : null;
 
       items.push({
         syncKey,
@@ -543,6 +512,32 @@ export async function GET(req: NextRequest) {
       });
     }
   }
+
+  const posForHybrid = normalizeDbPositions(snap.positions);
+  const cashForHybrid = normalizeCash(snap.cash_by_owner);
+  const quoteWeights: QuoteWeightedOwnerInput[] = [];
+  for (const row of posForHybrid) {
+    if (!OWNER_NAMES_FOR_DAILY_RETURN.has(row.owner.trim())) continue;
+    const qRow = await memoizedQuote(row.symbol);
+    const pctRow =
+      qRow.price && qRow.previousClose && qRow.previousClose > 0
+        ? ((qRow.price - qRow.previousClose) / qRow.previousClose) * 100
+        : null;
+    quoteWeights.push({ ownerLabel: row.owner.trim(), symbol: row.symbol, changePct: pctRow });
+  }
+  const yesterdayRecord =
+    ownerYesterdayTotals.size > 0
+      ? Object.fromEntries([...ownerYesterdayTotals.entries()].map(([k, v]) => [k.trim(), v]))
+      : undefined;
+  const ownerDailyReturns = computeOwnerDailyReturnsHybrid(
+    posForHybrid,
+    cashForHybrid,
+    quotes,
+    usdKrw,
+    eurKrw,
+    quoteWeights,
+    yesterdayRecord,
+  );
 
   const domesticWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "DOMESTIC");
   const overseasWatchEntries = watchEntries.filter((w) => marketGroupOfSymbol(w.symbol) === "OVERSEAS");
@@ -736,6 +731,16 @@ export async function POST(req: NextRequest) {
     alreadySent = new Set((logs ?? []).map((l) => l.symbol));
   }
 
+  const postQuoteMemoBySymbol = new Map<string, Quote>();
+  async function postMemoizedQuote(inputSymbol: string): Promise<Quote> {
+    const k = inputSymbol.trim().toUpperCase();
+    const hit = postQuoteMemoBySymbol.get(k);
+    if (hit !== undefined) return hit;
+    const q = await fetchQuoteForSymbol(inputSymbol);
+    postQuoteMemoBySymbol.set(k, q);
+    return q;
+  }
+
   for (const [ownerSymbol, info] of symbolMap) {
     const symbol = ownerSymbol.split("::")[1] ?? "";
     if (!symbol) continue;
@@ -752,7 +757,7 @@ export async function POST(req: NextRequest) {
       });
       continue;
     }
-    const q = await fetchQuoteForSymbol(symbol);
+    const q = await postMemoizedQuote(symbol);
     const pct = (q.price && q.previousClose && q.previousClose > 0)
       ? ((q.price - q.previousClose) / q.previousClose) * 100
       : null;
@@ -834,19 +839,37 @@ export async function POST(req: NextRequest) {
       : null;
     const portfolioChangeVsYesterdayPct =
       yVal !== null && yVal > 0 ? ((todayLiveKrw - yVal) / yVal) * 100 : null;
-    const ownerLive = computeOwnerLiveValuesKrw(posNorm, cashNorm, quotes, usdK, eurK);
     const yOwners =
       ydayRow?.owner_values && typeof ydayRow.owner_values === "object" && !Array.isArray(ydayRow.owner_values)
         ? (ydayRow.owner_values as Record<string, unknown>)
         : null;
-    const ownerDailyReturns = Object.entries(ownerLive)
-      .map(([owner, today]) => {
-        const yRaw = yOwners?.[owner];
-        const y = yRaw === undefined ? null : Number(yRaw);
-        const changePct = y !== null && Number.isFinite(y) && y > 0 ? ((today - y) / y) * 100 : null;
-        return { owner, changePct };
-      })
-      .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
+    const yesterdayRecordManual =
+      yOwners && typeof yOwners === "object"
+        ? Object.fromEntries(
+            Object.entries(yOwners)
+              .map(([k, v]) => [k.trim(), Number(v)] as [string, number])
+              .filter(([, n]) => Number.isFinite(n)),
+          )
+        : undefined;
+    const quoteWeightsManual: QuoteWeightedOwnerInput[] = [];
+    for (const row of posNorm) {
+      if (!OWNER_NAMES_FOR_DAILY_RETURN.has(row.owner.trim())) continue;
+      const qRow = await postMemoizedQuote(row.symbol);
+      const pctRow =
+        qRow.price && qRow.previousClose && qRow.previousClose > 0
+          ? ((qRow.price - qRow.previousClose) / qRow.previousClose) * 100
+          : null;
+      quoteWeightsManual.push({ ownerLabel: row.owner.trim(), symbol: row.symbol, changePct: pctRow });
+    }
+    const ownerDailyReturns = computeOwnerDailyReturnsHybrid(
+      posNorm,
+      cashNorm,
+      quotes,
+      usdK,
+      eurK,
+      quoteWeightsManual,
+      yesterdayRecordManual,
+    );
 
     async function sendHoldings(itemsForMessage: AlertItem[]): Promise<Response | null> {
       if (itemsForMessage.length === 0) return null;
