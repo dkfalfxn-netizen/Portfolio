@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { generateBriefSummary } from "@/lib/ai-brief-summary";
 import { todayKST } from "@/lib/date-utils";
-import { coerceNumberedSummaryLines } from "@/lib/briefing-format";
+import { coerceNumberedSummaryLines, dropIncompleteNumberedLastLine } from "@/lib/briefing-format";
 import {
   dedupeHeadlines,
   formatHeadlinesSourceBlock,
@@ -68,18 +68,19 @@ async function generateSummary(items: GoogleNewsHeadline[], date: string): Promi
       "규칙:\n" +
       "- 투자 권유·단정적 예측 금지.\n" +
       "- 제목에 없는 수치·인용·속보 사실은 쓰지 말 것.\n" +
-      "- 한국어로 **정확히 4~6줄**만 출력한다. 각 줄은 **숫자·마침표·공백**으로 시작하고, 끝에 **(근거: [N])** 또는 **(근거: [N][M])**로 근거 헤드라인 번호를 적는다.\n" +
+      "- 한국어로 **정확히 4~6줄**만 출력한다. 각 줄은 **숫자·마침표·공백**으로 시작하고, **한 줄은 짧고 완성된 한 문장**으로, 문장 끝은 `。` `．` `!` `?` 중 하나로 **반드시** 끝낸다(중간 끊김 금지). 끝에 **(근거: [N])** 또는 **(근거: [N][M])**로 근거 번호.\n" +
       "- AI·반도체·투자 축과 방산·국방 축이 섞여 있으면 각각 반영한다.\n" +
       "- **URL·도메인·http는 응답에 넣지 마라.**\n" +
-      "- 마지막 줄은 **원문 기사 확인이 필요**하다는 취지로 짧게 마무리한다. `(근거: …)`는 생략 가능하다.",
+      "- 마지막 줄은 **제목만으로는 세부 내용을 알 수 없으니, 아래에 붙는 링크로 기사를 직접 열어 볼 것**이라는 취지로 짧게 마무리한다. `(근거: …)`는 생략 가능하다. (너는 기사 본문을 보지 못한다. **헤드라인 텍스트만**이 입력이다.)",
     user: `기준일(한국): ${date}\n\n각 번호는 하나의 뉴스 헤드라인과 그 RSS 링크에 대응한다.\n\n${numbered.slice(0, 12000)}`,
-    maxTokens: 950,
+    maxTokens: 2048,
     temperature: 0.25,
   });
   if (!text || text.length === 0) {
     return fallbackSummary(items);
   }
-  const body = coerceNumberedSummaryLines(text.trim().slice(0, 8000), 6);
+  const pre = dropIncompleteNumberedLastLine(text.trim().slice(0, 12_000));
+  const body = coerceNumberedSummaryLines(pre, 6);
   return `${body}${SOURCE_BLOCK_SEP}${formatHeadlinesSourceBlock(items)}`;
 }
 

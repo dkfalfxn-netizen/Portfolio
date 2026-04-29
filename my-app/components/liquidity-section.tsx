@@ -1,7 +1,6 @@
 "use client";
 
-import { withCoercedBriefingBody } from "@/lib/briefing-format";
-import { BriefingSummaryText } from "@/components/briefing-summary-text";
+import { MacroBriefingBlock } from "@/components/macro-briefing-block";
 import { LiquidityBriefingChart } from "@/components/liquidity-briefing-chart";
 import type { LiquidityHistoryRow } from "@/components/liquidity-briefing-chart";
 
@@ -54,7 +53,7 @@ export function LiquiditySection({
       <section className="rounded-2xl border border-slate-700/60 bg-slate-900/30 p-3 shadow-sm sm:p-4">
         <h3 className="mb-1 text-sm font-semibold text-slate-100">연준·금리 정책 (뉴스 헤드라인 AI 요약)</h3>
         <p className="mb-2 text-[11px] text-slate-500 sm:text-xs">
-          Google 뉴스 RSS에서 &quot;Federal Reserve / Kevin Warsh / FOMC&quot; 키워드로 수집한 <strong>헤드라인·링크</strong>를 바탕으로, 매일 별도 Cron이 번호 목록 요약과 참고 링크를 만듭니다. 링크는 Google 뉴스 경유일 수 있습니다. 투자 권유가 아니라 모니터링용입니다.
+          Google 뉴스 RSS에서 &quot;Federal Reserve / Kevin Warsh / FOMC&quot; 키워드로 수집한 <strong>헤드라인(제목)·링크</strong>만 사용합니다(기사 본문은 수집하지 않음). 매일 Cron이 제목 기반 번호 요약과 아래 참고 링크를 만듭니다. 원문은 링크를 열어 확인하세요. 투자 권유가 아닌 모니터링용입니다.
         </p>
         {fedLoading ? (
           <p className="text-sm text-slate-400">연·금리 요약을 불러오는 중…</p>
@@ -76,7 +75,7 @@ export function LiquiditySection({
                 {fedReportDate ? (
                   <p className="mb-1 text-[10px] text-slate-500">기준일(저장): {fedReportDate}</p>
                 ) : null}
-                <BriefingSummaryText text={withCoercedBriefingBody(fedSummary, 6)} />
+                <MacroBriefingBlock text={fedSummary} />
               </>
             ) : !fedNote ? (
               <p className="text-sm text-slate-400">요약이 없습니다.</p>
@@ -88,7 +87,7 @@ export function LiquiditySection({
       <section className="rounded-2xl border border-slate-700/60 bg-slate-900/30 p-3 shadow-sm sm:p-4">
         <h3 className="mb-1 text-sm font-semibold text-slate-100">AI·방산 (뉴스 헤드라인 AI 요약)</h3>
         <p className="mb-2 text-[11px] text-slate-500 sm:text-xs">
-          Google 뉴스 RSS에서 <strong>인공지능·반도체·투자</strong>와 <strong>한국 방산·방위 산업</strong> 등으로 수집한 <strong>헤드라인·링크</strong>를 바탕으로, 매일 별도 Cron이 번호 목록 요약과 참고 링크를 만듭니다. 투자 권유가 아니라 모니터링용입니다.
+          Google 뉴스 RSS에서 <strong>인공지능·반도체·투자</strong>와 <strong>한국 방산·방위 산업</strong> 등으로 수집한 <strong>헤드라인(제목)·링크</strong>만 사용합니다(기사 본문은 수집하지 않음). 매일 Cron이 제목 기반 번호 요약과 아래 참고 링크를 만듭니다. 원문은 링크를 열어 확인하세요. 투자 권유가 아닌 모니터링용입니다.
         </p>
         {themesLoading ? (
           <p className="text-sm text-slate-400">AI·방산 요약을 불러오는 중…</p>
@@ -110,7 +109,7 @@ export function LiquiditySection({
                 {themesReportDate ? (
                   <p className="mb-1 text-[10px] text-slate-500">기준일(저장): {themesReportDate}</p>
                 ) : null}
-                <BriefingSummaryText text={withCoercedBriefingBody(themesSummary, 6)} />
+                <MacroBriefingBlock text={themesSummary} />
               </>
             ) : !themesNote ? (
               <p className="text-sm text-slate-400">요약이 없습니다.</p>
