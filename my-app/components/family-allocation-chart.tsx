@@ -481,142 +481,93 @@ function TargetStockWeightNeu({
   if (slices.length === 0) {
     return (
       <div
-        className="flex min-h-[200px] flex-col items-center justify-center rounded-2xl px-3 py-4 text-center text-xs text-zinc-500"
-        style={{
-          boxShadow: "inset 4px 4px 10px rgba(0,0,0,0.45), inset -4px -4px 10px rgba(255,255,255,0.04)",
-          background: "#151a24",
-        }}
+        className="flex min-h-[120px] flex-col items-center justify-center rounded-2xl px-3 py-4 text-center text-xs text-zinc-500"
+        style={{ background: "#151a24" }}
       >
-        목표 비중을 설정할 주식 슬라이스가 없습니다.
+        목표 비중을 설정할 슬라이스가 없습니다.
       </div>
     );
   }
 
+  // bar x-axis: 0% = nothing held, 100% = exactly at target, max display = MAX_RATIO × target
+  const MAX_RATIO = 1.5;
+  const TARGET_AT = 1 / MAX_RATIO; // target marker at 66.7% of bar width
+
   return (
     <div
-      className="flex flex-col rounded-2xl p-3 sm:p-4"
+      className="flex flex-col rounded-2xl p-3"
       style={{
         background: "#151a24",
         boxShadow:
           "6px 6px 14px rgba(0,0,0,0.45), -4px -4px 12px rgba(255,255,255,0.03), inset 0 1px 0 rgba(255,255,255,0.04)",
       }}
     >
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void handleClickSave()}
-          disabled={saveStatus === "saving" || slices.length === 0}
-          className="rounded-lg border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-[10px] font-semibold text-sky-200 shadow-[0_0_12px_rgba(56,189,248,0.15)] transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {saveStatus === "saving" ? "저장 중…" : "목표 비중 저장"}
-        </button>
-        {savedAtText ? (
-          <span className="text-[9px] font-medium tabular-nums text-zinc-400">{savedAtText} 저장</span>
-        ) : null}
-        {saveStatus === "err" && saveFailedBrief && !savedAtText ? (
-          <span className="text-[9px] text-rose-300/90">저장 실패</span>
-        ) : null}
-      </div>
-      <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[8px] leading-tight text-zinc-400 sm:text-[9px]">
-        <span className="flex items-center gap-1">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-sky-500" />
-          ±5% 이내
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-red-500" />
-          목표 미달 (빨강 막대)
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-emerald-500" />
-          목표 초과 (초록 막대)
-        </span>
-        <span className="ml-auto shrink-0 text-zinc-500">
-          눈금 0→100% 포트폴리오 비중 · <span className="border-l border-dashed border-zinc-400/70 pl-1.5">목표점선</span>
-        </span>
-      </div>
-      {showTargetSumError ? (
-        <div
-          className="mb-3 rounded-lg border border-rose-500/45 bg-rose-950/35 px-2.5 py-2 text-[10px] leading-snug text-rose-100/95"
-          role="alert"
-        >
-          <p className="text-rose-200/95">
-            목표 합계 <span className="tabular-nums font-semibold text-rose-50">{targetSum.toFixed(1)}%</span>
-            — 100%에 맞추세요
-            {targetSum < 100 - TARGET_SUM_TOLERANCE ? (
-              <span>
-                {" "}
-                (<span className="tabular-nums">{(100 - targetSum).toFixed(1)}%</span> 부족)
-              </span>
-            ) : (
-              <span>
-                {" "}
-                (<span className="tabular-nums">{(targetSum - 100).toFixed(1)}%</span> 초과)
-              </span>
-            )}
-            .
-          </p>
+      {/* ── Header ── */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px]">
+          <span className="font-semibold tracking-wide text-zinc-100">포트폴리오 비중 리밸런싱</span>
+          <span className="flex items-center gap-1 text-zinc-500">
+            <span className="inline-block h-[5px] w-[9px] rounded-sm bg-red-500/80" />
+            부족
+          </span>
+          <span className="flex items-center gap-1 text-zinc-500">
+            <span className="inline-block h-[5px] w-[9px] rounded-sm bg-emerald-500/80" />
+            초과
+          </span>
+          <span className="text-zinc-600">· Marker=목표</span>
         </div>
-      ) : hasAnyTarget && targetSumOk ? (
-        <p className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-950/25 px-2.5 py-1.5 text-[10px] text-emerald-200/95">
-          목표 비중 합계 <span className="tabular-nums font-semibold">{targetSum.toFixed(1)}%</span> — 100%에 맞습니다.
-        </p>
-      ) : null}
-      {rebalanceItems.length > 0 && (
-        <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
-          <div className="mb-2.5 flex items-center justify-between gap-2">
-            <p className="text-[10px] font-semibold text-zinc-400 tracking-wide">리밸런싱 필요 금액</p>
-            <label className="flex items-center gap-1.5 text-[10px] text-zinc-500">
-              분할
-              <input
-                type="number"
-                min={1}
-                max={100}
-                step={1}
-                value={splitCount}
-                onChange={(e) => setSplitCount(e.target.value)}
-                className="w-10 rounded-md border border-white/10 bg-zinc-900/80 px-1 py-0.5 text-center text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 placeholder:text-zinc-600 focus:ring-1"
-                style={{ boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)" }}
-                aria-label="분할 수"
-              />
-              회
-            </label>
-          </div>
-          {(() => {
-            const n = Math.max(1, Math.floor(Number(splitCount) || 1));
-            return (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                {rebalanceItems.map((item) => {
-                  const perSplit = item.diffKrw / n;
-                  return (
-                    <div key={item.ticker} className="flex items-center justify-between gap-2 text-[10px]">
-                      <span className="truncate font-semibold text-zinc-300">{item.ticker}</span>
-                      <span className={`tabular-nums font-bold shrink-0 ${item.diffKrw > 0 ? "text-red-400" : "text-blue-400"}`}>
-                        {item.diffKrw > 0 ? "매수 " : "매도 "}
-                        {formatKrwCompact(Math.abs(perSplit))}
-                        {n > 1 && (
-                          <span className="ml-1 font-normal text-zinc-500">
-                            ×{n}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
-          <p className="mt-2 text-[9px] text-zinc-600">
-            총액 {formatKrw(Math.round(total))} 기준 · 매수(빨강) / 매도(파랑)
-            {Math.max(1, Math.floor(Number(splitCount) || 1)) > 1 && (
-              <span> · {Math.max(1, Math.floor(Number(splitCount) || 1))}분할 1회차</span>
-            )}
-          </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={`text-[10px] tabular-nums font-semibold ${
+              showTargetSumError
+                ? "text-rose-400"
+                : hasAnyTarget && targetSumOk
+                ? "text-emerald-400"
+                : "text-zinc-500"
+            }`}
+          >
+            {targetSum.toFixed(1)}%
+            {showTargetSumError
+              ? targetSum < 100
+                ? ` ▲${(100 - targetSum).toFixed(1)} 미달`
+                : ` ▼${(targetSum - 100).toFixed(1)} 초과`
+              : hasAnyTarget && targetSumOk
+              ? " ✓"
+              : ""}
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleClickSave()}
+            disabled={saveStatus === "saving" || slices.length === 0}
+            className="rounded border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-200 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saveStatus === "saving" ? "…" : "저장"}
+          </button>
+          {savedAtText && <span className="text-[9px] tabular-nums text-zinc-600">{savedAtText}</span>}
+          {saveStatus === "err" && saveFailedBrief && !savedAtText && (
+            <span className="text-[9px] text-rose-400">실패</span>
+          )}
         </div>
-      )}
+      </div>
 
-      <p className="mb-3 text-[11px] font-semibold tracking-tight text-zinc-100">포트폴리오 비중 리밸런싱</p>
+      {/* ── Shared scale labels (relative to target: 0%=nothing, 100%=target) ── */}
+      <div className="mb-1 flex items-end gap-1.5 pl-[108px] pr-[96px]">
+        <div className="relative flex-1">
+          {[0, 25, 50, 75, 100].map((pct) => (
+            <span
+              key={pct}
+              className="absolute -translate-x-1/2 text-[8px] tabular-nums text-zinc-600"
+              style={{ left: `${(pct / 100) * TARGET_AT * 100}%` }}
+            >
+              {pct}%
+            </span>
+          ))}
+          <div className="h-3" />
+        </div>
+      </div>
 
-      <div className="flex flex-col divide-y divide-white/[0.06] pb-1">
+      {/* ── Bar rows ── */}
+      <div className="space-y-[3px]">
         {orderedSlices.map((slice) => {
           const hasInputTarget = Object.prototype.hasOwnProperty.call(targetsByTicker, slice.ticker);
           const target = targetsByTicker[slice.ticker] ?? 0;
@@ -624,73 +575,43 @@ function TargetStockWeightNeu({
           const hasPositiveTarget = target > 0;
           const isOverTargetWhenZero = hasInputTarget && !hasPositiveTarget && actual > 0;
 
-          /** 목표 대비 상대 편차 (actual−target)/target */
+          const ratio = hasPositiveTarget
+            ? actual / target
+            : isOverTargetWhenZero
+            ? MAX_RATIO
+            : 0;
+          const barWidthPct = (Math.min(ratio, MAX_RATIO) / MAX_RATIO) * 100;
+          const isClipped = ratio > MAX_RATIO;
+
           const relDev = hasPositiveTarget ? (actual - target) / target : 0;
           const withinBand = hasPositiveTarget && Math.abs(relDev) <= 0.05;
           const belowBand = hasPositiveTarget && relDev < -0.05;
+          const diffPp = actual - target;
 
-          const fillGradientH = !(hasPositiveTarget || isOverTargetWhenZero)
+          const barBg = !hasInputTarget
+            ? "rgba(255,255,255,0.07)"
+            : withinBand
+            ? "linear-gradient(to right, rgb(29,78,216), rgb(14,165,233))"
+            : belowBand
+            ? "linear-gradient(to right, rgb(153,27,27), rgb(220,38,38), rgb(248,113,113))"
+            : "linear-gradient(to right, rgb(20,83,45), rgb(22,163,74), rgb(52,211,153))";
+          const barGlow = !hasInputTarget
             ? undefined
             : withinBand
-              ? "linear-gradient(to right, rgb(29, 78, 216) 0%, rgb(37, 99, 235) 38%, rgb(14, 165, 233) 72%, rgb(125, 211, 252) 100%)"
-              : belowBand
-                ? "linear-gradient(to right, rgb(153, 27, 27) 0%, rgb(220, 38, 38) 45%, rgb(248, 113, 113) 90%, rgb(254, 202, 202) 100%)"
-                : "linear-gradient(to right, rgb(20, 83, 45) 0%, rgb(22, 163, 74) 40%, rgb(52, 211, 153) 78%, rgb(190, 242, 100) 100%)";
-          const barGlow =
-            !(hasPositiveTarget || isOverTargetWhenZero)
-              ? undefined
-              : withinBand
-                ? "0 0 12px rgba(56, 189, 248, 0.38)"
-                : belowBand
-                  ? "0 0 12px rgba(248, 113, 113, 0.48)"
-                  : "0 0 12px rgba(52, 211, 153, 0.42)";
-
-          /** 목표 − 목표값(%p) 편차: actual − target */
-          const deltaPp = hasPositiveTarget ? actual - target : 0;
-          const tgtLabel = fmtTargetPctLabel(target);
-
-          let goalLine: string;
-          let deltaLine: string;
-          let compactStatus: string;
-
-          if (!hasInputTarget) {
-            goalLine = "목표 — ·";
-            deltaLine = `현재 ${actual.toFixed(1)}%`;
-            compactStatus = `현재 ${actual.toFixed(1)}%`;
-          } else if (isOverTargetWhenZero) {
-            goalLine = "목표 0% ·";
-            deltaLine = `+${actual.toFixed(1)}%p (초과)`;
-            compactStatus = `▼ +${actual.toFixed(1)}%p 초과`;
-          } else if (!hasPositiveTarget) {
-            goalLine = "목표 0% ·";
-            deltaLine = `현재 ${actual.toFixed(1)}%`;
-            compactStatus = `현재 ${actual.toFixed(1)}%`;
-          } else if (withinBand) {
-            goalLine = `목표 ${tgtLabel}% ·`;
-            deltaLine = `${deltaPp >= 0 ? "+" : ""}${deltaPp.toFixed(1)}%p (±5% 이내)`;
-            compactStatus = `${deltaPp >= 0 ? "+" : ""}${deltaPp.toFixed(1)}%p (±5% 이내)`;
-          } else if (belowBand) {
-            goalLine = `목표 ${tgtLabel}% ·`;
-            deltaLine = `${deltaPp.toFixed(1)}%p (부족)`;
-            compactStatus = `▲ ${deltaPp.toFixed(1)}%p 부족`;
-          } else {
-            goalLine = `목표 ${tgtLabel}% ·`;
-            deltaLine = `+${deltaPp.toFixed(1)}%p (초과)`;
-            compactStatus = `▼ +${deltaPp.toFixed(1)}%p 초과`;
-          }
-
-          const fillWpct = Math.min(Math.max(actual, 0), 100);
-          const markerLeftPct =
-            hasInputTarget && Number.isFinite(target) ? Math.min(Math.max(target, 0), 100) : null;
+            ? "0 0 8px rgba(56,189,248,0.35)"
+            : belowBand
+            ? "0 0 8px rgba(248,113,113,0.45)"
+            : "0 0 8px rgba(52,211,153,0.4)";
 
           const tooltipEntries = nonCashEntriesSortedByWeight(slice.allEntries);
           const isGrouped = tooltipEntries.length > 1;
           const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
 
           return (
-            <div key={slice.name} className="group relative py-2.5">
-              {tooltipEntries.length > 0 ? (
-                <div className="pointer-events-none absolute left-0 top-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
+            <div key={slice.name} className="group relative flex items-center gap-1.5">
+              {/* Hover tooltip */}
+              {tooltipEntries.length > 0 && (
+                <div className="pointer-events-none absolute bottom-[calc(100%+4px)] left-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
                   {isGrouped ? (
                     <div className="space-y-1">
                       <p className="font-bold text-cyan-400">{slice.ticker}</p>
@@ -714,130 +635,122 @@ function TargetStockWeightNeu({
                     </div>
                   )}
                 </div>
-              ) : null}
-              <div className="flex items-stretch gap-2 sm:gap-2.5">
-                <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
-                  <div className="flex w-[4.75rem] shrink-0 flex-col justify-center gap-0.5 sm:w-[5.25rem]">
-                    <span
-                      className="truncate text-[12px] font-bold leading-none tracking-tight text-zinc-100"
-                      title={slice.displayName}
-                    >
-                      {slice.ticker}
-                    </span>
-                    <label className="sr-only" htmlFor={`target-pct-${slice.name}`}>
-                      {slice.ticker} 목표 비중
-                    </label>
-                    <input
-                      id={`target-pct-${slice.name}`}
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={0.1}
-                      placeholder="%"
-                      aria-label={`${slice.ticker} 목표 비중 %`}
-                      className="block w-full max-w-[3.75rem] rounded border border-white/12 bg-zinc-900/90 px-1 py-0.5 text-center text-[11px] tabular-nums leading-tight text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      style={{
-                        boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
-                        textAlign: "center",
-                      }}
-                      value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
-                      onChange={(e) => setTarget(slice.ticker, e.target.value)}
-                    />
-                  </div>
+              )}
 
-                  <div className="relative min-h-[42px] min-w-[100px] flex-1 pb-8 sm:pb-9">
-                    <div className="pointer-events-none absolute bottom-[26px] left-0 right-0 flex justify-between px-px text-[8px] font-medium tabular-nums tracking-tight text-zinc-600">
-                      <span className="-translate-x-px leading-none">0</span>
-                      <span className="leading-none">25</span>
-                      <span className="leading-none">50</span>
-                      <span className="leading-none">75</span>
-                      <span className="leading-none translate-x-px text-zinc-500">100%</span>
-                    </div>
-
-                    {[0, 25, 50, 75, 100].map((tick) => (
-                      <div
-                        key={`tick-${slice.name}-${tick}`}
-                        className="pointer-events-none absolute bottom-6 top-7 z-[1] w-px bg-zinc-700/45"
-                        style={{
-                          left: `${tick}%`,
-                          transform:
-                            tick === 0 ? "translateX(0)" : tick === 100 ? "translateX(-100%)" : "translateX(-50%)",
-                        }}
-                        aria-hidden
-                      />
-                    ))}
-
-                    {markerLeftPct != null ? (
-                      <div
-                        className="pointer-events-none absolute bottom-[22px] top-4 z-[4] border-l border-dashed border-zinc-200/85"
-                        style={{ left: `${markerLeftPct}%`, transform: "translateX(-50%)" }}
-                        title={`목표 (${tgtLabel}%)`}
-                        aria-hidden
-                      />
-                    ) : null}
-
-                    <div className="absolute bottom-1 left-0 right-0 z-[2] px-px">
-                      <div
-                        className="rounded-full pb-px pl-px pr-px pt-px shadow-[inset_2px_2px_5px_rgba(0,0,0,0.55),inset_-2px_-2px_5px_rgba(255,255,255,0.04)]"
-                        style={{
-                          background: "#151a21",
-                        }}
-                      >
-                        <div className="h-2 overflow-hidden rounded-full">
-                          {fillGradientH ? (
-                            <div
-                              className="rounded-full bg-cover transition-[width] duration-300 ease-out"
-                              style={{
-                                height: "7px",
-                                width: `${fillWpct}%`,
-                                maxWidth: "100%",
-                                boxShadow: barGlow ?? undefined,
-                                backgroundImage: fillGradientH,
-                              }}
-                            />
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex w-full shrink-0 justify-end sm:w-auto sm:max-w-[9.5rem] sm:flex-col">
-                    <p
-                      className={`tabular-nums text-[11px] font-bold leading-snug sm:text-[11px] ${
-                        !hasInputTarget
-                          ? "text-zinc-500"
-                          : withinBand
-                            ? "text-sky-400"
-                            : belowBand
-                              ? "text-red-400"
-                              : "text-emerald-400"
-                      }`}
-                    >
-                      {compactStatus}
-                    </p>
-                    <div className="mt-0.5 leading-tight">
-                      <p className="text-[8px] text-zinc-500">{goalLine}</p>
-                      <p
-                        className={`text-[9px] font-medium ${
-                          !hasInputTarget
-                            ? "text-zinc-500"
-                            : withinBand
-                              ? "text-sky-400/90"
-                              : belowBand
-                                ? "text-red-400/90"
-                                : "text-emerald-400/90"
-                        }`}
-                      >
-                        {deltaLine}
-                      </p>
-                    </div>
-                  </div>
+              {/* Name + target input (inline) */}
+              <div className="flex w-[108px] shrink-0 items-center justify-between gap-1">
+                <span className="truncate text-[11px] font-semibold text-zinc-200" title={slice.displayName}>
+                  {slice.ticker}
+                </span>
+                <div className="flex shrink-0 items-center">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    placeholder="—"
+                    aria-label={`${slice.ticker} 목표 비중 %`}
+                    className="w-9 rounded border border-white/10 bg-zinc-900/80 px-0.5 py-0 text-right text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
+                    value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
+                    onChange={(e) => setTarget(slice.ticker, e.target.value)}
+                  />
+                  <span className="ml-0.5 text-[9px] text-zinc-600">%</span>
                 </div>
+              </div>
+
+              {/* Horizontal bar (scale: 0→MAX_RATIO×target, marker at 100% of target) */}
+              <div
+                className="relative h-[18px] flex-1 overflow-hidden rounded-sm"
+                style={{ background: "rgba(255,255,255,0.04)" }}
+              >
+                <div
+                  className="pointer-events-none absolute top-0 z-10 h-full w-px"
+                  style={{
+                    left: `${TARGET_AT * 100}%`,
+                    borderRight: "1px dashed rgba(161,161,170,0.55)",
+                  }}
+                />
+                {barWidthPct > 0 && (
+                  <div
+                    className="absolute left-0 top-[2px] bottom-[2px] rounded-sm transition-all duration-300"
+                    style={{ width: `${barWidthPct}%`, background: barBg, boxShadow: barGlow }}
+                  />
+                )}
+                {isClipped && (
+                  <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[8px] text-emerald-300/70">›</span>
+                )}
+              </div>
+
+              {/* Deviation label */}
+              <div className="w-[96px] shrink-0 text-right text-[10px] tabular-nums leading-none">
+                {!hasInputTarget ? (
+                  <span className="text-zinc-600">—</span>
+                ) : !hasPositiveTarget && actual > 0 ? (
+                  <span className="text-emerald-400">목표 0% ▼ +{actual.toFixed(1)}%p</span>
+                ) : !hasPositiveTarget ? (
+                  <span className="text-zinc-500">목표 0%</span>
+                ) : withinBand ? (
+                  <span className="text-sky-400">≈ 목표</span>
+                ) : belowBand ? (
+                  <span className="text-red-400">▲ {Math.abs(diffPp).toFixed(1)}%p 부족</span>
+                ) : (
+                  <span className="text-emerald-400">▼ +{diffPp.toFixed(1)}%p 초과</span>
+                )}
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* ── Rebalancing amounts (collapsible) ── */}
+      {rebalanceItems.length > 0 && (
+        <details className="mt-3 group/reb">
+          <summary className="cursor-pointer select-none list-none text-[10px] text-zinc-500 hover:text-zinc-300 transition">
+            <span className="group-open/reb:hidden">▶ 리밸런싱 금액 보기</span>
+            <span className="hidden group-open/reb:inline">▼ 리밸런싱 금액 접기</span>
+          </summary>
+          <div className="mt-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="text-[9px] text-zinc-500">총액 {formatKrw(Math.round(total))} 기준</span>
+              <label className="flex items-center gap-1 text-[9px] text-zinc-500">
+                분할
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={splitCount}
+                  onChange={(e) => setSplitCount(e.target.value)}
+                  className="w-8 rounded border border-white/10 bg-zinc-900/80 px-1 py-0 text-center text-[9px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 focus:ring-1"
+                  style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
+                  aria-label="분할 수"
+                />
+                회
+              </label>
+            </div>
+            {(() => {
+              const n = Math.max(1, Math.floor(Number(splitCount) || 1));
+              return (
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                  {rebalanceItems.map((item) => {
+                    const perSplit = item.diffKrw / n;
+                    return (
+                      <div key={item.ticker} className="flex items-center justify-between gap-1 text-[10px]">
+                        <span className="truncate font-semibold text-zinc-300">{item.ticker}</span>
+                        <span className={`tabular-nums font-bold shrink-0 ${item.diffKrw > 0 ? "text-red-400" : "text-blue-400"}`}>
+                          {item.diffKrw > 0 ? "▲" : "▼"} {formatKrwCompact(Math.abs(perSplit))}
+                          {n > 1 && <span className="ml-0.5 font-normal text-zinc-600">×{n}</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -1006,36 +919,38 @@ export function FamilyAllocationDonut({
         `,
       }}
     >
-      <div className="mb-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 backdrop-blur-md">
-        {chartData.map((d, i) => {
-          const c = NEON_PALETTE[i % NEON_PALETTE.length];
-          return (
-            <div key={d.name} className="flex items-center gap-2 text-[11px] font-medium tracking-tight text-zinc-200">
-              <span
-                className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                style={{
-                  backgroundColor: c,
-                  boxShadow: `0 0 10px ${c}, 0 0 4px ${c}`,
-                }}
-              />
-              <span title={d.displayName}>
-                {d.ticker}{" "}
-                <span className="text-zinc-400">{d.weight.toFixed(1)}%</span>
-              </span>
-            </div>
-          );
-        })}
+      {/* ── 소유자 헤더 + 현재 비중 범례 ── */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="flex items-baseline gap-2">
+          <p className="text-sm font-bold text-zinc-100">{ownerName}</p>
+          <p className="text-[11px] tabular-nums text-zinc-400">{formatKrw(total)}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {chartData.map((d, i) => {
+            const c = NEON_PALETTE[i % NEON_PALETTE.length];
+            return (
+              <div key={d.name} className="flex items-center gap-1 text-[10px] text-zinc-300">
+                <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: c, boxShadow: `0 0 6px ${c}` }} />
+                <span title={d.displayName}>
+                  {d.ticker} <span className="text-zinc-500">{d.weight.toFixed(1)}%</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="mb-3 border-b border-white/10 pb-3">
-        <p className="text-base font-bold text-zinc-100">{ownerName}</p>
-        <p className="mt-0.5 text-sm font-semibold tabular-nums text-zinc-300">총 자산 {formatKrw(total)}</p>
-      </div>
+      {/* ── 리밸런싱 바 차트 ── */}
+      <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} cloudSyncKey={cloudSyncKey} total={total} />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.88fr)_minmax(320px,1.2fr)] lg:items-start">
-        <div className="flex min-h-0 max-w-full flex-col lg:max-w-[min(100%,520px)]">
-          <p className="mb-2 text-[11px] font-medium tracking-wide text-zinc-400">비중 트리맵</p>
-          <div className="h-[200px] w-full rounded-xl border border-white/10 bg-zinc-950/40 p-2 sm:h-[228px]">
+      {/* ── 트리맵 (아코디언) ── */}
+      <details className="mt-3 group/treemap">
+        <summary className="cursor-pointer select-none list-none text-[10px] text-zinc-500 hover:text-zinc-300 transition">
+          <span className="group-open/treemap:hidden">▶ 트리맵 보기</span>
+          <span className="hidden group-open/treemap:inline">▼ 트리맵 접기</span>
+        </summary>
+        <div className="mt-2">
+          <div className="h-[180px] w-full rounded-xl border border-white/10 bg-zinc-950/40 p-2">
             <ResponsiveContainer width="100%" height="100%">
               <Treemap
                 data={chartData}
@@ -1054,9 +969,7 @@ export function FamilyAllocationDonut({
           </div>
           <OwnerScratchPad ownerName={ownerName} cloudSyncKey={cloudSyncKey} />
         </div>
-
-        <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} cloudSyncKey={cloudSyncKey} total={total} />
-      </div>
+      </details>
     </div>
   );
 }
