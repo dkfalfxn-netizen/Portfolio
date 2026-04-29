@@ -151,6 +151,9 @@ function buildChangeRows(cur: DailySnapshot, prev: DailySnapshot): OwnerChange[]
 }
 
 function aggregateOwnerTotals(rows: OwnerChange[]): OwnerChange[] {
+  // changePct 는 두 경로 모두 "소유자 전일 총액" 분모 기준이므로 합산이 수학적으로 정확
+  // (스냅샷 경로: buildChangeRows에서 ownerPrevTotal을 분모로 통일
+  //  라이브 경로: dailyLiveChangeByDate에서 ownerPrevKrw를 분모로 통일)
   const map = new Map<string, { changeKrw: number; changePct: number | null }>();
   for (const row of rows) {
     const owner = getOwnerFromBreakdownKey(row.name);
@@ -160,7 +163,10 @@ function aggregateOwnerTotals(rows: OwnerChange[]): OwnerChange[] {
       continue;
     }
     existing.changeKrw += row.changeKrw;
-    existing.changePct = (existing.changePct ?? 0) + (row.changePct ?? 0);
+    // 분모가 동일한 값으로 통일되어 있으므로 합산이 올바른 가중 평균과 동일
+    if (row.changePct !== null) {
+      existing.changePct = (existing.changePct ?? 0) + row.changePct;
+    }
   }
   return [...map.entries()]
     .map(([name, v]) => ({ name, changeKrw: v.changeKrw, changePct: v.changePct }))

@@ -1599,33 +1599,43 @@ export default function Home() {
 
   const dailyLiveChangeByDate = useMemo<Record<string, DailyLiveChange>>(() => {
     const date = todayKST();
+
+    // 소유자별 전일 기준 총액 (prevStock + 현금) — aggregateOwnerTotals가 올바른 %를 계산하려면
+    // 각 그룹의 changePct 분모를 "그룹 자체 기준"이 아닌 "소유자 전체 기준"으로 통일해야 함
+    const ownerPrevKrwMap = new Map<string, number>(
+      positionsByOwner.map((g) => {
+        const prevStock = g.items.reduce((s, p) => {
+          if (p.previousClose === null) return s;
+          const v =
+            p.currency === "USD" ? p.previousClose * p.quantity * usdKrw
+            : p.currency === "EUR" ? p.previousClose * p.quantity * eurKrw
+            : p.previousClose * p.quantity;
+          return s + v;
+        }, 0);
+        return [g.ownerName, prevStock + g.sectionCashKrw] as [string, number];
+      }),
+    );
+
     const ownerChanges = ownerGroupDailySummary
-      .flatMap((owner) => owner.groups.map((g) => ({
-        name: `${owner.ownerName} · ${g.label}`,
-        changeKrw: g.dailyChangeKrw,
-        changePct: g.dailyChangePct,
-      })))
+      .flatMap((owner) => {
+        const ownerPrevKrw = ownerPrevKrwMap.get(owner.ownerName) ?? 0;
+        return owner.groups.map((g) => ({
+          name: `${owner.ownerName} · ${g.label}`,
+          changeKrw: g.dailyChangeKrw,
+          // 소유자 전체 전일 총액 대비 %로 통일 → aggregateOwnerTotals 합산이 정확해짐
+          changePct: ownerPrevKrw > 0 ? (g.dailyChangeKrw / ownerPrevKrw) * 100 : g.dailyChangePct,
+        }));
+      })
       .sort((a, b) => Math.abs(b.changeKrw) - Math.abs(a.changeKrw));
 
     const totalChangeKrw = ownerGroupDailySummary.reduce((sum, owner) => sum + owner.totalDailyKrw, 0);
-    const prevTotalKrw = positionsByOwner.reduce((sum, group) => {
-      const prevStock = group.items.reduce((s, p) => {
-        if (p.previousClose === null) return s;
-        const v =
-          p.currency === "USD" ? p.previousClose * p.quantity * usdKrw
-          : p.currency === "EUR" ? p.previousClose * p.quantity * eurKrw
-          : p.previousClose * p.quantity;
-        return s + v;
-      }, 0);
-      return sum + prevStock + group.sectionCashKrw;
-    }, 0);
-    const totalChangePct = prevTotalKrw > 0 ? (totalChangeKrw / prevTotalKrw) * 100 : null;
+    const prevTotalKrw = [...ownerPrevKrwMap.values()].reduce((s, v) => s + v, 0);
 
     return {
       [date]: {
         date,
         changeKrw: totalChangeKrw,
-        changePct: totalChangePct,
+        changePct: prevTotalKrw > 0 ? (totalChangeKrw / prevTotalKrw) * 100 : null,
         ownerChanges,
         compareNote: "실시간 전일종가 기준",
       },
