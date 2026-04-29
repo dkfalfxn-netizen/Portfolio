@@ -249,6 +249,7 @@ function TargetStockWeightNeu({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
   const [savedAtText, setSavedAtText] = useState<string | null>(null);
   const [saveFailedBrief, setSaveFailedBrief] = useState(false);
+  const [splitCount, setSplitCount] = useState<string>("1");
 
   useEffect(() => {
     const onRefresh = () => {
@@ -474,24 +475,53 @@ function TargetStockWeightNeu({
       ) : null}
       {rebalanceItems.length > 0 && (
         <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
-          <p className="mb-2 text-[10px] font-semibold text-zinc-400 tracking-wide">리밸런싱 필요 금액</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-            {rebalanceItems.map((item) => (
-              <div key={item.ticker} className="flex items-center justify-between gap-2 text-[10px]">
-                <span className="truncate font-semibold text-zinc-300">{item.ticker}</span>
-                <span
-                  className={`tabular-nums font-bold shrink-0 ${
-                    item.diffKrw > 0 ? "text-red-400" : "text-blue-400"
-                  }`}
-                >
-                  {item.diffKrw > 0 ? "매수 " : "매도 "}
-                  {formatKrwCompact(Math.abs(item.diffKrw))}
-                </span>
-              </div>
-            ))}
+          <div className="mb-2.5 flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold text-zinc-400 tracking-wide">리밸런싱 필요 금액</p>
+            <label className="flex items-center gap-1.5 text-[10px] text-zinc-500">
+              분할
+              <input
+                type="number"
+                min={1}
+                max={100}
+                step={1}
+                value={splitCount}
+                onChange={(e) => setSplitCount(e.target.value)}
+                className="w-10 rounded-md border border-white/10 bg-zinc-900/80 px-1 py-0.5 text-center text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 placeholder:text-zinc-600 focus:ring-1"
+                style={{ boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)" }}
+                aria-label="분할 수"
+              />
+              회
+            </label>
           </div>
+          {(() => {
+            const n = Math.max(1, Math.floor(Number(splitCount) || 1));
+            return (
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                {rebalanceItems.map((item) => {
+                  const perSplit = item.diffKrw / n;
+                  return (
+                    <div key={item.ticker} className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className="truncate font-semibold text-zinc-300">{item.ticker}</span>
+                      <span className={`tabular-nums font-bold shrink-0 ${item.diffKrw > 0 ? "text-red-400" : "text-blue-400"}`}>
+                        {item.diffKrw > 0 ? "매수 " : "매도 "}
+                        {formatKrwCompact(Math.abs(perSplit))}
+                        {n > 1 && (
+                          <span className="ml-1 font-normal text-zinc-500">
+                            ×{n}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
           <p className="mt-2 text-[9px] text-zinc-600">
             총액 {formatKrw(Math.round(total))} 기준 · 매수(빨강) / 매도(파랑)
+            {Math.max(1, Math.floor(Number(splitCount) || 1)) > 1 && (
+              <span> · {Math.max(1, Math.floor(Number(splitCount) || 1))}분할 1회차</span>
+            )}
           </p>
         </div>
       )}
