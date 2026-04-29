@@ -714,9 +714,9 @@ function TargetStockWeightNeu({
           const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
 
           return (
-            <div key={slice.name} className="group relative py-4">
+            <div key={slice.name} className="group relative py-2.5">
               {tooltipEntries.length > 0 ? (
-                <div className="pointer-events-none absolute right-4 top-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md lg:right-8 group-hover:block">
+                <div className="pointer-events-none absolute left-[5.5rem] top-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block sm:left-[7rem]">
                   {isGrouped ? (
                     <div className="space-y-1">
                       <p className="font-bold text-cyan-400">{slice.ticker}</p>
@@ -741,141 +741,144 @@ function TargetStockWeightNeu({
                   )}
                 </div>
               ) : null}
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                <div className="flex min-w-[7rem] max-w-[140px] flex-col gap-1 sm:max-w-none">
-                  <span
-                    className="text-[13px] font-bold leading-snug tracking-tight text-zinc-100 sm:text-[12px]"
-                    title={slice.displayName}
-                  >
-                    {slice.ticker}
-                  </span>
-                  <label className="sr-only" htmlFor={`target-pct-${slice.name}`}>
-                    {slice.ticker} 목표 비중
-                  </label>
-                  <input
-                    id={`target-pct-${slice.name}`}
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={0.1}
-                    placeholder="목표%"
-                    aria-label={`${slice.ticker} 목표 비중 %`}
-                    className="block w-full max-w-[4.75rem] rounded-md border border-white/10 bg-zinc-900/90 px-2 py-1 text-center text-[12px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    style={{
-                      boxShadow: "inset 2px 2px 5px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
-                      textAlign: "center",
-                    }}
-                    value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
-                    onChange={(e) => setTarget(slice.ticker, e.target.value)}
-                  />
-                </div>
+              <div className="flex items-stretch gap-2 sm:gap-2.5">
+                <textarea
+                  rows={2}
+                  aria-label={`${slice.ticker} 간단 메모`}
+                  spellCheck={false}
+                  value={assetQuickNotesByTicker[slice.ticker] ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setAssetQuickNotesByTicker((p) => ({ ...p, [slice.ticker]: v }));
+                    queuePersistAssetNote(slice.ticker, v);
+                  }}
+                  placeholder="메모"
+                  className="box-border h-[58px] w-[4.25rem] shrink-0 resize-none rounded border border-white/[0.1] bg-[#0c0f16] px-1 py-0.5 text-left text-[8px] leading-snug text-zinc-400 outline-none placeholder:text-zinc-700 focus:border-sky-500/40 focus:ring-1 focus:ring-sky-500/20 sm:h-[52px] sm:w-[4.75rem] sm:text-[9px]"
+                  style={{
+                    boxShadow:
+                      "inset 2px 2px 4px rgba(0,0,0,0.45), inset -1px -1px 2px rgba(255,255,255,0.02)",
+                    fontFamily: 'ui-monospace, "Cascadia Code", monospace',
+                  }}
+                />
 
-                <div className="relative min-h-[58px] min-w-[120px] flex-1 self-stretch pb-11">
-                  <div className="pointer-events-none absolute bottom-[34px] left-0 right-0 flex justify-between text-[9px] font-medium tabular-nums tracking-tight text-zinc-600">
-                    <span>0</span>
-                    <span className="-translate-x-px">25</span>
-                    <span>50</span>
-                    <span>75</span>
-                    <span>100%</span>
+                <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+                  <div className="flex w-[4.75rem] shrink-0 flex-col justify-center gap-0.5 sm:w-[5.25rem]">
+                    <span
+                      className="truncate text-[12px] font-bold leading-none tracking-tight text-zinc-100"
+                      title={slice.displayName}
+                    >
+                      {slice.ticker}
+                    </span>
+                    <label className="sr-only" htmlFor={`target-pct-${slice.name}`}>
+                      {slice.ticker} 목표 비중
+                    </label>
+                    <input
+                      id={`target-pct-${slice.name}`}
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.1}
+                      placeholder="%"
+                      aria-label={`${slice.ticker} 목표 비중 %`}
+                      className="block w-full max-w-[3.75rem] rounded border border-white/12 bg-zinc-900/90 px-1 py-0.5 text-center text-[11px] tabular-nums leading-tight text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      style={{
+                        boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5), inset -1px -1px 3px rgba(255,255,255,0.03)",
+                        textAlign: "center",
+                      }}
+                      value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
+                      onChange={(e) => setTarget(slice.ticker, e.target.value)}
+                    />
                   </div>
 
-                  {[0, 25, 50, 75, 100].map((tick) => (
-                    <div
-                      key={`tick-${slice.name}-${tick}`}
-                      className="pointer-events-none absolute bottom-8 top-10 z-[1] w-px bg-zinc-700/50"
-                      style={{
-                        left: `${tick}%`,
-                        transform:
-                          tick === 0 ? "translateX(0)" : tick === 100 ? "translateX(-100%)" : "translateX(-50%)",
-                      }}
-                      aria-hidden
-                    />
-                  ))}
+                  <div className="relative min-h-[42px] min-w-[100px] flex-1 pb-8 sm:pb-9">
+                    <div className="pointer-events-none absolute bottom-[26px] left-0 right-0 flex justify-between px-px text-[8px] font-medium tabular-nums tracking-tight text-zinc-600">
+                      <span className="-translate-x-px leading-none">0</span>
+                      <span className="leading-none">25</span>
+                      <span className="leading-none">50</span>
+                      <span className="leading-none">75</span>
+                      <span className="leading-none translate-x-px text-zinc-500">100%</span>
+                    </div>
 
-                  {markerLeftPct != null ? (
-                    <div
-                      className="pointer-events-none absolute bottom-9 top-5 z-[4] border-l border-dashed border-zinc-200/85"
-                      style={{ left: `${markerLeftPct}%`, transform: "translateX(-50%)" }}
-                      title={`목표 (${tgtLabel}%)`}
-                      aria-hidden
-                    />
-                  ) : null}
+                    {[0, 25, 50, 75, 100].map((tick) => (
+                      <div
+                        key={`tick-${slice.name}-${tick}`}
+                        className="pointer-events-none absolute bottom-6 top-7 z-[1] w-px bg-zinc-700/45"
+                        style={{
+                          left: `${tick}%`,
+                          transform:
+                            tick === 0 ? "translateX(0)" : tick === 100 ? "translateX(-100%)" : "translateX(-50%)",
+                        }}
+                        aria-hidden
+                      />
+                    ))}
 
-                  <div className="absolute bottom-[6px] left-0 right-0 z-[2] px-px">
-                    <div
-                      className="rounded-full py-px pt-px pb-px pl-px pr-px shadow-[inset_3px_3px_6px_rgba(0,0,0,0.55),inset_-2px_-2px_5px_rgba(255,255,255,0.04)]"
-                      style={{
-                        background: "#151a21",
-                      }}
-                    >
-                      <div className="h-[11px] overflow-hidden rounded-full">
-                        {fillGradientH ? (
-                          <div
-                            className="h-[9px] rounded-full transition-[width] duration-300 ease-out"
-                            style={{
-                              width: `${fillWpct}%`,
-                              maxWidth: "100%",
-                              boxShadow: barGlow ?? undefined,
-                              backgroundImage: fillGradientH,
-                            }}
-                          />
-                        ) : null}
+                    {markerLeftPct != null ? (
+                      <div
+                        className="pointer-events-none absolute bottom-[22px] top-4 z-[4] border-l border-dashed border-zinc-200/85"
+                        style={{ left: `${markerLeftPct}%`, transform: "translateX(-50%)" }}
+                        title={`목표 (${tgtLabel}%)`}
+                        aria-hidden
+                      />
+                    ) : null}
+
+                    <div className="absolute bottom-1 left-0 right-0 z-[2] px-px">
+                      <div
+                        className="rounded-full pb-px pl-px pr-px pt-px shadow-[inset_2px_2px_5px_rgba(0,0,0,0.55),inset_-2px_-2px_5px_rgba(255,255,255,0.04)]"
+                        style={{
+                          background: "#151a21",
+                        }}
+                      >
+                        <div className="h-2 overflow-hidden rounded-full">
+                          {fillGradientH ? (
+                            <div
+                              className="rounded-full bg-cover transition-[width] duration-300 ease-out"
+                              style={{
+                                height: "7px",
+                                width: `${fillWpct}%`,
+                                maxWidth: "100%",
+                                boxShadow: barGlow ?? undefined,
+                                backgroundImage: fillGradientH,
+                              }}
+                            />
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="flex w-full shrink-0 flex-col justify-start gap-1 text-right text-[11px] sm:w-[154px] sm:shrink">
-                  <p
-                    className={`truncate font-semibold tabular-nums leading-tight ${
-                      !hasInputTarget
-                        ? "text-zinc-500"
-                        : withinBand
-                          ? "text-sky-400"
-                          : belowBand
-                            ? "text-red-400"
-                            : "text-emerald-400"
-                    }`}
-                  >
-                    {compactStatus}
-                  </p>
-                  <div className="block text-[10px] leading-snug tracking-tight text-zinc-400">
-                    <p className="text-zinc-500">{goalLine}</p>
+                  <div className="flex w-full shrink-0 justify-end sm:w-auto sm:max-w-[9.5rem] sm:flex-col">
                     <p
-                      className={`mt-0.5 font-medium ${
+                      className={`tabular-nums text-[11px] font-bold leading-snug sm:text-[11px] ${
                         !hasInputTarget
                           ? "text-zinc-500"
                           : withinBand
-                            ? "text-sky-400/95"
+                            ? "text-sky-400"
                             : belowBand
-                              ? "text-red-400/95"
-                              : "text-emerald-400/95"
+                              ? "text-red-400"
+                              : "text-emerald-400"
                       }`}
                     >
-                      {deltaLine}
+                      {compactStatus}
                     </p>
+                    <div className="mt-0.5 leading-tight">
+                      <p className="text-[8px] text-zinc-500">{goalLine}</p>
+                      <p
+                        className={`text-[9px] font-medium ${
+                          !hasInputTarget
+                            ? "text-zinc-500"
+                            : withinBand
+                              ? "text-sky-400/90"
+                              : belowBand
+                                ? "text-red-400/90"
+                                : "text-emerald-400/90"
+                        }`}
+                      >
+                        {deltaLine}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              <textarea
-                rows={2}
-                aria-label={`${slice.ticker} 간단 메모`}
-                spellCheck={false}
-                value={assetQuickNotesByTicker[slice.ticker] ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setAssetQuickNotesByTicker((p) => ({ ...p, [slice.ticker]: v }));
-                  queuePersistAssetNote(slice.ticker, v);
-                }}
-                placeholder="메모·계산"
-                className="mt-2 w-full min-h-[3.25rem] resize-y rounded border border-white/[0.08] bg-[#0f131a]/98 px-2 py-1 text-left text-[9px] leading-snug text-zinc-400 outline-none placeholder:text-zinc-600 focus:border-sky-500/35 focus:ring-1 focus:ring-sky-500/25 sm:mt-1"
-                style={{
-                  boxShadow:
-                    "inset 2px 2px 4px rgba(0,0,0,0.4), inset -1px -1px 2px rgba(255,255,255,0.02)",
-                  fontFamily: 'ui-monospace, "Cascadia Code", monospace',
-                }}
-              />
             </div>
           );
         })}
