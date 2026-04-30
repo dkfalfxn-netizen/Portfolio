@@ -319,7 +319,18 @@ export async function POST(req: NextRequest) {
       )
       .eq("sync_key", key)
       .maybeSingle();
-    const fallback = withSellLog.error
+    // 1차 fallback: target_stock_weight_by_owner·owner_scratchpad_by_owner 컬럼 마이그레이션 미적용 시
+    const withoutWeightCols = withSellLog.error
+      ? await admin
+          .from("portfolio_snapshots")
+          .select(
+            "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, updated_at",
+          )
+          .eq("sync_key", key)
+          .maybeSingle()
+      : null;
+    // 2차 fallback: owner_names·sell_log_by_owner 컬럼도 없는 아주 오래된 스키마
+    const fallback = withoutWeightCols?.error
       ? await admin
           .from("portfolio_snapshots")
           .select("positions, cash_by_owner, holdings_sort_by_owner, updated_at")
@@ -327,6 +338,7 @@ export async function POST(req: NextRequest) {
           .maybeSingle()
       : null;
     const data = (withSellLog.data ??
+      withoutWeightCols?.data ??
       fallback?.data) as
       | {
           positions?: unknown;
@@ -339,7 +351,7 @@ export async function POST(req: NextRequest) {
           updated_at?: string | null;
         }
       | null;
-    const error = fallback?.error ?? withSellLog.error;
+    const error = fallback?.error ?? withoutWeightCols?.error ?? withSellLog.error;
 
     if (error) {
       return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });

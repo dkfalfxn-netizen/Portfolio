@@ -1882,6 +1882,7 @@ export default function Home() {
     const log = loadSellLog();
     skipMarkLocalChangedRef.current = 2; // 디스크→state 재적용은 "수정"이 아님
     skipSellLogLocalChangedRef.current = 1;
+    skipOwnerLocalChangedRef.current = 1; // 초기 로드 시 ownerNames 효과가 로컬 변경으로 오인되는 것을 방지
     setPositions(pos);
     setCashByOwner(cash);
     setSellLog(log);

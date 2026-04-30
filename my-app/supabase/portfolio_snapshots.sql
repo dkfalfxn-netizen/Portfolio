@@ -6,14 +6,23 @@ create table if not exists public.portfolio_snapshots (
   holdings_sort_by_owner jsonb not null default '{}'::jsonb,
   owner_names jsonb not null default '[]'::jsonb,
   sell_log_by_owner jsonb not null default '{}'::jsonb,
+  target_stock_weight_by_owner jsonb not null default '{}'::jsonb,
+  owner_scratchpad_by_owner jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
 
+-- 기존 테이블에 누락된 컬럼을 추가합니다 (이미 있으면 무시).
 alter table public.portfolio_snapshots
   add column if not exists owner_names jsonb not null default '[]'::jsonb;
 
 alter table public.portfolio_snapshots
   add column if not exists sell_log_by_owner jsonb not null default '{}'::jsonb;
+
+alter table public.portfolio_snapshots
+  add column if not exists target_stock_weight_by_owner jsonb not null default '{}'::jsonb;
+
+alter table public.portfolio_snapshots
+  add column if not exists owner_scratchpad_by_owner jsonb not null default '{}'::jsonb;
 
 alter table public.portfolio_snapshots enable row level security;
 
