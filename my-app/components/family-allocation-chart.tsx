@@ -126,6 +126,12 @@ export type AllocationSlice = {
   changePct: number | null;
 };
 
+/** 포트폴리오 비중 리밸런싱 목록에서 맨 아래로 보낼 슬라이스 (예수금·현금 조각·차트그룹「현금」합산) */
+function isCashRebalanceTicker(ticker: string): boolean {
+  const t = ticker.trim();
+  return t === "현금" || t === "USD 현금" || t === "KRW 현금";
+}
+
 /** 현물 비중(%) 내림차순 — USD/KRW 현금 행은 제외 */
 function nonCashEntriesSortedByWeight(
   allEntries: AllocationSlice["allEntries"],
@@ -448,10 +454,14 @@ function TargetStockWeightNeu({
     [slices, targetsByTicker],
   );
 
-  /** 목표 % 큰 그룹/종목이 먼저, 동률·미설정(0)은 현재 비중으로 보조 정렬 */
+  /** 목표 % 큰 그룹/종목이 먼저. 현금류(USD/KRW 현금·「현금」그룹)는 항상 맨 아래 */
   const orderedSlices = useMemo(
     () =>
       [...slices].sort((a, b) => {
+        const cashRank = (sl: AllocationSlice) => (isCashRebalanceTicker(sl.ticker) ? 1 : 0);
+        const crA = cashRank(a);
+        const crB = cashRank(b);
+        if (crA !== crB) return crA - crB;
         const ta = targetsByTicker[a.ticker] ?? 0;
         const tb = targetsByTicker[b.ticker] ?? 0;
         if (Math.abs(tb - ta) > 1e-9) return tb - ta;
@@ -476,7 +486,12 @@ function TargetStockWeightNeu({
         return { ticker: sl.ticker, diffKrw, targetKrw, currentKrw: sl.value };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
-      .sort((a, b) => Math.abs(b.diffKrw) - Math.abs(a.diffKrw));
+      .sort((a, b) => {
+        const ra = isCashRebalanceTicker(a.ticker) ? 1 : 0;
+        const rb = isCashRebalanceTicker(b.ticker) ? 1 : 0;
+        if (ra !== rb) return ra - rb;
+        return Math.abs(b.diffKrw) - Math.abs(a.diffKrw);
+      });
   }, [targetSumOk, hasAnyTarget, total, slices, targetsByTicker]);
 
   if (slices.length === 0) {

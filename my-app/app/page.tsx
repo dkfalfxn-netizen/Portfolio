@@ -148,6 +148,18 @@ const SELL_LOG_KEY = "portfolio_sell_log_v1";
 const LAST_SELL_LOG_SYNC_TS_KEY = "portfolio_last_sell_log_sync_ts_v1";
 const SELL_LOG_DIRTY_KEY = "portfolio_sell_log_dirty_v1";
 const TRADING_FEE_RATE = 0.002; // 0.2%
+/** 매입 시 현금 잔고 비교용(부동소수 오차) */
+const CASH_CHECK_EPS = 1e-6;
+/** 보유 종목 차트 그룹 추천(datalist). 「현금」은 현금·현금성 자산을 한 그룹으로 묶을 때 사용 */
+const HOLDINGS_CHART_GROUP_PRESETS = [
+  "현금",
+  "GOLD",
+  "ATTACK",
+  "XLE",
+  "AI",
+  "S&P500",
+  "방산",
+] as const;
 /** 일별 스냅샷 최대 보관 일수 */
 const SNAPSHOT_MAX_DAYS = 180;
 /** 실현손익 '종목별 손익' 접기 키(전 보유자 합산 표이므로 단일 토글) */
@@ -198,10 +210,26 @@ function calcSellRealizedKrw(entry: Pick<SellLogEntry, "qty" | "sellPrice" | "av
     entry.currency === "KRW"
       ? (sell - avg) * qty
       : (sell - avg) * qty * fx;
-  // 종목 추가 직후 -0.2%가 반영되도록 매입 원가 기준 수수료를 차감
-  const buyNotionalKrw =
-    entry.currency === "KRW" ? avg * qty : avg * qty * fx;
-  return gross - buyNotionalKrw * TRADING_FEE_RATE;
+  // 수수료는 종목 추가(매입) 시 평단·현금 차감에만 반영. 매도 실현손익에서는 이중 차감하지 않음.
+  return gross;
+}
+
+/** 종목 추가 시 현금 차감: 명목 + 매입 수수료 (통화별) */
+function purchaseCashDeduction(params: {
+  currency: "USD" | "EUR" | "KRW";
+  quantity: number;
+  avgPrice: number;
+  purchaseEurKrw: number;
+}): { deductUsd: number; deductKrw: number } {
+  const qty = Number(params.quantity);
+  const px = Number(params.avgPrice);
+  if (!Number.isFinite(qty) || !Number.isFinite(px)) return { deductUsd: 0, deductKrw: 0 };
+  const withFee = qty * px * (1 + TRADING_FEE_RATE);
+  if (params.currency === "KRW") return { deductUsd: 0, deductKrw: withFee };
+  if (params.currency === "USD") return { deductUsd: withFee, deductKrw: 0 };
+  const eurKrw = Number(params.purchaseEurKrw);
+  if (!Number.isFinite(eurKrw) || eurKrw <= 0) return { deductUsd: 0, deductKrw: 0 };
+  return { deductUsd: 0, deductKrw: withFee * eurKrw };
 }
 
 function normalizeOwnerNames(raw: unknown): OwnerName[] {
@@ -1043,6 +1071,8 @@ export default function Home() {
     avgPrice: "",
     purchaseUsdKrw: "",
     purchaseEurKrw: "",
+    /** 원형 차트·보유 표 그룹(미입력 시 티커); 현금성 자산은 「현금」 등으로 묶기 */
+    chartGroup: "",
     currency: "USD" as "USD" | "EUR" | "KRW",
     accountType: "해외주식" as "해외주식" | "국내주식",
     /** 종목 추가 시 한 번에 넣을 담당자(복수) */
@@ -1061,11 +1091,26 @@ export default function Home() {
       actionSuccessToastTimerRef.current = null;
     }, 3200);
   }, []);
+  const actionErrorToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [actionErrorToast, setActionErrorToast] = useState("");
+  const showActionErrorToast = useCallback((message: string) => {
+    if (actionErrorToastTimerRef.current) {
+      clearTimeout(actionErrorToastTimerRef.current);
+    }
+    setActionErrorToast(message);
+    actionErrorToastTimerRef.current = setTimeout(() => {
+      setActionErrorToast("");
+      actionErrorToastTimerRef.current = null;
+    }, 4200);
+  }, []);
 
   useEffect(
     () => () => {
       if (actionSuccessToastTimerRef.current) {
         clearTimeout(actionSuccessToastTimerRef.current);
+      }
+      if (actionErrorToastTimerRef.current) {
+        clearTimeout(actionErrorToastTimerRef.current);
       }
     },
     [],
@@ -1143,7 +1188,17 @@ export default function Home() {
 
   useEffect(() => {
     setAddPositionError("");
-  }, [form.symbol, form.name, form.currency, form.selectedOwners]);
+  }, [
+    form.symbol,
+    form.name,
+    form.currency,
+    form.selectedOwners,
+    form.quantity,
+    form.avgPrice,
+    form.chartGroup,
+    form.purchaseUsdKrw,
+    form.purchaseEurKrw,
+  ]);
 
   const refreshLatestBackupAt = useCallback(async () => {
     const key = cloudSyncKey.trim();
@@ -2722,6 +2777,31 @@ export default function Home() {
     }
     setAddPositionError("");
 
+    const { deductUsd, deductKrw } = purchaseCashDeduction({
+      currency: form.currency,
+      quantity,
+      avgPrice,
+      purchaseEurKrw: purchaseEurKrwNum,
+    });
+
+    const shortOwners: OwnerName[] = [];
+    for (const owner of ownersOrdered) {
+      const w = cashByOwner[owner] ?? { usd: 0, krw: 0 };
+      const usdOk = deductUsd <= CASH_CHECK_EPS || w.usd >= deductUsd - CASH_CHECK_EPS;
+      const krwOk = deductKrw <= CASH_CHECK_EPS || w.krw >= deductKrw - CASH_CHECK_EPS;
+      if (!usdOk || !krwOk) shortOwners.push(owner);
+    }
+    if (shortOwners.length > 0) {
+      const msg =
+        shortOwners.length === ownersOrdered.length
+          ? "매입에 필요한 금액(주문+수수료)보다 현금 잔고가 적습니다."
+          : `매입에 필요한 금액(주문+수수료)보다 현금이 부족한 보유자: ${shortOwners.join(", ")}`;
+      setAddPositionError(msg);
+      showActionErrorToast("현금이 부족합니다.");
+      return;
+    }
+
+    const cg = form.chartGroup.trim();
     const base: Omit<Position, "owner"> = {
       symbol,
       name: nameTrimmed,
@@ -2733,6 +2813,7 @@ export default function Home() {
       accountName,
       ...(form.currency === "USD" ? { purchaseUsdKrw: purchaseUsdKrwNum } : {}),
       ...(form.currency === "EUR" ? { purchaseEurKrw: purchaseEurKrwNum } : {}),
+      ...(cg ? { chartGroup: cg } : {}),
     };
 
     setPositions((prev) => {
@@ -2744,6 +2825,18 @@ export default function Home() {
       return acc;
     });
 
+    setCashByOwner((prev) => {
+      const next = { ...prev };
+      for (const owner of ownersOrdered) {
+        const w = next[owner] ?? { usd: 0, krw: 0 };
+        next[owner] = {
+          usd: w.usd - deductUsd,
+          krw: w.krw - deductKrw,
+        };
+      }
+      return next;
+    });
+
     setForm({
       symbol: "",
       name: "",
@@ -2751,6 +2844,7 @@ export default function Home() {
       avgPrice: "",
       purchaseUsdKrw: "",
       purchaseEurKrw: "",
+      chartGroup: "",
       currency: form.currency,
       accountType,
       selectedOwners: form.selectedOwners,
@@ -2956,6 +3050,15 @@ export default function Home() {
           aria-live="polite"
         >
           {actionSuccessToast}
+        </div>
+      ) : null}
+      {actionErrorToast ? (
+        <div
+          className="pointer-events-none fixed bottom-16 left-1/2 z-[60] max-w-[min(90vw,24rem)] -translate-x-1/2 rounded-lg border border-rose-500/55 bg-rose-950/95 px-4 py-2.5 text-center text-sm font-medium text-rose-100 shadow-lg shadow-rose-950/55 sm:bottom-20"
+          role="alert"
+          aria-live="assertive"
+        >
+          {actionErrorToast}
         </div>
       ) : null}
       <header className="sticky top-0 z-40 border-b border-slate-800/90 bg-[#0b1220]">
@@ -3627,6 +3730,8 @@ export default function Home() {
                                   placeholder="차트 그룹 (선택)"
                                   value={editChartGroup}
                                   onChange={(e) => setEditChartGroup(e.target.value)}
+                                  list="holdings-chart-group-presets"
+                                  autoComplete="off"
                                 />
                               </div>
                             ) : (
@@ -4626,11 +4731,19 @@ export default function Home() {
               <span className="font-medium text-foreground">ASML.AS</span>, 에르메스{" "}
               <span className="font-medium text-foreground">RMS</span> 또는 <span className="font-medium text-foreground">RMS.PA</span>
               )을 입력하면 시세가 반영됩니다.
+              <span className="font-medium text-foreground">차트 그룹</span>에{" "}
+              <span className="font-medium text-foreground">현금</span>을 넣으면 원형 차트·보유 표에서 현금과
+              MMF 등 현금성 자산 줄을 같은 조각으로 합산할 수 있습니다.
             </p>
             <form
               onSubmit={handleSubmit}
               className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6"
             >
+              <datalist id="holdings-chart-group-presets">
+                {HOLDINGS_CHART_GROUP_PRESETS.map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
               <input
                 className="rounded-md border bg-background px-3 py-2 text-sm"
                 placeholder="티커 (예: NVDA, 005930)"
@@ -4713,6 +4826,14 @@ export default function Home() {
                 <option value="EUR">EUR</option>
                 <option value="KRW">KRW</option>
               </select>
+              <input
+                className="col-span-2 rounded-md border bg-background px-3 py-2 text-sm sm:col-span-3 md:col-span-6"
+                placeholder="차트 그룹 (선택 · 예: 현금, MMF 등 현금성 자산)"
+                value={form.chartGroup}
+                onChange={(e) => setForm((prev) => ({ ...prev, chartGroup: e.target.value }))}
+                list="holdings-chart-group-presets"
+                autoComplete="off"
+              />
               <div className="col-span-2 flex flex-col gap-2 sm:col-span-3 md:col-span-6">
                 <span className="text-[11px] font-medium text-muted-foreground">담당자 (복수 선택)</span>
                 <div className="flex flex-wrap gap-x-3 gap-y-1.5">
