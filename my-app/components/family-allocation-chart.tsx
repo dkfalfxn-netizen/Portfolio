@@ -141,6 +141,14 @@ function nonCashEntriesSortedByWeight(
     .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
 }
 
+/** 툴팁 등: 현금 통합 조각에서는 USD/KRW·종목 줄 모두 노출 */
+function entriesForAllocationTooltip(slice: Pick<AllocationSlice, "ticker" | "allEntries">) {
+  if (slice.ticker === "현금") {
+    return [...slice.allEntries].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
+  }
+  return nonCashEntriesSortedByWeight(slice.allEntries);
+}
+
 function formatKrw(n: number) {
   return `₩${fmtInt(n)}`;
 }
@@ -174,7 +182,7 @@ function NeonTooltip({
 }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
-  const entries = nonCashEntriesSortedByWeight(p.allEntries);
+  const entries = entriesForAllocationTooltip(p);
   const isGroup = entries.length > 1;
   const entryPctText = (w?: number) => `${(w ?? p.weight).toFixed(1)}%`;
   return (
@@ -623,7 +631,7 @@ function TargetStockWeightNeu({
             ? "0 0 8px rgba(248,113,113,0.45)"
             : "0 0 8px rgba(52,211,153,0.4)";
 
-          const tooltipEntries = nonCashEntriesSortedByWeight(slice.allEntries);
+          const tooltipEntries = entriesForAllocationTooltip(slice);
           const isGrouped = tooltipEntries.length > 1;
           const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
 
@@ -804,12 +812,9 @@ export function FamilyAllocationDonut({
       const normalize = (value: unknown) =>
         typeof value === "string" ? value.trim() : "";
       const normalizeUpper = (value: unknown) => normalize(value).toUpperCase();
-      const usdCash = chartData.find((d) => d.ticker === "USD 현금");
-      const krwCash = chartData.find((d) => d.ticker === "KRW 현금");
-      const mergedCashValue = (usdCash?.value ?? 0) + (krwCash?.value ?? 0);
-      const mergedCashWeight = (usdCash?.weight ?? 0) + (krwCash?.weight ?? 0);
+      /** allocation은 페이지에서 예수금+차트「현금」그룹이 이미 하나의 ticker「현금」으로 합쳐져 옴 */
       const base = chartData
-        .filter((d) => d.value > 0 && d.ticker !== "USD 현금" && d.ticker !== "KRW 현금")
+        .filter((d) => d.value > 0)
         .map((d) => ({
           ...d,
           allEntries: d.allEntries.map((entry) => ({
@@ -819,28 +824,6 @@ export function FamilyAllocationDonut({
           })),
         }));
       const baseByTicker = new Map(base.map((d) => [normalizeUpper(d.ticker), d]));
-      if (mergedCashValue > 0) {
-        base.push({
-          name: "cash-merged",
-          displayName: "현금(USD+KRW)",
-          ticker: "현금",
-          allEntries: [
-            ...(usdCash?.allEntries ?? []).map((entry) => ({
-              name: normalize(entry.name) || normalize(entry.symbol),
-              symbol: normalize(entry.symbol),
-              weight: entry.weight,
-            })),
-            ...(krwCash?.allEntries ?? []).map((entry) => ({
-              name: normalize(entry.name) || normalize(entry.symbol),
-              symbol: normalize(entry.symbol),
-              weight: entry.weight,
-            })),
-          ],
-          value: mergedCashValue,
-          weight: mergedCashWeight,
-          changePct: null,
-        });
-      }
       const groupedWatch = new Map<
         string,
         {

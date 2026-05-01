@@ -1580,39 +1580,49 @@ export default function Home() {
         }),
       );
 
+      const chartCashStockSlice = stockSlices.find((s) => s.ticker === "현금");
+      const stockSlicesNoBundledCash = stockSlices.filter((s) => s.ticker !== "현금");
+
       const c = cashByOwner[ownerName] ?? { usd: 0, krw: 0 };
       const usd = Number.isFinite(c.usd) ? Math.max(0, c.usd) : 0;
       const krw = Number.isFinite(c.krw) ? Math.max(0, c.krw) : 0;
       const usdCashKrw = usd * usdKrw;
-      const extra: {
+
+      /** 예수금(USD/KRW) + 차트그룹「현금」종목을 하나의 현금 조각으로 */
+      type CashAgg = {
         name: string;
         displayName: string;
         ticker: string;
         allEntries: { name: string; symbol: string; value: number }[];
         value: number;
         changePct: number | null;
-      }[] = [];
+      };
+      const cashBundleParts: CashAgg["allEntries"] = [];
       if (usdCashKrw > 0) {
-        extra.push({
-          name: `cash-usd|${ownerName}`,
-          displayName: "USD 현금",
-          ticker: "USD 현금",
-          allEntries: [{ name: "USD 현금", symbol: "", value: usdCashKrw }],
-          value: usdCashKrw,
-          changePct: null,
-        });
+        cashBundleParts.push({ name: "USD 현금", symbol: "", value: usdCashKrw });
       }
       if (krw > 0) {
+        cashBundleParts.push({ name: "KRW 현금", symbol: "", value: krw });
+      }
+      if (chartCashStockSlice) {
+        cashBundleParts.push(...chartCashStockSlice.allEntries);
+      }
+      const cashBundleValue =
+        usdCashKrw + krw + (chartCashStockSlice?.value ?? 0);
+
+      const extra: CashAgg[] = [];
+      if (cashBundleValue > 0 && cashBundleParts.length > 0) {
         extra.push({
-          name: `cash-krw|${ownerName}`,
-          displayName: "KRW 현금",
-          ticker: "KRW 현금",
-          allEntries: [{ name: "KRW 현금", symbol: "", value: krw }],
-          value: krw,
-          changePct: null,
+          name: `cash-bundle|${ownerName}`,
+          displayName: "현금",
+          ticker: "현금",
+          allEntries: cashBundleParts,
+          value: cashBundleValue,
+          changePct: chartCashStockSlice?.changePct ?? null,
         });
       }
-      const merged = [...stockSlices, ...extra];
+
+      const merged = [...stockSlicesNoBundledCash, ...extra];
       const total = merged.reduce((sum, item) => sum + item.value, 0);
       const data = merged.map((item) => ({
         ...item,
