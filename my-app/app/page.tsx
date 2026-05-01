@@ -22,6 +22,8 @@ import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import { LiquiditySection } from "@/components/liquidity-section";
 import { cn } from "@/lib/utils";
+import { inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
+import { fmtInt, fmtUsdNumber, MONEY_INT_LOCALE } from "@/lib/format-money";
 import {
   HAS_LOCAL_CHANGES_KEY,
   loadAllTargetStockWeights,
@@ -600,19 +602,9 @@ function formatPositionMarketValueForeign(
   const v = position.quantity * position.currentPrice;
   if (!Number.isFinite(v)) return null;
   if (position.currency === "USD") {
-    return v.toLocaleString("en-US", {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    return `$${fmtUsdNumber(v, 2, 2)}`;
   }
-  return v.toLocaleString("de-DE", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return `€${fmtUsdNumber(v, 2, 2)}`;
 }
 
 /** 같은 담당자·같은 티커·같은 통화면 한 줄로 합칩니다(계좌 구분 무시, 가중 평단). */
@@ -1351,6 +1343,32 @@ export default function Home() {
   const usdKrw = marketQuery.data?.usdKrw ?? 1350;
   const eurKrw = marketQuery.data?.eurKrw ?? 1450;
 
+  const handleAddSymbolInput = useCallback(
+    (value: string) => {
+      setForm((prev) => {
+        const next = { ...prev, symbol: value };
+        const inferred = inferTradingCurrencyFromTicker(value);
+        if (inferred === null) return next;
+
+        const usdFilled = prev.purchaseUsdKrw.trim() !== "";
+        const eurFilled = prev.purchaseEurKrw.trim() !== "";
+        const purchaseUsdDefault =
+          prev.currency === "USD" && usdFilled ? prev.purchaseUsdKrw : String(Math.round(usdKrw));
+        const purchaseEurDefault =
+          prev.currency === "EUR" && eurFilled ? prev.purchaseEurKrw : String(Math.round(eurKrw));
+
+        return {
+          ...next,
+          currency: inferred,
+          accountType: inferred === "KRW" ? "국내주식" : "해외주식",
+          purchaseUsdKrw: inferred === "USD" ? purchaseUsdDefault : "",
+          purchaseEurKrw: inferred === "EUR" ? purchaseEurDefault : "",
+        };
+      });
+    },
+    [usdKrw, eurKrw],
+  );
+
   const totalCashKrw = useMemo(() => {
     return ownerNames.reduce((sum, owner) => {
       const c = cashByOwner[owner] ?? { usd: 0, krw: 0 };
@@ -1428,7 +1446,7 @@ export default function Home() {
       },
       {
         label: "평가손익 (주식·원화)",
-        value: `₩${Math.round(totalProfit).toLocaleString()}`,
+        value: `₩${fmtInt(totalProfit)}`,
         sub: "현금은 손익 없이 원금으로 포함",
         change: "",
         positive: totalProfit >= 0,
@@ -2951,7 +2969,7 @@ export default function Home() {
               로컬
             </span>
             <span className="hidden text-[11px] text-slate-500 sm:inline">
-              USD/KRW {usdKrw.toLocaleString()} · EUR/KRW {eurKrw.toLocaleString()}
+              USD/KRW {usdKrw.toLocaleString(MONEY_INT_LOCALE)} · EUR/KRW {eurKrw.toLocaleString(MONEY_INT_LOCALE)}
             </span>
           </div>
           <nav
@@ -3096,7 +3114,7 @@ export default function Home() {
                 가족(담당자)별·계좌별 자산과 종목별 수익률을 한눈에 확인합니다.
               </p>
               <p className="mt-0.5 text-[10px] font-medium text-slate-500 sm:text-[11px]">
-                환율 USD/KRW: {usdKrw.toLocaleString()} · EUR/KRW: {eurKrw.toLocaleString()} · 시세 갱신:{" "}
+                환율 USD/KRW: {usdKrw.toLocaleString(MONEY_INT_LOCALE)} · EUR/KRW: {eurKrw.toLocaleString(MONEY_INT_LOCALE)} · 시세 갱신:{" "}
                 {marketQuery.data?.fetchedAt
                   ? new Date(marketQuery.data.fetchedAt).toLocaleTimeString()
                   : "대기 중"}
@@ -3106,8 +3124,8 @@ export default function Home() {
             <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {(
                 [
-                  { key: "appr", label: "총 평가금액", sub: "실시간", value: `₩${Math.round(kisMetrics.totalAppraisal).toLocaleString()}` },
-                  { key: "dep", label: "예수금(현금)", sub: "USD·KRW 합산", value: `₩${Math.round(kisMetrics.deposit).toLocaleString()}` },
+                  { key: "appr", label: "총 평가금액", sub: "실시간", value: `₩${fmtInt(kisMetrics.totalAppraisal)}` },
+                  { key: "dep", label: "예수금(현금)", sub: "USD·KRW 합산", value: `₩${fmtInt(kisMetrics.deposit)}` },
                   { key: "cnt", label: "보유 종목 수", sub: "고유 티커", value: String(kisMetrics.uniqueTickerCount) },
                 ] as const
               ).map((c) => (
@@ -3407,12 +3425,12 @@ export default function Home() {
                       <p className="text-xs text-muted-foreground">
                         총 매입{" "}
                         <span className="font-medium tabular-nums text-foreground">
-                          ₩{Math.round(group.sectionCostBasis).toLocaleString()}
+                          ₩{fmtInt(group.sectionCostBasis)}
                         </span>
                         <span className="hidden sm:inline">
                           {" "}
-                          (주식 원가 ₩{Math.round(group.sectionStockCost).toLocaleString()} · 현금 ₩
-                          {Math.round(group.sectionCashKrw).toLocaleString()})
+                          (주식 원가 ₩{fmtInt(group.sectionStockCost)} · 현금 ₩
+                          {fmtInt(group.sectionCashKrw)})
                         </span>
                       </p>
                       <p className="text-sm font-semibold tabular-nums text-foreground">
@@ -3420,7 +3438,7 @@ export default function Home() {
                         <span className="text-xs font-normal text-muted-foreground">(USD)</span>
                       </p>
                       <p className="font-semibold tabular-nums">
-                        총 평가(주식+현금) ₩{Math.round(group.sectionTotal).toLocaleString()}
+                        총 평가(주식+현금) ₩{fmtInt(group.sectionTotal)}
                       </p>
                       <p
                         className={`text-sm font-semibold tabular-nums ${
@@ -3428,16 +3446,16 @@ export default function Home() {
                         }`}
                       >
                         평가손익 {group.sectionPnL >= 0 ? "+" : ""}₩
-                        {Math.round(group.sectionPnL).toLocaleString()} (
+                        {fmtInt(group.sectionPnL)} (
                         {group.sectionPnL >= 0 ? "+" : ""}
                         {group.sectionPnLPct.toFixed(2)}%)
                       </p>
                       <p className="text-[11px] text-muted-foreground">
-                        주식 평가 ₩{Math.round(group.sectionStockValue).toLocaleString()}
+                        주식 평가 ₩{fmtInt(group.sectionStockValue)}
                         <span className="hidden sm:inline">
                           {" "}
-                          · 현금 ₩{Math.round(group.sectionCashKrw).toLocaleString()} (USD{" "}
-                          {group.cashUsd.toLocaleString()} / KRW {group.cashKrw.toLocaleString()})
+                          · 현금 ₩{fmtInt(group.sectionCashKrw)} (USD{" "}
+                          {fmtUsdNumber(group.cashUsd, 2, 4)} / KRW {fmtInt(group.cashKrw)})
                         </span>
                       </p>
                     </div>
@@ -3556,7 +3574,7 @@ export default function Home() {
                                     {hasChange && (
                                       <span className={`text-xs tabular-nums font-semibold ${groupDailyChangeKrw > 0 ? "text-red-400" : groupDailyChangeKrw < 0 ? "text-blue-400" : "text-muted-foreground"}`}>
                                         오늘 {groupDailyChangeKrw > 0 ? "+" : ""}
-                                        {Math.round(groupDailyChangeKrw).toLocaleString()}원
+                                        {fmtInt(groupDailyChangeKrw)}원
                                         {groupDailyChangePct !== null && (
                                           <span className="ml-0.5 opacity-80">
                                             ({groupDailyChangePct > 0 ? "+" : ""}{groupDailyChangePct.toFixed(2)}%)
@@ -3568,14 +3586,14 @@ export default function Home() {
                                     {groupTotalPnlPct !== null && (
                                       <span className={`text-xs tabular-nums font-semibold ${groupTotalPnlKrw > 0 ? "text-red-400" : groupTotalPnlKrw < 0 ? "text-blue-400" : "text-muted-foreground"}`}>
                                         총 {groupTotalPnlKrw > 0 ? "+" : ""}
-                                        {Math.round(groupTotalPnlKrw).toLocaleString()}원
+                                        {fmtInt(groupTotalPnlKrw)}원
                                         <span className="ml-0.5 opacity-80">
                                           ({groupTotalPnlPct > 0 ? "+" : ""}{groupTotalPnlPct.toFixed(2)}%)
                                         </span>
                                       </span>
                                     )}
                                     <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums font-medium text-muted-foreground">
-                                      합계 ₩{Math.round(block.sumKrw).toLocaleString()}
+                                      합계 ₩{fmtInt(block.sumKrw)}
                                     </span>
                                   </div>
                                 </div>
@@ -3622,7 +3640,7 @@ export default function Home() {
                           </TableCell>
                           <TableCell className="px-3 py-1.5 text-right align-top">
                             <p className="text-[16px] font-semibold tabular-nums leading-none">
-                              ₩{Math.round(position.valueKrw).toLocaleString()}
+                              ₩{fmtInt(position.valueKrw)}
                             </p>
                             {foreignMarketValue ? (
                               <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
@@ -3644,13 +3662,13 @@ export default function Home() {
                               previousClose={position.previousClose}
                               krwLine={
                                 position.currency === "USD"
-                                  ? `₩${Math.round(
+                                  ? `₩${fmtInt(
                                       position.currentPrice * usdKrw,
-                                    ).toLocaleString()}`
+                                    )}`
                                   : position.currency === "EUR"
-                                    ? `₩${Math.round(
+                                    ? `₩${fmtInt(
                                         position.currentPrice * eurKrw,
-                                      ).toLocaleString()}`
+                                      )}`
                                     : undefined
                               }
                             />
@@ -3699,7 +3717,7 @@ export default function Home() {
                                 </span>
                                 <span className="text-xs font-normal opacity-75">
                                   {position.valueKrw - position.costKrw >= 0 ? "+" : ""}₩
-                                  {Math.round(position.valueKrw - position.costKrw).toLocaleString()}
+                                  {fmtInt(position.valueKrw - position.costKrw)}
                                 </span>
                               </div>
                             ) : (
@@ -3710,7 +3728,7 @@ export default function Home() {
                                 </span>
                                 <span className="text-xs font-normal opacity-75">
                                   {position.valueKrw - position.costKrw >= 0 ? "+" : ""}₩
-                                  {Math.round(position.valueKrw - position.costKrw).toLocaleString()}
+                                  {fmtInt(position.valueKrw - position.costKrw)}
                                 </span>
                               </div>
                             )}
@@ -3761,19 +3779,23 @@ export default function Home() {
                               />
                             ) : (
                               <>
-                                {position.avgPrice.toLocaleString()} {position.currency}
+                                {position.currency === "KRW"
+                                  ? `${fmtInt(Math.round(position.avgPrice))} KRW`
+                                  : position.currency === "USD"
+                                    ? `$${fmtUsdNumber(position.avgPrice, 2, 4)}`
+                                    : `€${fmtUsdNumber(position.avgPrice, 2, 4)}`}
                                 <p className="text-xs text-muted-foreground">
                                   {position.currency === "USD" || position.currency === "EUR" ? (
                                     <>
                                       원화(매입환율): ₩
-                                      {Math.round(
+                                      {fmtInt(
                                         position.avgPrice * position.purchaseFxUsed,
-                                      ).toLocaleString()}
+                                      )}
                                     </>
                                   ) : (
                                     <>
                                       원화: ₩
-                                      {Math.round(position.avgPrice).toLocaleString()}
+                                      {fmtInt(position.avgPrice)}
                                     </>
                                   )}
                                 </p>
@@ -3795,8 +3817,8 @@ export default function Home() {
                                 <div className="flex flex-col items-end gap-0.5">
                                   <span>
                                     {position.purchaseUsdKrw != null
-                                      ? `${position.purchaseUsdKrw.toLocaleString()} ₩/$`
-                                      : `${usdKrw.toLocaleString()} ₩/$`}
+                                      ? `${fmtInt(Math.round(position.purchaseUsdKrw))} ₩/$`
+                                      : `${usdKrw.toLocaleString(MONEY_INT_LOCALE)} ₩/$`}
                                   </span>
                                   {position.purchaseUsdKrw == null ? (
                                     <span className="text-[10px] text-muted-foreground">
@@ -3819,8 +3841,8 @@ export default function Home() {
                                 <div className="flex flex-col items-end gap-0.5">
                                   <span>
                                     {position.purchaseEurKrw != null
-                                      ? `${position.purchaseEurKrw.toLocaleString()} ₩/EUR`
-                                      : `${eurKrw.toLocaleString()} ₩/EUR`}
+                                      ? `${fmtInt(Math.round(position.purchaseEurKrw))} ₩/EUR`
+                                      : `${eurKrw.toLocaleString(MONEY_INT_LOCALE)} ₩/EUR`}
                                   </span>
                                   {position.purchaseEurKrw == null ? (
                                     <span className="text-[10px] text-muted-foreground">
@@ -4177,7 +4199,7 @@ export default function Home() {
                               className={`text-xs font-bold tabular-nums underline-offset-2 hover:underline ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}
                               onClick={() => setSellLogDetailOpenOwner(owner)}
                             >
-                              누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{Math.round(totalRealized).toLocaleString()}
+                              누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{fmtInt(totalRealized)}
                             </button>
                           </div>
                         </div>
@@ -4205,9 +4227,9 @@ export default function Home() {
                                         <span className="ml-1 text-muted-foreground">{s.symbol}</span>
                                       </td>
                                       <td className="py-1 pr-2 text-right tabular-nums">{s.qty}</td>
-                                      <td className="py-1 pr-2 text-right tabular-nums">₩{Math.round(s.costKrw).toLocaleString()}</td>
+                                      <td className="py-1 pr-2 text-right tabular-nums">₩{fmtInt(s.costKrw)}</td>
                                       <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${s.realizedKrw > 0 ? "text-red-500" : s.realizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                                        {s.realizedKrw >= 0 ? "+" : ""}₩{Math.round(s.realizedKrw).toLocaleString()}
+                                        {s.realizedKrw >= 0 ? "+" : ""}₩{fmtInt(s.realizedKrw)}
                                       </td>
                                       <td className={`py-1 text-right tabular-nums font-semibold ${pct > 0 ? "text-red-500" : pct < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
                                         {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
@@ -4223,10 +4245,10 @@ export default function Home() {
                                     {symPnlList.reduce((s, x) => s + x.qty, 0)}
                                   </td>
                                   <td className="py-1 pr-2 text-right tabular-nums">
-                                    ₩{Math.round(symPnlList.reduce((s, x) => s + x.costKrw, 0)).toLocaleString()}
+                                    ₩{fmtInt(symPnlList.reduce((s, x) => s + x.costKrw, 0))}
                                   </td>
                                   <td className={`py-1 pr-2 text-right tabular-nums ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                                    {totalRealized >= 0 ? "+" : ""}₩{Math.round(totalRealized).toLocaleString()}
+                                    {totalRealized >= 0 ? "+" : ""}₩{fmtInt(totalRealized)}
                                   </td>
                                   <td className={`py-1 text-right tabular-nums ${(() => { const tc = symPnlList.reduce((s, x) => s + x.costKrw, 0); const p = tc > 0 ? (totalRealized / tc) * 100 : 0; return p > 0 ? "text-red-500" : p < 0 ? "text-blue-500" : "text-muted-foreground"; })()}`}>
                                     {(() => { const tc = symPnlList.reduce((s, x) => s + x.costKrw, 0); const p = tc > 0 ? (totalRealized / tc) * 100 : 0; return `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`; })()}
@@ -4413,7 +4435,7 @@ export default function Home() {
                           </label>
                           <div className="col-span-2 flex items-center justify-between sm:col-span-4">
                             <span className={`text-[11px] font-semibold tabular-nums ${previewRealizedTotal > 0 ? "text-red-500" : previewRealizedTotal < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                              실현손익 예상: {previewRealizedTotal >= 0 ? "+" : ""}₩{Math.round(previewRealizedTotal).toLocaleString()}
+                              실현손익 예상: {previewRealizedTotal >= 0 ? "+" : ""}₩{fmtInt(previewRealizedTotal)}
                             </span>
                             <div className="flex gap-1.5">
                               {form.editingId && (
@@ -4465,13 +4487,21 @@ export default function Home() {
                                     </td>
                                     <td className="py-1 pr-2 text-right tabular-nums">{e.qty}</td>
                                     <td className="py-1 pr-2 text-right tabular-nums">
-                                      {e.currency !== "KRW" ? `$${e.sellPrice}` : `₩${e.sellPrice.toLocaleString()}`}
+                                      {e.currency !== "KRW"
+                                        ? e.currency === "EUR"
+                                          ? `€${fmtUsdNumber(e.sellPrice, 2, 4)}`
+                                          : `$${fmtUsdNumber(e.sellPrice, 2, 4)}`
+                                        : `₩${fmtInt(Math.round(e.sellPrice))}`}
                                     </td>
                                     <td className="py-1 pr-2 text-right tabular-nums">
-                                      {e.currency !== "KRW" ? `$${e.avgPrice}` : `₩${e.avgPrice.toLocaleString()}`}
+                                      {e.currency !== "KRW"
+                                        ? e.currency === "EUR"
+                                          ? `€${fmtUsdNumber(e.avgPrice, 2, 4)}`
+                                          : `$${fmtUsdNumber(e.avgPrice, 2, 4)}`
+                                        : `₩${fmtInt(Math.round(e.avgPrice))}`}
                                     </td>
                                     <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${e.realizedKrw > 0 ? "text-red-500" : e.realizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                                      {e.realizedKrw >= 0 ? "+" : ""}₩{Math.round(e.realizedKrw).toLocaleString()}
+                                      {e.realizedKrw >= 0 ? "+" : ""}₩{fmtInt(e.realizedKrw)}
                                     </td>
                                     <td className="py-1 pr-2 text-muted-foreground">{e.note ?? "—"}</td>
                                     <td className="py-1 text-right">
@@ -4510,7 +4540,7 @@ export default function Home() {
                   <div className="mb-1.5 flex items-center justify-between">
                     <p className="text-[11px] font-semibold text-muted-foreground">{owner.ownerName}</p>
                     <p className={`text-[11px] font-bold tabular-nums ${owner.totalDailyKrw > 0 ? "text-red-400" : owner.totalDailyKrw < 0 ? "text-blue-400" : "text-muted-foreground"}`}>
-                      {owner.totalDailyKrw > 0 ? "+" : ""}{Math.round(owner.totalDailyKrw).toLocaleString()}
+                      {owner.totalDailyKrw > 0 ? "+" : ""}{fmtInt(owner.totalDailyKrw)}
                     </p>
                   </div>
                   <table className="w-full text-[11px]">
@@ -4519,7 +4549,7 @@ export default function Home() {
                         <tr key={g.label} className="border-t border-border/40 first:border-0">
                           <td className="py-0.5 pr-1 text-muted-foreground truncate max-w-[80px]">{g.label}</td>
                           <td className={`py-0.5 text-right tabular-nums font-medium ${g.dailyChangeKrw > 0 ? "text-red-400" : g.dailyChangeKrw < 0 ? "text-blue-400" : "text-muted-foreground/50"}`}>
-                            {g.dailyChangeKrw !== 0 ? `${g.dailyChangeKrw > 0 ? "+" : ""}${Math.round(g.dailyChangeKrw).toLocaleString()}` : "—"}
+                            {g.dailyChangeKrw !== 0 ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}` : "—"}
                           </td>
                           <td className={`py-0.5 pl-1 text-right tabular-nums ${g.dailyChangePct !== null && g.dailyChangeKrw !== 0 ? (g.dailyChangeKrw > 0 ? "text-red-400" : "text-blue-400") : "text-muted-foreground/40"}`}>
                             {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
@@ -4605,7 +4635,7 @@ export default function Home() {
                 className="rounded-md border bg-background px-3 py-2 text-sm"
                 placeholder="티커 (예: NVDA, 005930)"
                 value={form.symbol}
-                onChange={(e) => setForm((prev) => ({ ...prev, symbol: e.target.value }))}
+                onChange={(e) => handleAddSymbolInput(e.target.value)}
                 required
               />
               <input
@@ -4643,7 +4673,7 @@ export default function Home() {
                   step="any"
                   required
                   className="rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder={`매입 USD/KRW (예: ${Math.round(usdKrw)})`}
+                  placeholder={`매입 USD/KRW (예: ${fmtInt(usdKrw)})`}
                   value={form.purchaseUsdKrw}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, purchaseUsdKrw: e.target.value }))
@@ -4656,7 +4686,7 @@ export default function Home() {
                   step="any"
                   required
                   className="rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder={`매입 EUR/KRW (예: ${Math.round(eurKrw)})`}
+                  placeholder={`매입 EUR/KRW (예: ${fmtInt(eurKrw)})`}
                   value={form.purchaseEurKrw}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, purchaseEurKrw: e.target.value }))
@@ -4735,7 +4765,7 @@ export default function Home() {
             </form>
             <p className="mt-2 text-xs text-muted-foreground">
               현금(USD·KRW)은 아래 각 보유 종목 표 상단에서 입력합니다. 전체 현금
-              합계(원화): ₩{Math.round(totalCashKrw).toLocaleString()}
+              합계(원화): ₩{fmtInt(totalCashKrw)}
             </p>
           </section>
           </div>
@@ -5104,7 +5134,7 @@ export default function Home() {
                       className={`text-xs font-bold underline-offset-2 hover:underline ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}
                       onClick={() => setSellLogDetailOpenOwner(owner)}
                     >
-                      누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{Math.round(totalRealized).toLocaleString()}
+                      누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{fmtInt(totalRealized)}
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 rounded-lg border bg-muted/20 p-2 text-xs sm:grid-cols-4">
@@ -5177,7 +5207,7 @@ export default function Home() {
                     <button type="button" className="cursor-pointer rounded bg-primary px-3 py-1 text-primary-foreground hover:bg-primary/90" onClick={handleSave}>
                       {form.editingId ? "수정 저장" : "+ 기록 추가"}
                     </button>
-                    <div className="col-span-2 text-[11px] font-semibold sm:col-span-4">실현손익 예상: {preview >= 0 ? "+" : ""}₩{Math.round(preview).toLocaleString()}</div>
+                    <div className="col-span-2 text-[11px] font-semibold sm:col-span-4">실현손익 예상: {preview >= 0 ? "+" : ""}₩{fmtInt(preview)}</div>
                     {sellLogErrorByOwner[owner] ? <p className="col-span-2 text-[11px] font-medium text-destructive sm:col-span-4">{sellLogErrorByOwner[owner]}</p> : null}
                   </div>
                   {symPnlList.length > 0 && (
@@ -5230,7 +5260,7 @@ export default function Home() {
                                               : "text-muted-foreground"
                                         }
                                       >
-                                        {daySum >= 0 ? "+" : ""}₩{Math.round(daySum).toLocaleString()}
+                                        {daySum >= 0 ? "+" : ""}₩{fmtInt(daySum)}
                                       </span>
                                     </td>
                                   </tr>
@@ -5247,13 +5277,13 @@ export default function Home() {
                                         </td>
                                         <td className="py-1 pr-2 text-right tabular-nums">{s.qty}</td>
                                         <td className="py-1 pr-2 text-right tabular-nums">
-                                          ₩{Math.round(s.costKrw).toLocaleString()}
+                                          ₩{fmtInt(s.costKrw)}
                                         </td>
                                         <td
                                           className={`py-1 pr-2 text-right tabular-nums font-semibold ${s.realizedKrw > 0 ? "text-red-500" : s.realizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}
                                         >
                                           {s.realizedKrw >= 0 ? "+" : ""}₩
-                                          {Math.round(s.realizedKrw).toLocaleString()}
+                                          {fmtInt(s.realizedKrw)}
                                         </td>
                                         <td
                                           className={`py-1 text-right tabular-nums font-semibold ${pct > 0 ? "text-red-500" : pct < 0 ? "text-blue-500" : "text-muted-foreground"}`}
@@ -5331,7 +5361,7 @@ export default function Home() {
                                         <span
                                           className={`text-xs font-semibold tabular-nums sm:text-sm ${dayTotal > 0 ? "text-red-500" : dayTotal < 0 ? "text-blue-500" : "text-muted-foreground"}`}
                                         >
-                                          {dayTotal >= 0 ? "+" : ""}₩{Math.round(dayTotal).toLocaleString()}
+                                          {dayTotal >= 0 ? "+" : ""}₩{fmtInt(dayTotal)}
                                         </span>
                                       </div>
                                     </td>
@@ -5348,7 +5378,7 @@ export default function Home() {
                                         className={`py-1 pr-2 text-right tabular-nums font-semibold ${calcSellRealizedKrw(e) > 0 ? "text-red-500" : calcSellRealizedKrw(e) < 0 ? "text-blue-500" : "text-muted-foreground"}`}
                                       >
                                         {calcSellRealizedKrw(e) >= 0 ? "+" : ""}₩
-                                        {Math.round(calcSellRealizedKrw(e)).toLocaleString()}
+                                        {fmtInt(calcSellRealizedKrw(e))}
                                       </td>
                                       <td className="py-1 text-right">
                                         <div className="flex justify-end gap-1">
@@ -6039,7 +6069,7 @@ export default function Home() {
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs font-semibold">보유자: {name}</p>
                       <span className={`text-xs font-bold ${ownerTotal > 0 ? "text-red-500" : ownerTotal < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                        누적: {ownerTotal >= 0 ? "+" : ""}₩{Math.round(ownerTotal).toLocaleString()}
+                        누적: {ownerTotal >= 0 ? "+" : ""}₩{fmtInt(ownerTotal)}
                       </span>
                     </div>
                     {rows.length === 0 ? (
@@ -6069,7 +6099,7 @@ export default function Home() {
                                 <td className="py-1 pr-2 text-right tabular-nums">{e.avgPrice}</td>
                                 <td className="py-1 pr-2 text-right tabular-nums">{e.currency === "KRW" ? "1" : e.fxRate}</td>
                                 <td className={`py-1 pr-2 text-right tabular-nums font-semibold ${calcSellRealizedKrw(e) > 0 ? "text-red-500" : calcSellRealizedKrw(e) < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
-                                  {calcSellRealizedKrw(e) >= 0 ? "+" : ""}₩{Math.round(calcSellRealizedKrw(e)).toLocaleString()}
+                                  {calcSellRealizedKrw(e) >= 0 ? "+" : ""}₩{fmtInt(calcSellRealizedKrw(e))}
                                 </td>
                                 <td className="py-1 text-muted-foreground">{e.note ?? "—"}</td>
                               </tr>

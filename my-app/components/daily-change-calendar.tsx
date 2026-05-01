@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { DailySnapshot } from "@/app/page";
 import { ymdKST } from "@/lib/date-utils";
+import { fmtInt } from "@/lib/format-money";
 
 type LiveChange = {
   date: string;
@@ -110,7 +111,7 @@ function reconcileOwnerChangeRows(
 
 function toKrw(n: number): string {
   const sign = n > 0 ? "+" : n < 0 ? "" : "±";
-  return `${sign}${Math.round(n).toLocaleString()}원`;
+  return `${sign}${fmtInt(n)}원`;
 }
 
 function getOwnerFromBreakdownKey(name: string): string {
@@ -359,7 +360,7 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
                   ) : c.totalValue != null && c.totalValue > 0 ? (
                     // 스냅샷은 있으나 비교할 전날 데이터가 없는 경우 → 총액 표시
                     <p className="mt-1 text-[10px] text-muted-foreground">
-                      ₩{Math.round(c.totalValue / 10000).toLocaleString()}만
+                      ₩{fmtInt(Math.round(c.totalValue / 10000))}만
                     </p>
                   ) : (
                     <p className="mt-2 text-[10px] text-muted-foreground/70">—</p>

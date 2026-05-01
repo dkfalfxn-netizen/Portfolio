@@ -12,6 +12,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import type { DailySnapshot } from "@/app/page";
+import { fmtInt } from "@/lib/format-money";
 
 /** 일별 자산 추이 차트 Y축 상한 (개인 라인 가독성용, 단위: 원) */
 const Y_AXIS_MAX_KRW = 300_000_000; // 3억
@@ -28,10 +29,10 @@ const OWNER_COLORS: Record<string, string> = {
 function fmt(n: number) {
   if (n >= 1_0000_0000) return `${(n / 1_0000_0000).toFixed(1)}억`;
   if (n >= 1_0000) return `${(n / 1_0000).toFixed(0)}만`;
-  return `₩${Math.round(n).toLocaleString()}`;
+  return `₩${fmtInt(n)}`;
 }
 function fmtFull(n: number) {
-  return `₩${Math.round(n).toLocaleString()}`;
+  return `₩${fmtInt(n)}`;
 }
 
 type DiffTooltipData = {
@@ -83,7 +84,7 @@ function buildDiffTooltipData(current: DailySnapshot, prev: DailySnapshot, owner
   if (rows.length === 0) return null;
 
   rows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
-  const lines = rows.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
+  const lines = rows.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${fmtInt(r.diff)}원`);
   return {
     title: `${owner} 자산별 전일비`,
     lines,
@@ -99,7 +100,7 @@ function buildLiveTooltipData(owner: string, live: LiveChange): DiffTooltipData 
     }))
     .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
   if (rows.length === 0) return null;
-  const lines = rows.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${Math.round(r.diff).toLocaleString()}원`);
+  const lines = rows.map((r) => `${r.label}: ${r.diff > 0 ? "+" : ""}${fmtInt(r.diff)}원`);
   return {
     title: `${owner} 자산별 전일비`,
     lines,

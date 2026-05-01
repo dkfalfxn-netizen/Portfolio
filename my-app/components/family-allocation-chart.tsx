@@ -12,6 +12,7 @@ import {
   persistOneOwnerScratchpad,
   pushTargetWeightsAndScratchpadsToServer,
 } from "@/lib/portfolio-owner-scratchpad";
+import { fmtInt } from "@/lib/format-money";
 
 /** 네온 글로우용 팔레트 (한 단계 어둡게 — 채도는 유지) */
 const NEON_PALETTE = [
@@ -135,7 +136,7 @@ function nonCashEntriesSortedByWeight(
 }
 
 function formatKrw(n: number) {
-  return `₩${Math.round(n).toLocaleString()}`;
+  return `₩${fmtInt(n)}`;
 }
 
 function shadeHexToWhite(hex: string, f: number): string {
@@ -307,9 +308,9 @@ function formatKrwCompact(n: number): string {
     return `${sign}${(abs / 1_0000_0000).toFixed(1)}억`;
   }
   if (abs >= 10_000) {
-    return `${sign}${Math.round(abs / 10_000).toLocaleString()}만`;
+    return `${sign}${fmtInt(Math.round(abs / 10_000))}만`;
   }
-  return `${sign}${Math.round(abs).toLocaleString()}원`;
+  return `${sign}${fmtInt(Math.round(abs))}원`;
 }
 
 /** 목표 % 표시용 — 정수면 소수 생략 */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { fmtInt } from "@/lib/format-money";
 
 export type GroupAllocation = {
   groupKey: string;      // chartGroup 또는 symbol
@@ -21,7 +22,7 @@ type Props = {
 };
 
 function fmt(n: number) {
-  return `₩${Math.round(n).toLocaleString()}`;
+  return `₩${fmtInt(n)}`;
 }
 
 function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {

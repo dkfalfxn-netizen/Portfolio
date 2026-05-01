@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { fmtInt } from "@/lib/format-money";
 
 const resendClient = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
@@ -101,9 +102,9 @@ export async function sendDailySummaryEmail(
     .map(
       (o) => `<tr>
   <td style="padding:6px 10px;border-bottom:1px solid #eee">${o.owner}</td>
-  <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">₩${Math.round(o.totalKrw).toLocaleString()}</td>
-  <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">₩${Math.round(o.stockKrw).toLocaleString()}</td>
-  <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">₩${Math.round(o.cashKrw).toLocaleString()}</td>
+  <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">₩${fmtInt(o.totalKrw)}</td>
+  <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">₩${fmtInt(o.stockKrw)}</td>
+  <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">₩${fmtInt(o.cashKrw)}</td>
 </tr>`,
     )
     .join("");
@@ -114,7 +115,7 @@ export async function sendDailySummaryEmail(
   <td style="padding:6px 10px;border-bottom:1px solid #eee">${r.owner}</td>
   <td style="padding:6px 10px;border-bottom:1px solid #eee">${r.symbol}</td>
   <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">${r.ratioPct.toFixed(2)}%</td>
-  <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">₩${Math.round(r.valueKrw).toLocaleString()}</td>
+  <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">₩${fmtInt(r.valueKrw)}</td>
 </tr>`,
     )
     .join("");
@@ -123,7 +124,7 @@ export async function sendDailySummaryEmail(
 <div style="font-family:sans-serif;max-width:760px;margin:0 auto">
   <h2 style="color:#111">포트폴리오 데일리 요약 리포트</h2>
   <p style="color:#555">${payload.dateKst} 기준 자동 리포트입니다.</p>
-  <p style="color:#222"><b>총 자산:</b> ₩${Math.round(payload.totalKrw).toLocaleString()}</p>
+  <p style="color:#222"><b>총 자산:</b> ₩${fmtInt(payload.totalKrw)}</p>
   <p style="color:#222"><b>비중 이탈 건수:</b> ${payload.violationsCount}건</p>
 
   <h3 style="margin-top:18px">보유자별 현황</h3>

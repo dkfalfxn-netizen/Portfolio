@@ -1,5 +1,7 @@
 "use client";
 
+import { fmtInt, fmtUsdNumber } from "@/lib/format-money";
+
 /** 한국 시세 앱 스타일: 상승 빨강(#ef5350 계열), 하락 청록(#00bfa5 계열) */
 const UP_BG = "bg-[#ef5350]";
 const DOWN_BG = "bg-[#00bfa5]";
@@ -25,8 +27,8 @@ export function LivePriceCell({
 
   const fmt = (n: number) =>
     currency === "USD" || currency === "EUR"
-      ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
-      : Math.round(n).toLocaleString();
+      ? fmtUsdNumber(n, 2, 4)
+      : fmtInt(Math.round(n));
 
   const pillClass = !hasDay
     ? "bg-muted text-foreground"
