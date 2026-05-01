@@ -141,10 +141,41 @@ function nonCashEntriesSortedByWeight(
     .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
 }
 
+/** 현금 통합 조각 툴팁: 이름이 「USD 현금」「KRW 현금」인 줄은 표시명 기준 한 줄로 합침 (% 가산) */
+function rollupCashTooltipEntries(
+  entries: AllocationSlice["allEntries"],
+): AllocationSlice["allEntries"] {
+  const map = new Map<string, { name: string; symbol: string; weight: number }>();
+  for (const e of entries) {
+    const nm = typeof e.name === "string" ? e.name.trim() : "";
+    const symRaw = typeof e.symbol === "string" ? e.symbol.trim() : "";
+    const w = typeof e.weight === "number" && Number.isFinite(e.weight) ? e.weight : 0;
+    const key =
+      nm === "USD 현금" || nm === "KRW 현금"
+        ? `__byName__:${nm}`
+        : `${symRaw.toUpperCase()}\n${nm}`;
+    const cur = map.get(key);
+    if (cur) cur.weight += w;
+    else
+      map.set(key, {
+        name: nm,
+        symbol: nm === "USD 현금" || nm === "KRW 현금" ? "" : symRaw,
+        weight: w,
+      });
+  }
+  return Array.from(map.values()).map((v) => ({
+    name: v.name,
+    symbol: v.symbol,
+    weight: v.weight,
+  }));
+}
+
 /** 툴팁 등: 현금 통합 조각에서는 USD/KRW·종목 줄 모두 노출 */
 function entriesForAllocationTooltip(slice: Pick<AllocationSlice, "ticker" | "allEntries">) {
   if (slice.ticker === "현금") {
-    return [...slice.allEntries].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
+    return rollupCashTooltipEntries(slice.allEntries).sort(
+      (a, b) => (b.weight ?? 0) - (a.weight ?? 0),
+    );
   }
   return nonCashEntriesSortedByWeight(slice.allEntries);
 }
@@ -190,8 +221,11 @@ function NeonTooltip({
       {isGroup ? (
         <div className="mb-1.5 space-y-1">
           <p className="mb-1 font-bold text-cyan-400">{p.ticker}</p>
-          {entries.map((e) => (
-            <div key={`${e.symbol}-${e.name}`} className="flex items-baseline justify-between gap-2">
+          {entries.map((e, ei) => (
+            <div
+              key={`${p.ticker}-tt-${ei}-${e.symbol}-${e.name}`}
+              className="flex items-baseline justify-between gap-2"
+            >
               <div className="flex items-baseline gap-1.5">
                 <span className="font-semibold text-zinc-300">{e.symbol}</span>
                 <span className="text-zinc-500">{e.name}</span>
@@ -643,8 +677,11 @@ function TargetStockWeightNeu({
                   {isGrouped ? (
                     <div className="space-y-1">
                       <p className="font-bold text-cyan-400">{slice.ticker}</p>
-                      {tooltipEntries.map((e) => (
-                        <div key={`${slice.ticker}-${e.symbol}`} className="flex items-baseline justify-between gap-2">
+                      {tooltipEntries.map((e, ei) => (
+                        <div
+                          key={`${slice.ticker}-bar-${ei}-${e.symbol}-${e.name}`}
+                          className="flex items-baseline justify-between gap-2"
+                        >
                           <div className="flex items-baseline gap-1.5">
                             <span className="font-semibold text-zinc-300">{e.symbol}</span>
                             <span className="text-zinc-500">{e.name}</span>

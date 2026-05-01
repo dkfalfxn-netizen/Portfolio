@@ -706,7 +706,7 @@ function mergeDuplicatePositions(positions: Position[]): Position[] {
   return Array.from(map.values());
 }
 
-/** 할당·툴팁용 현금 번들: 동일 (심볼, 표시명) 행은 평가금액 합산 */
+/** 할당·툴팁용 현금 번들: 동일 행 평가금액 합산 — USD/KRW「현금」은 표시명만으로 묶음(예수금·가짜 종목 줄 중복 방지) */
 function mergeCashBundleDisplayEntries(
   parts: { name: string; symbol: string; value: number }[],
 ): { name: string; symbol: string; value: number }[] {
@@ -714,10 +714,18 @@ function mergeCashBundleDisplayEntries(
   for (const p of parts) {
     const sym = typeof p.symbol === "string" ? p.symbol.trim() : "";
     const nm = typeof p.name === "string" ? p.name.trim() : "";
-    const key = `${sym}\n${nm}`;
+    const key =
+      nm === "USD 현금" || nm === "KRW 현금"
+        ? `__byName__:${nm}`
+        : `${sym}\n${nm}`;
     const cur = map.get(key);
     if (cur) cur.value += p.value;
-    else map.set(key, { name: nm || p.name, symbol: p.symbol ?? "", value: p.value });
+    else
+      map.set(key, {
+        name: nm || p.name,
+        symbol: nm === "USD 현금" || nm === "KRW 현금" ? "" : sym,
+        value: p.value,
+      });
   }
   return Array.from(map.values());
 }
