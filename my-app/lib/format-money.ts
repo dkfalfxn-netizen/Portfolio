@@ -11,6 +11,14 @@ export function fmtInt(n: number): string {
   return Math.round(n).toLocaleString(MONEY_INT_LOCALE);
 }
 
+/** 콤마·기타 비숫자 제거 후 정수 (원화 입력 필드 onChange용) */
+export function parseKoreanIntDigits(raw: string): number {
+  const d = raw.replace(/[^\d]/g, "");
+  if (d === "") return 0;
+  const n = Number(d);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+
 /** ₩ + 정수 콤마 */
 export function fmtKrwInt(n: number): string {
   return `₩${fmtInt(n)}`;

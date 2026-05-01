@@ -23,7 +23,7 @@ import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail
 import { LiquiditySection } from "@/components/liquidity-section";
 import { cn } from "@/lib/utils";
 import { inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
-import { fmtInt, fmtUsdNumber, MONEY_INT_LOCALE } from "@/lib/format-money";
+import { fmtInt, fmtUsdNumber, MONEY_INT_LOCALE, parseKoreanIntDigits } from "@/lib/format-money";
 import {
   HAS_LOCAL_CHANGES_KEY,
   loadAllTargetStockWeights,
@@ -3627,23 +3627,22 @@ export default function Home() {
                     <label className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-muted-foreground">KRW</span>
                       <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        className="w-32 rounded-md border bg-background px-2 py-1.5 text-right"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        className="w-36 min-w-0 rounded-md border bg-background px-2 py-1.5 text-right tabular-nums"
                         placeholder="0"
-                        value={group.cashKrw}
-                        onChange={(e) =>
+                        value={group.cashKrw === 0 ? "" : fmtInt(group.cashKrw)}
+                        onChange={(e) => {
+                          const krw = parseKoreanIntDigits(e.target.value);
                           setCashByOwner((prev) => ({
                             ...prev,
                             [group.ownerName]: {
                               ...prev[group.ownerName],
-                              krw: Number.isFinite(Number(e.target.value))
-                                ? Number(e.target.value)
-                                : 0,
+                              krw,
                             },
-                          }))
-                        }
+                          }));
+                        }}
                       />
                     </label>
                   </div>
