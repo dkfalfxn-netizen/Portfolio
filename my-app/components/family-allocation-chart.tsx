@@ -575,10 +575,14 @@ function TargetStockWeightNeu({
           const hasPositiveTarget = target > 0;
           const isOverTargetWhenZero = hasInputTarget && !hasPositiveTarget && actual > 0;
 
+          // 목표 미설정이고 실제 보유가 있으면 10%를 기준 스케일로 삼아 회색 바 표시
+          const NO_TARGET_REF = 10;
           const ratio = hasPositiveTarget
             ? actual / target
             : isOverTargetWhenZero
             ? MAX_RATIO
+            : !hasInputTarget && actual > 0
+            ? actual / NO_TARGET_REF
             : 0;
           const barWidthPct = (Math.min(ratio, MAX_RATIO) / MAX_RATIO) * 100;
           const isClipped = ratio > MAX_RATIO;
