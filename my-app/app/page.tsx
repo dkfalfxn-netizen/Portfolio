@@ -206,12 +206,13 @@ function calcSellRealizedKrw(entry: Pick<SellLogEntry, "qty" | "sellPrice" | "av
   const avg = Number(entry.avgPrice);
   const fx = Number(entry.fxRate) || 1;
   if (!Number.isFinite(qty) || !Number.isFinite(sell) || !Number.isFinite(avg)) return 0;
-  const gross =
-    entry.currency === "KRW"
-      ? (sell - avg) * qty
-      : (sell - avg) * qty * fx;
-  // 수수료는 종목 추가(매입) 시 평단·현금 차감에만 반영. 매도 실현손익에서는 이중 차감하지 않음.
-  return gross;
+  const sellNotionalKrw =
+    entry.currency === "KRW" ? sell * qty : sell * qty * fx;
+  const buyNotionalKrw =
+    entry.currency === "KRW" ? avg * qty : avg * qty * fx;
+  /** 매도 금액 기준 수수료 차감(매입 쪽은 종목 추가 시 별도 반영) */
+  const netProceedsKrw = sellNotionalKrw * (1 - TRADING_FEE_RATE);
+  return netProceedsKrw - buyNotionalKrw;
 }
 
 /** 종목 추가 시 현금 차감: 명목 + 매입 수수료 (통화별) */
@@ -4938,11 +4939,16 @@ export default function Home() {
           >
           <section id="section-realized" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
             <h2 className="mb-2 font-semibold">실현손익 입력</h2>
-            <p className="mb-3 text-xs text-muted-foreground">종목 추가 아래에서 보유자별 매도 기록을 입력합니다.</p>
+            <p className="mb-3 text-xs text-muted-foreground">
+              종목 추가 아래에서 보유자별 매도 기록을 입력합니다. 실현손익은 매도 체결 금액(원화換算)에{" "}
+              <span className="font-medium text-foreground">{((TRADING_FEE_RATE * 100).toFixed(1))}%</span>
+              매도 수수료를 차감한 금액입니다.
+            </p>
             {(() => {
               const owner = sellLogOwnerForSection;
               const listViewOwner = sellLogListViewOwner;
               const listLog = sellLog[listViewOwner] ?? [];
+              const listTotalRealizedKrw = listLog.reduce((s, e) => s + calcSellRealizedKrw(e), 0);
               const log = sellLog[owner] ?? [];
               const totalRealized = log.reduce((s, e) => s + calcSellRealizedKrw(e), 0);
               const allSellLogEntries: SellLogEntry[] = Object.values(sellLog).flat();
@@ -5056,7 +5062,13 @@ export default function Home() {
                 const avg = Number(entry.avgPrice);
                 const fx = Number(entry.fxRate) || 1;
                 if (!Number.isFinite(qty) || !Number.isFinite(sell) || !Number.isFinite(avg)) return 0;
-                return entry.currency === "KRW" ? (sell - avg) * qty : (sell - avg) * qty * fx;
+                return calcSellRealizedKrw({
+                  qty,
+                  sellPrice: sell,
+                  avgPrice: avg,
+                  currency: entry.currency,
+                  fxRate: fx,
+                });
               };
               const handleTickerChange = (nextSymbol: string) => {
                 const selected = ownerTickerOptions.find((x) => x.symbol === nextSymbol);
@@ -5366,7 +5378,14 @@ export default function Home() {
                     <button type="button" className="cursor-pointer rounded bg-primary px-3 py-1 text-primary-foreground hover:bg-primary/90" onClick={handleSave}>
                       {form.editingId ? "수정 저장" : "+ 기록 추가"}
                     </button>
-                    <div className="col-span-2 text-[11px] font-semibold sm:col-span-4">실현손익 예상: {preview >= 0 ? "+" : ""}₩{fmtInt(preview)}</div>
+                    <div className="col-span-2 sm:col-span-4">
+                      <span className="text-[11px] font-semibold">
+                        실현손익 예상: {preview >= 0 ? "+" : ""}₩{fmtInt(preview)}
+                      </span>
+                      <span className="ml-1 text-[10px] text-muted-foreground">
+                        (매도 {(TRADING_FEE_RATE * 100).toFixed(1)}% 반영)
+                      </span>
+                    </div>
                     {sellLogErrorByOwner[owner] ? <p className="col-span-2 text-[11px] font-medium text-destructive sm:col-span-4">{sellLogErrorByOwner[owner]}</p> : null}
                   </div>
                   {symPnlList.length > 0 && (
@@ -5480,6 +5499,26 @@ export default function Home() {
                           </select>
                         </label>
                         <span className="text-[10px] text-muted-foreground tabular-nums">({listLog.length}건)</span>
+                        {listLog.length > 0 ? (
+                          <span className="text-[10px] text-muted-foreground">
+                            · 총 실현손익{" "}
+                            <span
+                              className={`tabular-nums font-semibold ${
+                                listTotalRealizedKrw > 0
+                                  ? "text-red-500"
+                                  : listTotalRealizedKrw < 0
+                                    ? "text-blue-500"
+                                    : "text-muted-foreground"
+                              }`}
+                            >
+                              {listTotalRealizedKrw >= 0 ? "+" : ""}₩{fmtInt(listTotalRealizedKrw)}
+                            </span>
+                            <span className="opacity-80">
+                              {" "}
+                              (매도 {(TRADING_FEE_RATE * 100).toFixed(1)}% 반영)
+                            </span>
+                          </span>
+                        ) : null}
                       </div>
                       <button
                         type="button"
