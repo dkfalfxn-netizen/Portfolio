@@ -28,7 +28,7 @@ export function inferTradingCurrencyFromTicker(raw: string): "KRW" | "USD" | "EU
   if (eurHints.test(s) || s === "RMS") return "EUR";
 
   if (/^[A-Z]{1,4}\.[A-Z]{1,4}$/.test(s)) return "USD";
-  if (/^[A-Z][A-Z0-9.-]{0,19}$/.test(s)) return "USD";
+  if (s.length >= 2 && /^[A-Z][A-Z0-9.-]{0,19}$/.test(s)) return "USD";
 
   return null;
 }
