@@ -22,11 +22,14 @@ export function ymdKST(at: Date): string {
   }).format(at);
 }
 
-/** 어제 KST 날짜 (YYYY-MM-DD) */
+/** 어제 KST 날짜 (YYYY-MM-DD)
+ *
+ * setDate(getDate()-1)은 서버 로컬 TZ(UTC) 기준으로 하루를 빼므로
+ * KST 자정 근처에서 날짜가 어긋날 수 있음.
+ * 한국은 DST 없이 UTC+9 고정이므로 정확히 86400초를 빼는 방식이 안전합니다.
+ */
 export function yesterdayKST(at: Date = new Date()): string {
-  const d = new Date(at);
-  d.setDate(d.getDate() - 1);
-  return todayKST(d);
+  return ymdKST(new Date(at.getTime() - 24 * 60 * 60 * 1000));
 }
 
 /** KST 기준 MM/DD 문자열 (예: "04/21") */
@@ -39,6 +42,15 @@ export function mmddKST(at: Date = new Date()): string {
   const m = parts.find((p) => p.type === "month")?.value ?? "??";
   const day = parts.find((p) => p.type === "day")?.value ?? "??";
   return `${m}/${day}`;
+}
+
+/** KST(Asia/Seoul) 기준 토요일·일요일이면 true (자동 크론 등에 사용) */
+export function isKstWeekend(at: Date = new Date()): boolean {
+  const wd = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ,
+    weekday: "short",
+  }).format(at);
+  return wd === "Sat" || wd === "Sun";
 }
 
 /** KST 기준 YYYY-MM-DD HH:MM 문자열 */

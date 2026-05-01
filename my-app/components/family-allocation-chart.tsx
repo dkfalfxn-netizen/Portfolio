@@ -671,12 +671,17 @@ function TargetStockWeightNeu({
                     borderRight: "1px dashed rgba(161,161,170,0.55)",
                   }}
                 />
-                {barWidthPct > 0 && (
+                {barWidthPct > 0 ? (
                   <div
                     className="absolute left-0 top-[2px] bottom-[2px] rounded-sm transition-all duration-300"
                     style={{ width: `${barWidthPct}%`, background: barBg, boxShadow: barGlow }}
                   />
-                )}
+                ) : hasInputTarget && !hasPositiveTarget ? (
+                  <div
+                    className="absolute left-0 top-[2px] bottom-[2px] w-[3px] rounded-sm opacity-70"
+                    style={{ background: "rgba(161,161,170,0.5)" }}
+                  />
+                ) : null}
                 {isClipped && (
                   <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[8px] text-emerald-300/70">›</span>
                 )}
@@ -689,7 +694,7 @@ function TargetStockWeightNeu({
                 ) : !hasPositiveTarget && actual > 0 ? (
                   <span className="text-emerald-400">목표 0% ▼ +{actual.toFixed(1)}%p</span>
                 ) : !hasPositiveTarget ? (
-                  <span className="text-zinc-500">목표 0%</span>
+                  <span className="text-zinc-400">목표 0%</span>
                 ) : withinBand ? (
                   <span className="text-sky-400">≈ 목표</span>
                 ) : belowBand ? (

@@ -176,8 +176,10 @@ function aggregateOwnerTotals(rows: OwnerChange[]): OwnerChange[] {
 
 export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
   const [cursor, setCursor] = useState(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
+    // KST 기준 연·월로 초기화 (브라우저 TZ와 무관하게 달력이 KST 월을 표시)
+    const kst = ymdKST(new Date()); // "YYYY-MM-DD"
+    const [y, m] = kst.split("-").map(Number);
+    return new Date(y, m - 1, 1);
   });
   const [tooltip, setTooltip] = useState<{ key: string; x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);

@@ -39,6 +39,7 @@ async function fetchYahooPrice(yahooSymbol: string): Promise<PriceQuote> {
       method: "GET",
       cache: "no-store",
       headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return { price: null, currency: null };
     const data = await res.json() as { chart?: { result?: unknown[] } };
@@ -67,6 +68,7 @@ async function fetchNaverGoldPrice(): Promise<PriceQuote> {
         Accept: "text/html,application/xhtml+xml",
         Referer: "https://finance.naver.com/",
       },
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return { price: null, currency: null };
     const html = await res.text();
@@ -82,19 +84,56 @@ async function fetchNaverGoldPrice(): Promise<PriceQuote> {
 }
 
 /**
+ * 네이버 증권 모바일 API — 6자리 한국 주식/ETF 코드
+ * closePrice(현재가), compareToPreviousClosePrice(전일 대비) 반환
+ */
+async function fetchNaverStockPrice(code: string): Promise<PriceQuote> {
+  try {
+    const url = `https://m.stock.naver.com/api/stock/${encodeURIComponent(code)}/basic`;
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return { price: null, currency: null };
+    const d = await res.json() as Record<string, unknown>;
+    const price =
+      typeof d.closePrice === "string"
+        ? parseFloat((d.closePrice as string).replace(/,/g, ""))
+        : null;
+    if (!price || !Number.isFinite(price) || price <= 0) return { price: null, currency: null };
+    return { price, currency: "KRW" };
+  } catch {
+    return { price: null, currency: null };
+  }
+}
+
+/**
  * 심볼 배열에 대해 현재가를 일괄 조회합니다.
+ * - 한국 6자리 코드(ETF/주식): 네이버 증권 우선, 실패 시 Yahoo Finance 폴백
+ * - 금현물 등 KRX 상품: 네이버 금융
+ * - 해외/기타: Yahoo Finance
  * USD/KRW, EUR/KRW 환율도 함께 반환합니다.
  */
 export async function fetchPrices(inputSymbols: string[]): Promise<PricesResult> {
   const unique = [...new Set(inputSymbols.map((s) => s.trim()).filter(Boolean))];
   const commodities = unique.filter(isKrxCommodity);
-  const yahooInputs = unique.filter((s) => !isKrxCommodity(s));
+  const nonCommodities = unique.filter((s) => !isKrxCommodity(s));
 
-  const mapping = yahooInputs.map((s) => ({ input: s, yahoo: toYahooSymbol(s) }));
+  // 6자리 숫자로 시작하는 한국 주식/ETF 코드 (예: 069500, 0022T0)
+  const krSixDigit = nonCommodities.filter((s) => /^[0-9][0-9A-Z]{5}$/i.test(s.trim()));
+  const nonKr = nonCommodities.filter((s) => !/^[0-9][0-9A-Z]{5}$/i.test(s.trim()));
+
+  const mapping = nonKr.map((s) => ({ input: s, yahoo: toYahooSymbol(s) }));
   const yahooSet = [...new Set([...mapping.map((m) => m.yahoo), "KRW=X", "EURKRW=X"])];
 
-  const [yahooResults, commodityResults] = await Promise.all([
+  const [yahooResults, naverStockResults, commodityResults] = await Promise.all([
+    // 해외주식 + 환율
     Promise.all(yahooSet.map(async (sym) => [sym.toUpperCase(), await fetchYahooPrice(sym)] as const)),
+    // 한국 주식/ETF — 네이버 우선
+    Promise.all(krSixDigit.map(async (sym) => [sym, await fetchNaverStockPrice(sym)] as const)),
+    // 금현물 등 KRX 상품
     Promise.all(commodities.map(async (sym) => {
       const q = /^M040200/i.test(sym) ? await fetchNaverGoldPrice() : { price: null, currency: null };
       return [sym, q] as const;
@@ -102,12 +141,29 @@ export async function fetchPrices(inputSymbols: string[]): Promise<PricesResult>
   ]);
 
   const byYahoo = new Map<string, PriceQuote>(yahooResults);
+  const byNaverStock = new Map<string, PriceQuote>(naverStockResults);
   const quotes: Record<string, PriceQuote> = {};
 
+  // 해외주식
   for (const { input, yahoo } of mapping) {
     const q = byYahoo.get(yahoo.toUpperCase());
     quotes[input] = { price: q?.price ?? null, currency: q?.currency ?? null };
   }
+
+  // 한국 6자리 코드: 네이버 성공 시 사용, 실패 시 Yahoo 폴백
+  for (const sym of krSixDigit) {
+    const naverQ = byNaverStock.get(sym);
+    if (naverQ?.price) {
+      quotes[sym] = naverQ;
+    } else {
+      // Yahoo 폴백 (.KS 변환)
+      const yahooSym = toYahooSymbol(sym).toUpperCase();
+      const yahooQ = byYahoo.get(yahooSym) ?? await fetchYahooPrice(toYahooSymbol(sym));
+      quotes[sym] = { price: yahooQ?.price ?? null, currency: yahooQ?.currency ?? "KRW" };
+    }
+  }
+
+  // 금현물 등 KRX 상품
   for (const [sym, q] of commodityResults) {
     quotes[sym] = q;
   }

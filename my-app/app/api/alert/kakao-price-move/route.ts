@@ -12,7 +12,7 @@ import {
   type QuoteWeightedOwnerInput,
 } from "@/lib/briefing-message";
 import { isKrxCommodity, toYahooSymbol } from "@/lib/finance-symbols";
-import { todayKST, yesterdayKST, mmddKST } from "@/lib/date-utils";
+import { todayKST, yesterdayKST, mmddKST, isKstWeekend } from "@/lib/date-utils";
 import { analyzeFourSignals, type FourSignalsResult } from "@/lib/technical-signals";
 import { isKrEquityTradingSessionDay, isUsEquityTradingSessionDay } from "@/lib/trading-calendar";
 
@@ -203,11 +203,10 @@ function normalizeDbPositions(raw: unknown): Array<{
 
 /** Cron 쿼리 ?slot= 과 DB briefing_slot 값 (한국 시간 발송 시각) */
 const BRIEFING_SLOT_LABELS: Record<string, string> = {
-  "0100": "01:00 KST",
-  "0930": "09:00 KST",
-  "1200": "12:00 KST",
-  "1540": "15:40 KST",
-  "2300": "23:00 KST",
+  /** 24:00 = 당일 자정 종료 시각 (= 익일 00:00 KST와 동일) */
+  "0930": "09:30 KST",
+  "1400": "14:00 KST",
+  "2400": "24:00 KST",
   legacy: "일일(레거시)",
   manual: "수동 테스트",
 };
@@ -251,6 +250,17 @@ export async function GET(req: NextRequest) {
 
   const briefingSlot = req.nextUrl.searchParams.get("slot") ?? "legacy";
   const slotLabel = BRIEFING_SLOT_LABELS[briefingSlot] ?? briefingSlot;
+
+  const now = new Date();
+  if (isKstWeekend(now)) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "kst_weekend",
+      briefing_slot: briefingSlot,
+      message: "KST 주말(토·일)에는 크론 텔레그램 자동 브리핑을 발송하지 않습니다.",
+    });
+  }
 
   const admin = createSupabaseAdmin();
   if (!admin) return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
@@ -296,7 +306,6 @@ export async function GET(req: NextRequest) {
   const dateKst = todayKST();
 
   const yst = yesterdayKST();
-  const now = new Date();
   const marketOpen = {
     DOMESTIC: isKrEquityTradingSessionDay(now),
     OVERSEAS: isUsEquityTradingSessionDay(now),

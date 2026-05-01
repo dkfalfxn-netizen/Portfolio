@@ -275,7 +275,7 @@ function sanitizeTargetStockWeightsForOwners(raw: unknown, allowed: Set<string>)
     for (const [ticker, v] of Object.entries(inner as Record<string, unknown>)) {
       if (typeof ticker !== "string" || !ticker.trim()) continue;
       const n = Number(v);
-      if (Number.isFinite(n) && n > 0 && n <= 100) row[ticker] = n;
+      if (Number.isFinite(n) && n >= 0 && n <= 100) row[ticker] = n;
     }
     if (Object.keys(row).length) out[owner] = row;
   }

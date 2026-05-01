@@ -9,6 +9,7 @@ import {
 } from "@/lib/resend";
 import type { AlertRule } from "@/app/api/alert/config/route";
 import { saveAllSnapshots, type SaveAllSnapshotsResult } from "@/app/api/snapshot/route";
+import { fetchPrices } from "@/lib/market-prices";
 import { todayKST } from "@/lib/date-utils";
 
 type Position = {
@@ -150,6 +151,11 @@ async function handleCheck(syncKey?: string | null) {
    * 오늘(KST) 일별 평가 스냅샷을 `portfolio_daily_snapshots`에 저장합니다.
    * (이전에는 알림 규칙이 0건이면 여기까지 도달하지 못해 방문 없이 기록이 안 되는 버그가 있었음)
    */
+  // 알림 규칙 체크·일일 요약에 사용할 실시간 환율 조회 (실패 시 폴백)
+  const { usdKrw: liveUsd, eurKrw: liveEur } = await fetchPrices(["KRW=X", "EURKRW=X"]).catch(() => ({ usdKrw: null, eurKrw: null }));
+  const usdKrw = liveUsd ?? FALLBACK_USD_KRW;
+  const eurKrw = liveEur ?? FALLBACK_EUR_KRW;
+
   let snapshotResult: SaveAllSnapshotsResult = { total: 0, succeeded: 0, failed: 0, errors: [] };
   try {
     snapshotResult = await saveAllSnapshots();
@@ -200,8 +206,8 @@ async function handleCheck(syncKey?: string | null) {
       positions,
       cashByOwner,
       rules,
-      FALLBACK_USD_KRW,
-      FALLBACK_EUR_KRW,
+      usdKrw,
+      eurKrw,
     );
 
     let sent = false;
@@ -215,7 +221,7 @@ async function handleCheck(syncKey?: string | null) {
 
     let summaryError: string | undefined;
     if (cfg.email) {
-      const summary = buildDailySummary(positions, cashByOwner, FALLBACK_USD_KRW, FALLBACK_EUR_KRW);
+      const summary = buildDailySummary(positions, cashByOwner, usdKrw, eurKrw);
       const r = await sendDailySummaryEmail(cfg.email, {
         dateKst: todayKST(),
         totalKrw: summary.totalKrw,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 export type GroupAllocation = {
   groupKey: string;      // chartGroup 또는 symbol
@@ -241,6 +241,13 @@ export function RebalancingCalculator({
   usdKrw: number;
 }) {
   const [selectedOwner, setSelectedOwner] = useState(allocationByOwner[0]?.ownerName ?? "");
+
+  // ownerData 목록이 바뀌었는데 선택된 owner가 없으면 첫 번째로 재설정
+  useEffect(() => {
+    if (!allocationByOwner.find((o) => o.ownerName === selectedOwner)) {
+      setSelectedOwner(allocationByOwner[0]?.ownerName ?? "");
+    }
+  }, [allocationByOwner, selectedOwner]);
 
   const ownerData = useMemo(() => {
     return allocationByOwner.map(({ ownerName, data, total }) => {

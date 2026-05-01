@@ -17,11 +17,25 @@ type BreakdownValues = Record<string, number>;
 const FALLBACK_USD_KRW = 1400;
 const FALLBACK_EUR_KRW = 1500;
 
-/** 포트폴리오 스냅샷 하나에 대해 시세를 받아서 owner별 평가액을 계산 */
+/**
+ * 포트폴리오 스냅샷 하나에 대해 시세를 받아서 owner별 평가액을 계산.
+ *
+ * 시세 조회 우선순위:
+ *   1. fetchPrices() — 한국주식: 네이버 증권, 해외주식: Yahoo Finance
+ *   2. 조회 실패 시 positions의 currentPrice (last valid price)
+ *
+ * usedFallback=true 인 owner가 있으면 해당 owner의 가격이 stale일 수 있음.
+ */
 async function calcOwnerValues(
   positions: Position[],
   cashByOwner: Record<string, CashEntry>,
-): Promise<{ ownerValues: Record<string, number>; breakdownValues: BreakdownValues; totalValue: number; usdKrw: number }> {
+): Promise<{
+  ownerValues: Record<string, number>;
+  breakdownValues: BreakdownValues;
+  totalValue: number;
+  usdKrw: number;
+  stalePriceOwners: string[];
+}> {
   const symbols = [...new Set(positions.map((p) => p.symbol))];
   const { quotes, usdKrw: fetchedUsd, eurKrw: fetchedEur } = await fetchPrices(symbols);
 
@@ -30,20 +44,29 @@ async function calcOwnerValues(
 
   const ownerValues: Record<string, number> = {};
   const breakdownValues: BreakdownValues = {};
-  const owners = [...new Set(positions.map((p) => p.owner))];
+  const stalePriceOwners: string[] = [];
+  const owners = [
+    ...new Set([
+      ...positions.map((p) => p.owner),
+      ...Object.keys(cashByOwner),
+    ]),
+  ];
 
   for (const owner of owners) {
     const ownerPos = positions.filter((p) => p.owner === owner);
     const cash = cashByOwner[owner] ?? { usd: 0, krw: 0 };
+    let usedFallback = false;
 
     const stockValue = ownerPos.reduce((sum, p) => {
-      // 최신 시세 우선, 없으면 currentPrice(저장된 값) 사용
       const quote = quotes[p.symbol];
+      if (!quote?.price) usedFallback = true;
+      // 최신 시세 우선, 없으면 currentPrice(last valid price) 사용
       const price = quote?.price ?? p.currentPrice;
       if (p.currency === "USD") return sum + p.quantity * price * usdKrw;
       if (p.currency === "EUR") return sum + p.quantity * price * eurKrw;
       return sum + p.quantity * price;
     }, 0);
+
     const grouped = new Map<string, number>();
     for (const p of ownerPos) {
       const quote = quotes[p.symbol];
@@ -66,10 +89,11 @@ async function calcOwnerValues(
       breakdownValues[`${owner} · 현금`] = cashKrw;
     }
     ownerValues[owner] = stockValue + cashKrw;
+    if (usedFallback && ownerPos.length > 0) stalePriceOwners.push(owner);
   }
 
   const totalValue = Object.values(ownerValues).reduce((s, v) => s + v, 0);
-  return { ownerValues, breakdownValues, totalValue, usdKrw };
+  return { ownerValues, breakdownValues, totalValue, usdKrw, stalePriceOwners };
 }
 
 
@@ -100,7 +124,7 @@ export async function GET(req: NextRequest) {
 
   const withBreakdown = await admin
     .from("portfolio_daily_snapshots")
-    .select("date, owner_values, breakdown_values, total_value, usd_krw")
+    .select("date, owner_values, breakdown_values, total_value, usd_krw, updated_at")
     .eq("sync_key", syncKey)
     .gte("date", cutoffDate)
     .order("date", { ascending: true });
@@ -129,6 +153,7 @@ export async function GET(req: NextRequest) {
     breakdownValues: (row.breakdown_values as BreakdownValues | undefined) ?? undefined,
     totalValue: Number(row.total_value ?? 0),
     usdKrw: Number(row.usd_krw ?? 0),
+    updatedAt: typeof row.updated_at === "string" ? row.updated_at : undefined,
   }));
 
   return NextResponse.json({ snapshots });
@@ -237,7 +262,17 @@ export async function POST(req: NextRequest) {
 
   const positions = Array.isArray(snap.positions) ? (snap.positions as Position[]) : [];
   const cashByOwner = ((snap.cash_by_owner as Record<string, CashEntry>) ?? {});
-  const { ownerValues, breakdownValues, totalValue, usdKrw } = await calcOwnerValues(positions, cashByOwner);
+
+  let calcResult: Awaited<ReturnType<typeof calcOwnerValues>>;
+  try {
+    calcResult = await calcOwnerValues(positions, cashByOwner);
+  } catch (e) {
+    return NextResponse.json(
+      { error: `시세 조회 실패: ${e instanceof Error ? e.message : String(e)}` },
+      { status: 502 },
+    );
+  }
+  const { ownerValues, breakdownValues, totalValue, usdKrw, stalePriceOwners } = calcResult;
 
   const today = todayKST();
   const upsertPayload: Record<string, unknown> = {
@@ -267,7 +302,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: upsertError.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, date: today, ownerValues, breakdownValues, totalValue });
+  return NextResponse.json({
+    ok: true,
+    date: today,
+    ownerValues,
+    breakdownValues,
+    totalValue,
+    ...(stalePriceOwners.length > 0 ? { stalePriceOwners } : {}),
+  });
 }
 
 export type SaveAllSnapshotsResult = {
@@ -307,12 +349,18 @@ export async function saveAllSnapshots(): Promise<SaveAllSnapshotsResult> {
       try {
         const positions = Array.isArray(snap.positions) ? (snap.positions as Position[]) : [];
         const cashByOwner = ((snap.cash_by_owner as Record<string, CashEntry>) ?? {});
-        const { ownerValues, breakdownValues, totalValue, usdKrw } = await calcOwnerValues(positions, cashByOwner);
+        const { ownerValues, breakdownValues, totalValue, usdKrw, stalePriceOwners } = await calcOwnerValues(positions, cashByOwner);
 
         if (!(totalValue > 0)) {
           result.failed++;
           result.errors.push({ syncKey: snap.sync_key, reason: "totalValue가 0 이하 (시세 조회 실패 추정)" });
           return;
+        }
+        if (stalePriceOwners.length > 0) {
+          result.errors.push({
+            syncKey: snap.sync_key,
+            reason: `일부 보유자 시세 폴백(last valid price): ${stalePriceOwners.join(", ")}`,
+          });
         }
 
         const withBreakdown = await admin.from("portfolio_daily_snapshots").upsert({

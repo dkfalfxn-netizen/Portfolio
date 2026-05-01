@@ -24,7 +24,7 @@ function sanitizeInner(raw: unknown): Record<string, number> {
   for (const [ticker, v] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof ticker !== "string" || !ticker.trim()) continue;
     const n = Number(v);
-    if (Number.isFinite(n) && n > 0 && n <= 100) row[ticker] = n;
+    if (Number.isFinite(n) && n >= 0 && n <= 100) row[ticker] = n;
   }
   return row;
 }
