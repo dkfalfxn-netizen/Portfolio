@@ -705,6 +705,22 @@ function mergeDuplicatePositions(positions: Position[]): Position[] {
   return Array.from(map.values());
 }
 
+/** 할당·툴팁용 현금 번들: 동일 (심볼, 표시명) 행은 평가금액 합산 */
+function mergeCashBundleDisplayEntries(
+  parts: { name: string; symbol: string; value: number }[],
+): { name: string; symbol: string; value: number }[] {
+  const map = new Map<string, { name: string; symbol: string; value: number }>();
+  for (const p of parts) {
+    const sym = typeof p.symbol === "string" ? p.symbol.trim() : "";
+    const nm = typeof p.name === "string" ? p.name.trim() : "";
+    const key = `${sym}\n${nm}`;
+    const cur = map.get(key);
+    if (cur) cur.value += p.value;
+    else map.set(key, { name: nm || p.name, symbol: p.symbol ?? "", value: p.value });
+  }
+  return Array.from(map.values());
+}
+
 /** 종목 추가 폼: 한 건을 기존 목록에 병합하거나 새 줄 추가 */
 function applyPositionUpsert(prev: Position[], nextEntry: Position): Position[] {
   const key = makePositionKey(nextEntry);
@@ -1604,19 +1620,31 @@ export default function Home() {
       if (krw > 0) {
         cashBundleParts.push({ name: "KRW 현금", symbol: "", value: krw });
       }
+      const hasUsdDeposit = usdCashKrw > 0;
+      const hasKrwDeposit = krw > 0;
       if (chartCashStockSlice) {
-        cashBundleParts.push(...chartCashStockSlice.allEntries);
+        for (const ent of chartCashStockSlice.allEntries) {
+          const sym = typeof ent.symbol === "string" ? ent.symbol.trim() : "";
+          const nm = typeof ent.name === "string" ? ent.name.trim() : "";
+          if (sym === "" && nm === "USD 현금" && hasUsdDeposit) continue;
+          if (sym === "" && nm === "KRW 현금" && hasKrwDeposit) continue;
+          cashBundleParts.push({
+            name: ent.name,
+            symbol: typeof ent.symbol === "string" ? ent.symbol : "",
+            value: ent.value,
+          });
+        }
       }
-      const cashBundleValue =
-        usdCashKrw + krw + (chartCashStockSlice?.value ?? 0);
+      const mergedCashEntries = mergeCashBundleDisplayEntries(cashBundleParts);
+      const cashBundleValue = mergedCashEntries.reduce((s, e) => s + e.value, 0);
 
       const extra: CashAgg[] = [];
-      if (cashBundleValue > 0 && cashBundleParts.length > 0) {
+      if (cashBundleValue > 0 && mergedCashEntries.length > 0) {
         extra.push({
           name: `cash-bundle|${ownerName}`,
           displayName: "현금",
           ticker: "현금",
-          allEntries: cashBundleParts,
+          allEntries: mergedCashEntries,
           value: cashBundleValue,
           changePct: chartCashStockSlice?.changePct ?? null,
         });
