@@ -452,26 +452,20 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
     return () => window.clearTimeout(id);
   }, [targets, ownerName]);
 
-  /** 대시보드 목표 비중 불러오기 — 계산기 키에 병합 저장 후 미보유 종목 행도 표시 */
+  /** 대시보드 목표 비중 불러오기 — 계산기 키를 대시보드 값으로 교체(stale 키 제거 포함) */
   const handleLoad = useCallback(() => {
     if (typeof window === "undefined") return;
     const saved = loadAllTargetStockWeights()[ownerName] ?? {};
-    // 계산기 키에 대시보드 목표를 병합 저장 → mergeSavedTargetGroupsWithoutHoldings가 미보유 행 인식
+    // 계산기 키를 대시보드 저장값으로 완전 교체 (병합 아님 → stale 키 자동 제거)
     const allCalc = loadAllCalculatorTargetWeights();
-    const merged = { ...(allCalc[ownerName] ?? {}) };
-    for (const [k, v] of Object.entries(saved)) {
-      merged[k] = v;
-    }
-    allCalc[ownerName] = merged;
+    allCalc[ownerName] = { ...saved };
     try { window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(allCalc)); } catch { /* ignore */ }
-    // 현재 rows의 targets state 업데이트
-    setTargets((prev) => {
-      const next = { ...prev };
-      for (const k of Object.keys(saved)) {
-        next[k] = dashboardTargetInputString(saved, k);
-      }
-      return next;
-    });
+    // targets state도 대시보드 저장값으로 교체
+    const next: Record<string, string> = {};
+    for (const k of Object.keys(saved)) {
+      next[k] = dashboardTargetInputString(saved, k);
+    }
+    setTargets(next);
     // 외부 래퍼에 ownerData 재계산 요청 (미보유 행 추가)
     onDashboardLoaded?.();
     setLoadToast(true);
