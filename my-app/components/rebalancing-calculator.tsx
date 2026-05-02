@@ -17,6 +17,29 @@ import {
   REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
 } from "@/lib/rebalance-visual-order";
 
+/** 대시보드에 목표만 있고 현재 평가 0원인 그룹을 계산기 행에 포함 */
+function mergeSavedTargetGroupsWithoutHoldings(ownerName: string, baseGroups: GroupAllocation[]): GroupAllocation[] {
+  const saved = loadAllTargetStockWeights()[ownerName] ?? {};
+  const seen = new Set(baseGroups.map((g) => g.groupKey.trim()));
+  const extra: GroupAllocation[] = [];
+  for (const key of Object.keys(saved)) {
+    const k = key.trim();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    extra.push({
+      groupKey: k,
+      displayName: k,
+      valueKrw: 0,
+      currentPct: 0,
+      repSymbol: k,
+      repName: k,
+      repPrice: 0,
+      members: [],
+    });
+  }
+  return extra.length ? [...baseGroups, ...extra] : baseGroups;
+}
+
 // ─── 타입 ──────────────────────────────────────────────────────────────────────
 
 export type GroupAllocation = {
@@ -233,20 +256,22 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
     return init;
   });
 
-  // 새 그룹이 추가됐을 때 targets에 기본값(현재 비중) 추가
+  // 새 그룹이 추가됐을 때 targets에 기본값 추가 (대시보드 저장 목표가 있으면 우선)
   useEffect(() => {
     setTargets((prev) => {
+      const saved = loadAllTargetStockWeights()[ownerName] ?? {};
       const next = { ...prev };
       let changed = false;
       for (const g of groups) {
         if (!(g.groupKey in next)) {
-          next[g.groupKey] = g.currentPct.toFixed(1);
+          const sv = saved[g.groupKey];
+          next[g.groupKey] = sv != null ? String(sv) : g.currentPct.toFixed(1);
           changed = true;
         }
       }
       return changed ? next : prev;
     });
-  }, [groups]);
+  }, [groups, ownerName]);
 
   const [visualOrderKeys, setVisualOrderKeys] = useState<string[] | null>(null);
 
@@ -816,6 +841,19 @@ export function RebalancingCalculator({
   usdKrw: number;
 }) {
   const [selectedOwner, setSelectedOwner] = useState(allocationByOwner[0]?.ownerName ?? "");
+  const [mergeTargetsReady, setMergeTargetsReady] = useState(false);
+  /** 대시보드 저장/불러오기 후 localStorage 변경을 반영 */
+  const [savedTargetsBump, setSavedTargetsBump] = useState(0);
+
+  useEffect(() => {
+    setMergeTargetsReady(true);
+  }, []);
+
+  useEffect(() => {
+    const onRefresh = () => setSavedTargetsBump((n) => n + 1);
+    window.addEventListener("portfolio-target-weights-refresh", onRefresh);
+    return () => window.removeEventListener("portfolio-target-weights-refresh", onRefresh);
+  }, []);
 
   useEffect(() => {
     if (!allocationByOwner.find((o) => o.ownerName === selectedOwner)) {
@@ -837,7 +875,7 @@ export function RebalancingCalculator({
         }
       }
 
-      const groups: GroupAllocation[] = data.map((d) => {
+      let groups: GroupAllocation[] = data.map((d) => {
         const rep = repMap.get(d.ticker);
         const members = items
           .filter((p) => (p.chartGroup?.trim() || p.symbol) === d.ticker)
@@ -859,9 +897,13 @@ export function RebalancingCalculator({
         };
       });
 
+      if (mergeTargetsReady) {
+        groups = mergeSavedTargetGroupsWithoutHoldings(ownerName, groups);
+      }
+
       return { ownerName, groups, totalKrw: total };
     });
-  }, [allocationByOwner, enrichedPositions, usdKrw]);
+  }, [allocationByOwner, enrichedPositions, usdKrw, mergeTargetsReady, savedTargetsBump]);
 
   const current = ownerData.find((o) => o.ownerName === selectedOwner);
 
