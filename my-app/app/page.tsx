@@ -20,7 +20,6 @@ import { DailyTrendChart } from "@/components/daily-trend-chart";
 import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
-import { LiquiditySection } from "@/components/liquidity-section";
 import { cn } from "@/lib/utils";
 import { inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
 import { fmtInt, fmtUsdNumber, MONEY_INT_LOCALE, parseKoreanIntDigits } from "@/lib/format-money";
@@ -31,7 +30,6 @@ import {
 } from "@/lib/portfolio-target-weights";
 import { mergeAndPersistOwnerScratchpadsFromServer, loadAllOwnerScratchpads } from "@/lib/portfolio-owner-scratchpad";
 import { todayKST } from "@/lib/date-utils";
-import type { LiquidityHistoryRow } from "@/components/liquidity-briefing-chart";
 import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
@@ -92,36 +90,6 @@ type MarketResponse = {
 type HistoryResponse = {
   history: Record<string, SignalDailyPrice[]>;
   fetchedAt?: number;
-};
-
-type LiquidityHistoryResponse = {
-  ok: boolean;
-  rows: LiquidityHistoryRow[];
-};
-
-type FedBriefApiResponse = {
-  ok: boolean;
-  summary: string | null;
-  reportDate: string | null;
-  error?: string;
-  hint?: string;
-  message?: string;
-  titles?: string[];
-  sources?: { title: string; url: string }[];
-  /** `headlines-with-links`: 크론 v2 포맷(참고 링크 블록 포함). */
-  briefingFormat?: "headlines-with-links" | "legacy";
-};
-
-type ThemesBriefApiResponse = {
-  ok: boolean;
-  summary: string | null;
-  reportDate: string | null;
-  error?: string;
-  hint?: string;
-  message?: string;
-  titles?: string[];
-  sources?: { title: string; url: string }[];
-  briefingFormat?: "headlines-with-links" | "legacy";
 };
 
 /** 로컬 저장 키 — v1에서 한 번만 마이그레이션 후 v2만 사용 */
@@ -1331,63 +1299,6 @@ export default function Home() {
     staleTime: 1000 * 60 * 30,
     refetchInterval: 1000 * 60 * 30,
   });
-
-  const liquidityHistoryQuery = useQuery<LiquidityHistoryResponse>({
-    queryKey: ["liquidity-history"],
-    queryFn: async () => {
-      const res = await fetch("/api/liquidity/history");
-      if (!res.ok) throw new Error("데이터 분석(지표) 조회 실패");
-      return res.json() as Promise<LiquidityHistoryResponse>;
-    },
-    staleTime: 1000 * 60 * 60,
-    refetchInterval: 1000 * 60 * 60,
-  });
-
-  const fedBriefQuery = useQuery<FedBriefApiResponse>({
-    queryKey: ["macro-fed-brief"],
-    queryFn: async () => {
-      const res = await fetch("/api/macro/fed-brief", { cache: "no-store" });
-      return res.json() as Promise<FedBriefApiResponse>;
-    },
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-  });
-
-  const themesBriefQuery = useQuery<ThemesBriefApiResponse>({
-    queryKey: ["macro-themes-brief"],
-    queryFn: async () => {
-      const res = await fetch("/api/macro/themes-brief", { cache: "no-store" });
-      return res.json() as Promise<ThemesBriefApiResponse>;
-    },
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-  });
-
-  const fedNote = useMemo(() => {
-    if (fedBriefQuery.isError) return { tone: "warn" as const, text: "연준·금리 뉴스 요약 API를 불러오지 못했습니다." };
-    const d = fedBriefQuery.data;
-    if (!d) return null;
-    if (d.ok === false) {
-      const t = [d.error, d.hint].filter(Boolean).join(" ");
-      return t ? { tone: "warn" as const, text: t } : null;
-    }
-    if (d.summary) return null;
-    return { tone: "info" as const, text: d.message ?? "아직 요약이 없습니다." };
-  }, [fedBriefQuery.isError, fedBriefQuery.data]);
-
-  const themesNote = useMemo(() => {
-    if (themesBriefQuery.isError) return { tone: "warn" as const, text: "AI·방산 뉴스 요약 API를 불러오지 못했습니다." };
-    const d = themesBriefQuery.data;
-    if (!d) return null;
-    if (d.ok === false) {
-      const t = [d.error, d.hint].filter(Boolean).join(" ");
-      return t ? { tone: "warn" as const, text: t } : null;
-    }
-    if (d.summary) return null;
-    return { tone: "info" as const, text: d.message ?? "아직 요약이 없습니다." };
-  }, [themesBriefQuery.isError, themesBriefQuery.data]);
 
   const signalBySymbol = useMemo(() => {
     const out = new Map<
@@ -3274,7 +3185,6 @@ export default function Home() {
                   { id: "section-realized" as const, icon: "💰", label: "실현손익 입력" },
                   { id: "section-rebalance" as const, icon: "⚖️", label: "리밸런싱 계산기" },
                   { id: "section-alert" as const, icon: "🔔", label: "이메일 알림" },
-                  { id: "section-data" as const, icon: "📊", label: "데이터 분석" },
                   { id: "section-watchlist" as const, icon: "⭐", label: "관심종목" },
                   { id: "section-telegram" as const, icon: "📲", label: "텔레그램" },
                   { id: "section-sync" as const, icon: "🔑", label: "동기화 키" },
@@ -3524,27 +3434,6 @@ export default function Home() {
               으로 이동
             </p>
           </section>
-          </div>
-          <div
-            className={cn(
-              activeTopNav === "section-data" ? "block" : "hidden",
-              "space-y-4 sm:space-y-6",
-            )}
-            aria-hidden={activeTopNav !== "section-data"}
-          >
-          <LiquiditySection
-            isLoading={liquidityHistoryQuery.isLoading}
-            isError={!!liquidityHistoryQuery.error}
-            rows={liquidityHistoryQuery.data?.rows ?? []}
-            fedLoading={fedBriefQuery.isLoading}
-            fedSummary={fedBriefQuery.data?.ok === true ? fedBriefQuery.data.summary : null}
-            fedReportDate={fedBriefQuery.data?.ok === true ? fedBriefQuery.data.reportDate ?? null : null}
-            fedNote={fedNote}
-            themesLoading={themesBriefQuery.isLoading}
-            themesSummary={themesBriefQuery.data?.ok === true ? themesBriefQuery.data.summary : null}
-            themesReportDate={themesBriefQuery.data?.ok === true ? themesBriefQuery.data.reportDate ?? null : null}
-            themesNote={themesNote}
-          />
           </div>
 
           {/* 리밸런싱 계산기 (구버전·숨김) */}
