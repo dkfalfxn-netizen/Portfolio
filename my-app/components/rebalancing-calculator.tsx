@@ -103,6 +103,8 @@ type Props = {
   ownerName: string;
   groups: GroupAllocation[];
   totalKrw: number;
+  /** 대시보드 불러오기 후 외부 래퍼가 ownerData를 재계산하도록 알림 */
+  onDashboardLoaded?: () => void;
 };
 
 type Mode = "buy-sell" | "buy-only";
@@ -276,7 +278,7 @@ function floorShares(diffKrw: number, priceKrw: number): number {
   return Math.floor(Math.abs(diffKrw) / priceKrw);
 }
 
-function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
+function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Props) {
   // ── 목표 비중 state: 계산기 전용 키에서 초깃값 읽기 (대시보드와 독립) ──
   const [targets, setTargets] = useState<Record<string, string>>(() => {
     const saved =
@@ -450,20 +452,31 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
     return () => window.clearTimeout(id);
   }, [targets, ownerName]);
 
-  /** 대시보드 목표 비중 불러오기 — 계산기 상태에만 반영, 대시보드 미수정 */
+  /** 대시보드 목표 비중 불러오기 — 계산기 키에 병합 저장 후 미보유 종목 행도 표시 */
   const handleLoad = useCallback(() => {
     if (typeof window === "undefined") return;
     const saved = loadAllTargetStockWeights()[ownerName] ?? {};
+    // 계산기 키에 대시보드 목표를 병합 저장 → mergeSavedTargetGroupsWithoutHoldings가 미보유 행 인식
+    const allCalc = loadAllCalculatorTargetWeights();
+    const merged = { ...(allCalc[ownerName] ?? {}) };
+    for (const [k, v] of Object.entries(saved)) {
+      merged[k] = v;
+    }
+    allCalc[ownerName] = merged;
+    try { window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(allCalc)); } catch { /* ignore */ }
+    // 현재 rows의 targets state 업데이트
     setTargets((prev) => {
       const next = { ...prev };
-      for (const g of groups) {
-        next[g.groupKey] = dashboardTargetInputString(saved, g.groupKey);
+      for (const k of Object.keys(saved)) {
+        next[k] = dashboardTargetInputString(saved, k);
       }
       return next;
     });
+    // 외부 래퍼에 ownerData 재계산 요청 (미보유 행 추가)
+    onDashboardLoaded?.();
     setLoadToast(true);
     setTimeout(() => setLoadToast(false), 2000);
-  }, [groups, ownerName]);
+  }, [ownerName, onDashboardLoaded]);
 
   const handleSave = useCallback(() => {
     persistCalculatorTargets(ownerName, targets);
@@ -872,9 +885,15 @@ export function RebalancingCalculator({
 }) {
   const [selectedOwner, setSelectedOwner] = useState(allocationByOwner[0]?.ownerName ?? "");
   const [mergeTargetsReady, setMergeTargetsReady] = useState(false);
+  /** 대시보드 불러오기 후 계산기 키 변경을 감지해 ownerData 재계산 트리거 */
+  const [calcStorageBump, setCalcStorageBump] = useState(0);
 
   useEffect(() => {
     setMergeTargetsReady(true);
+  }, []);
+
+  const handleDashboardLoaded = useCallback(() => {
+    setCalcStorageBump((n) => n + 1);
   }, []);
 
   useEffect(() => {
@@ -925,7 +944,7 @@ export function RebalancingCalculator({
 
       return { ownerName, groups, totalKrw: total };
     });
-  }, [allocationByOwner, enrichedPositions, usdKrw, mergeTargetsReady]);
+  }, [allocationByOwner, enrichedPositions, usdKrw, mergeTargetsReady, calcStorageBump]);
 
   const current = ownerData.find((o) => o.ownerName === selectedOwner);
 
@@ -955,6 +974,7 @@ export function RebalancingCalculator({
           ownerName={current.ownerName}
           groups={current.groups}
           totalKrw={current.totalKrw}
+          onDashboardLoaded={handleDashboardLoaded}
         />
       ) : (
         <p className="text-sm text-muted-foreground">보유 종목이 없습니다.</p>
