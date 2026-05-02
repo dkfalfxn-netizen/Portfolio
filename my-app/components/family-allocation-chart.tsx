@@ -574,14 +574,7 @@ function TargetStockWeightNeu({
   const saveDebounceRef = useRef<number | null>(null);
   const [targetsByTicker, setTargetsByTicker] = useState<Record<string, number>>(() => {
     const all = loadAllTargetStockWeights();
-    const saved = all[ownerName] ?? {};
-    // 현재 보유 슬라이스에 있는 티커만 유지 — 매도한 종목의 잔여 목표를 자동 정리
-    const validTickers = new Set(slices.map((s) => s.ticker));
-    const cleaned: Record<string, number> = {};
-    for (const [k, v] of Object.entries(saved)) {
-      if (validTickers.has(k)) cleaned[k] = v;
-    }
-    return cleaned;
+    return { ...(all[ownerName] ?? {}) };
   });
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
   const [savedAtText, setSavedAtText] = useState<string | null>(null);
@@ -667,17 +660,12 @@ function TargetStockWeightNeu({
     const onRefresh = () => {
       const all = loadAllTargetStockWeights();
       const saved = all[ownerName] ?? {};
-      const validTickers = new Set(slices.map((s) => s.ticker));
-      const cleaned: Record<string, number> = {};
-      for (const [k, v] of Object.entries(saved)) {
-        if (validTickers.has(k)) cleaned[k] = v;
-      }
       skipSaveRef.current = true;
-      setTargetsByTicker(cleaned);
+      setTargetsByTicker({ ...saved });
     };
     window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
-  }, [ownerName, slices]);
+  }, [ownerName]);
 
   useEffect(() => {
     if (skipSaveRef.current) {
