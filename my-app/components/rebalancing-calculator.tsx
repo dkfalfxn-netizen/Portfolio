@@ -185,6 +185,34 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
     [rows, hideSmall],
   );
 
+  // ── 대시보드 목표 비중 불러오기 ──────────────────────────────────────────
+  const [loadToast, setLoadToast] = useState(false);
+
+  const handleLoad = useCallback(() => {
+    const saved =
+      typeof window !== "undefined" ? (loadAllTargetStockWeights()[ownerName] ?? {}) : {};
+    const hasSaved = Object.keys(saved).length > 0;
+    if (!hasSaved) return;
+    setTargets((prev) => {
+      const next = { ...prev };
+      for (const g of groups) {
+        if (saved[g.groupKey] != null) {
+          next[g.groupKey] = String(saved[g.groupKey]);
+        }
+      }
+      return next;
+    });
+    setLoadToast(true);
+    setTimeout(() => setLoadToast(false), 2000);
+  }, [groups, ownerName]);
+
+  // 대시보드에서 저장 이벤트가 발생하면 자동으로 반영
+  useEffect(() => {
+    const handler = () => handleLoad();
+    window.addEventListener("portfolio-target-weights-refresh", handler);
+    return () => window.removeEventListener("portfolio-target-weights-refresh", handler);
+  }, [handleLoad]);
+
   // ── 저장 / 초기화 ─────────────────────────────────────────────────────────
   const handleSave = useCallback(() => {
     try {
@@ -281,6 +309,19 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
           >
             {targetSum.toFixed(1)}%{!sumIsOver && !sumIsUnder ? " ✓" : sumIsOver ? " ▲" : " ▼"}
           </span>
+          {/* 대시보드 저장값 불러오기 */}
+          <button
+            type="button"
+            onClick={handleLoad}
+            title="대시보드(원형 차트) 목표 비중 설정값을 불러옵니다"
+            className={`rounded border px-2 py-1 text-[11px] transition-all active:scale-95 ${
+              loadToast
+                ? "border-sky-500/60 bg-sky-500/10 text-sky-400"
+                : "hover:bg-muted text-muted-foreground"
+            }`}
+          >
+            {loadToast ? "불러옴 ✓" : "대시보드 불러오기"}
+          </button>
           <button
             type="button"
             onClick={handleReset}
