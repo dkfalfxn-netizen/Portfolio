@@ -5,6 +5,7 @@ import { ResponsiveContainer, Tooltip, Treemap } from "recharts";
 import {
   HAS_LOCAL_CHANGES_KEY,
   loadAllTargetStockWeights,
+  PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT,
   TARGET_WEIGHT_STORAGE_KEY,
 } from "@/lib/portfolio-target-weights";
 import {
@@ -661,8 +662,8 @@ function TargetStockWeightNeu({
       skipSaveRef.current = true;
       setTargetsByTicker({ ...(all[ownerName] ?? {}) });
     };
-    window.addEventListener("portfolio-target-weights-refresh", onRefresh);
-    return () => window.removeEventListener("portfolio-target-weights-refresh", onRefresh);
+    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
   }, [ownerName]);
 
   useEffect(() => {
@@ -677,6 +678,7 @@ function TargetStockWeightNeu({
       try {
         window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
         window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+        window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
       } catch {
         setSaveStatus("err");
         setSaveFailedBrief(true);
@@ -699,6 +701,7 @@ function TargetStockWeightNeu({
     try {
       window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
       window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+      window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
     } catch {
       setSaveStatus("err");
       setSaveFailedBrief(true);

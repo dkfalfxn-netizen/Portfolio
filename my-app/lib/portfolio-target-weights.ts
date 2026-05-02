@@ -3,6 +3,9 @@ export const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
 
 export const TARGET_WEIGHT_STORAGE_KEY = "portfolio_target_stock_weight_v1";
 
+/** 원형 차트·리밸 계산기 교차 동기화용 브라우저 이벤트(detail 없음) */
+export const PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT = "portfolio-target-weights-refresh";
+
 export type TargetStockWeightByOwner = Record<string, Record<string, number>>;
 
 export function loadAllTargetStockWeights(): TargetStockWeightByOwner {
@@ -53,5 +56,5 @@ export function mergeAndPersistTargetStockWeightsFromServer(server: unknown): vo
   } catch {
     return;
   }
-  window.dispatchEvent(new Event("portfolio-target-weights-refresh"));
+  window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
 }

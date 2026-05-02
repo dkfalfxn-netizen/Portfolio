@@ -7,9 +7,10 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { fmtInt, parseKoreanIntDigits } from "@/lib/format-money";
 import {
-  loadAllTargetStockWeights,
-  TARGET_WEIGHT_STORAGE_KEY,
   HAS_LOCAL_CHANGES_KEY,
+  loadAllTargetStockWeights,
+  PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT,
+  TARGET_WEIGHT_STORAGE_KEY,
 } from "@/lib/portfolio-target-weights";
 import {
   loadVisualOrderKeysForOwner,
@@ -44,6 +45,40 @@ function mergeSavedTargetGroupsWithoutHoldings(ownerName: string, baseGroups: Gr
 function dashboardTargetInputString(saved: Record<string, number>, groupKey: string): string {
   const v = saved[groupKey];
   return v != null && Number.isFinite(v) ? String(v) : "0";
+}
+
+/** 입력 문자열과 LS 목표 숫자가 같은지 — "15"/"15.0" 같은 표기 차로 동기 재진입하지 않도록 */
+function targetInputMatchesStoredValue(inputStr: string | undefined, stored: number | undefined): boolean {
+  const want = stored != null && Number.isFinite(stored) ? stored : 0;
+  const n = parseFloat(inputStr ?? "");
+  if (!Number.isFinite(n)) return want === 0;
+  return Math.abs(n - want) < 1e-6;
+}
+
+/** 계산기 목표 문자열을 LS 보유자 맵에 병합 저장하고, 원형 차트 등에 동일 이벤트로 알림 */
+function persistCalculatorTargetsMerged(
+  ownerName: string,
+  targetsStrings: Record<string, string>,
+): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const all = loadAllTargetStockWeights();
+    const before = JSON.stringify(all);
+    const merged = { ...(all[ownerName] ?? {}) };
+    for (const [k, v] of Object.entries(targetsStrings)) {
+      const n = parseFloat(v);
+      if (!Number.isFinite(n)) continue;
+      merged[k] = Math.min(100, Math.max(0, n));
+    }
+    all[ownerName] = merged;
+    if (JSON.stringify(all) === before) return false;
+    window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
+    window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ─── 타입 ──────────────────────────────────────────────────────────────────────
@@ -203,8 +238,8 @@ function RebalancingBarSortableRow({
             onChange={(e) => setTargets((prev) => ({ ...prev, [row.groupKey]: e.target.value }))}
             title={
               dashboardHasStoredTarget ?
-                "대시보드(원형 차트)와 같은 저장소에 있는 목표 비중입니다. 수정 후 「저장」하면 대시보드에도 반영됩니다."
-              : "이 그룹은 대시보드에 목표가 아직 저장되지 않았습니다. 목표 입력은 0%로 두었습니다. 대시보드에서 목표를 저장하거나 여기서 입력한 뒤 「저장」하세요."
+                "목표 비중은 원형 차트와 같은 브라우저 저장소에 있습니다. 약간의 지연 뒤 자동으로 저장·동기화됩니다."
+              : "원형 차트에 이 그룹 목표가 아직 없으면 0%로 둡니다. 입력값은 같은 저장소에 자동 반영됩니다."
             }
             aria-label={`${row.displayName || row.groupKey} 목표 비중 퍼센트`}
           />
@@ -429,54 +464,57 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
     [rows, hideSmall],
   );
 
-  // ── 대시보드 목표 비중 불러오기 ──────────────────────────────────────────
+  // ── 목표 칸 ⇄ localStorage·원형 차트 동기화 ───────────────────────────────
   const [loadToast, setLoadToast] = useState(false);
 
-  const handleLoad = useCallback(() => {
-    const saved =
-      typeof window !== "undefined" ? (loadAllTargetStockWeights()[ownerName] ?? {}) : {};
-    const hasSaved = Object.keys(saved).length > 0;
-    if (!hasSaved) return;
+  const applyTargetsFromStorage = useCallback((opts?: { toast?: boolean }) => {
+    if (typeof window === "undefined") return;
+    const saved = loadAllTargetStockWeights()[ownerName] ?? {};
     setTargets((prev) => {
+      let changed = false;
       const next = { ...prev };
       for (const g of groups) {
-        if (saved[g.groupKey] != null) {
-          next[g.groupKey] = String(saved[g.groupKey]);
+        const desiredStr = dashboardTargetInputString(saved, g.groupKey);
+        const sv = saved[g.groupKey];
+        if (!targetInputMatchesStoredValue(next[g.groupKey], sv)) {
+          next[g.groupKey] = desiredStr;
+          changed = true;
         }
       }
-      return next;
+      return changed ? next : prev;
     });
     setTargetStorageRevision((n) => n + 1);
-    setLoadToast(true);
-    setTimeout(() => setLoadToast(false), 2000);
+    if (opts?.toast) {
+      setLoadToast(true);
+      setTimeout(() => setLoadToast(false), 2000);
+    }
   }, [groups, ownerName]);
 
-  // 대시보드에서 저장 이벤트가 발생하면 자동으로 반영
-  useEffect(() => {
-    const handler = () => handleLoad();
-    window.addEventListener("portfolio-target-weights-refresh", handler);
-    return () => window.removeEventListener("portfolio-target-weights-refresh", handler);
-  }, [handleLoad]);
+  const handleLoad = useCallback(() => {
+    applyTargetsFromStorage({ toast: true });
+  }, [applyTargetsFromStorage]);
 
-  // ── 저장 / 초기화 ─────────────────────────────────────────────────────────
-  const handleSave = useCallback(() => {
-    try {
-      const all = loadAllTargetStockWeights();
-      const entry: Record<string, number> = {};
-      for (const [k, v] of Object.entries(targets)) {
-        const n = parseFloat(v);
-        if (Number.isFinite(n)) entry[k] = n;
+  useEffect(() => {
+    const handler = () => applyTargetsFromStorage();
+    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, handler);
+  }, [applyTargetsFromStorage]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = window.setTimeout(() => {
+      if (persistCalculatorTargetsMerged(ownerName, targets)) {
+        setTargetStorageRevision((n) => n + 1);
       }
-      all[ownerName] = entry;
-      window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
-      window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
-      window.dispatchEvent(new Event("portfolio-target-weights-refresh"));
-      setTargetStorageRevision((n) => n + 1);
-      setSaveToast(true);
-      setTimeout(() => setSaveToast(false), 2000);
-    } catch {
-      /* localStorage 접근 불가 시 무시 */
-    }
+    }, 420);
+    return () => window.clearTimeout(id);
+  }, [targets, ownerName]);
+
+  const handleSave = useCallback(() => {
+    persistCalculatorTargetsMerged(ownerName, targets);
+    setTargetStorageRevision((n) => n + 1);
+    setSaveToast(true);
+    setTimeout(() => setSaveToast(false), 2000);
   }, [targets, ownerName]);
 
   const handleReset = useCallback(() => {
@@ -563,7 +601,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
           <button
             type="button"
             onClick={handleLoad}
-            title="대시보드(원형 차트) 목표 비중 설정값을 불러옵니다"
+            title="저장값을 즉시 읽어 다시 맞춥니다(보통은 자동으로 동기화됩니다)"
             className={`rounded border px-2 py-1 text-[11px] transition-all active:scale-95 ${
               loadToast
                 ? "border-sky-500/60 bg-sky-500/10 text-sky-400"
@@ -611,9 +649,9 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
           </span>
         </div>
         <p className="mb-3 max-w-2xl text-[10px] leading-snug text-muted-foreground">
-          왼쪽 % 입력 칸은 목표 비중이며, 대시보드 원형 차트와 같은 localStorage 저장값을 기본으로 씁니다. 해당 그룹
-          목표가 저장소에 없으면 0%로 둡니다. 여기에서 바꾼 뒤 우측「저장」을 누르면 대시보드와 숫자가 맞춰
-          유지됩니다.
+          왼쪽 %는 목표 비중이며, 원형 차트와 같은 localStorage 하나를 씁니다. 변경 후 반초 안팎 지연으로 자동
+          저장되어 두 화면이 같아집니다. 저장소 밖에서 값이 바뀌었다면 우측「대시보드 불러오기」나「저장」으로 즉시
+          맞출 수 있습니다. 미설정 그룹은 목표 입력이 0%입니다.
         </p>
 
         {/* 스케일 헤더 — 바 행과 동일한 레이아웃으로 정렬 */}
@@ -890,8 +928,8 @@ export function RebalancingCalculator({
 
   useEffect(() => {
     const onRefresh = () => setSavedTargetsBump((n) => n + 1);
-    window.addEventListener("portfolio-target-weights-refresh", onRefresh);
-    return () => window.removeEventListener("portfolio-target-weights-refresh", onRefresh);
+    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
   }, []);
 
   useEffect(() => {
