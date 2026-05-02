@@ -589,25 +589,6 @@ function TargetStockWeightNeu({
   const [splitCount, setSplitCount] = useState<string>("1");
   const [barTickerOrder, setBarTickerOrder] = useState<string[] | null>(null);
 
-  // 마운트 시 stale 키(매도 종목 등)를 localStorage에서도 즉시 제거
-  useEffect(() => {
-    try {
-      const all = loadAllTargetStockWeights();
-      const saved = all[ownerName] ?? {};
-      const validTickers = new Set(slices.map((s) => s.ticker));
-      const hasStale = Object.keys(saved).some((k) => !validTickers.has(k));
-      if (hasStale) {
-        const cleaned: Record<string, number> = {};
-        for (const [k, v] of Object.entries(saved)) {
-          if (validTickers.has(k)) cleaned[k] = v;
-        }
-        all[ownerName] = cleaned;
-        window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
-      }
-    } catch { /* ignore */ }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownerName]);
-
   useEffect(() => {
     setBarTickerOrder(loadVisualOrderKeysForOwner(ownerName));
   }, [ownerName]);
