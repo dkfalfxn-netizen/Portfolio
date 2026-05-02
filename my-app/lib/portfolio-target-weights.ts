@@ -1,9 +1,13 @@
 /** page·목표비중 UI 공통 — 로컬 변경 시 서버 푸시 유도 */
 export const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
 
+/** 대시보드(원형 차트) 전용 목표 비중 키 */
 export const TARGET_WEIGHT_STORAGE_KEY = "portfolio_target_stock_weight_v1";
 
-/** 원형 차트·리밸 계산기 교차 동기화용 브라우저 이벤트(detail 없음) */
+/** 리밸런싱 계산기 전용 목표 비중 키 (대시보드와 독립) */
+export const CALCULATOR_TARGET_STORAGE_KEY = "portfolio_calculator_target_weight_v1";
+
+/** 원형 차트 내부 교차 탭 동기화용 브라우저 이벤트 */
 export const PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT = "portfolio-target-weights-refresh";
 
 export type TargetStockWeightByOwner = Record<string, Record<string, number>>;
@@ -12,6 +16,20 @@ export function loadAllTargetStockWeights(): TargetStockWeightByOwner {
   if (typeof window === "undefined") return {};
   try {
     const raw = window.localStorage.getItem(TARGET_WEIGHT_STORAGE_KEY);
+    if (!raw) return {};
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null) return {};
+    return p as TargetStockWeightByOwner;
+  } catch {
+    return {};
+  }
+}
+
+/** 리밸런싱 계산기 전용 목표 비중 로더 */
+export function loadAllCalculatorTargetWeights(): TargetStockWeightByOwner {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(CALCULATOR_TARGET_STORAGE_KEY);
     if (!raw) return {};
     const p = JSON.parse(raw) as unknown;
     if (typeof p !== "object" || p === null) return {};
