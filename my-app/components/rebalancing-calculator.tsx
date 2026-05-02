@@ -40,6 +40,12 @@ function mergeSavedTargetGroupsWithoutHoldings(ownerName: string, baseGroups: Gr
   return extra.length ? [...baseGroups, ...extra] : baseGroups;
 }
 
+/** 대시보드에 목표가 없을 때 목표 입력란 초깃값은 0 (현재 비중으로 대체하지 않음) */
+function dashboardTargetInputString(saved: Record<string, number>, groupKey: string): string {
+  const v = saved[groupKey];
+  return v != null && Number.isFinite(v) ? String(v) : "0";
+}
+
 // ─── 타입 ──────────────────────────────────────────────────────────────────────
 
 export type GroupAllocation = {
@@ -198,7 +204,7 @@ function RebalancingBarSortableRow({
             title={
               dashboardHasStoredTarget ?
                 "대시보드(원형 차트)와 같은 저장소에 있는 목표 비중입니다. 수정 후 「저장」하면 대시보드에도 반영됩니다."
-              : "이 그룹은 대시보드에 목표가 아직 저장되지 않았습니다. 초깃값으로 현재 비중을 채워 두었으며, 수정·저장하면 대시보드 목표와 같아집니다."
+              : "이 그룹은 대시보드에 목표가 아직 저장되지 않았습니다. 목표 입력은 0%로 두었습니다. 대시보드에서 목표를 저장하거나 여기서 입력한 뒤 「저장」하세요."
             }
             aria-label={`${row.displayName || row.groupKey} 목표 비중 퍼센트`}
           />
@@ -261,19 +267,18 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
     [ownerName, targetStorageRevision],
   );
 
-  // ── 목표 비중 state: 대시보드 저장값 우선, 없으면 현재 비중 ─────────────────
+  // ── 목표 비중 state: 대시보드 저장값만 초깃값(미저장 그룹은 0%), 현재 비중으로 채우지 않음 ──
   const [targets, setTargets] = useState<Record<string, string>>(() => {
     const saved =
       typeof window !== "undefined" ? (loadAllTargetStockWeights()[ownerName] ?? {}) : {};
     const init: Record<string, string> = {};
     for (const g of groups) {
-      const v = saved[g.groupKey];
-      init[g.groupKey] = v != null ? String(v) : g.currentPct.toFixed(1);
+      init[g.groupKey] = dashboardTargetInputString(saved, g.groupKey);
     }
     return init;
   });
 
-  // 새 그룹이 추가됐을 때 targets에 기본값 추가 (대시보드 저장 목표가 있으면 우선)
+  // 새 그룹이 추가됐을 때 targets 보강 — 대시보드 저장값 또는 0%
   useEffect(() => {
     setTargets((prev) => {
       const saved = loadAllTargetStockWeights()[ownerName] ?? {};
@@ -281,8 +286,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
       let changed = false;
       for (const g of groups) {
         if (!(g.groupKey in next)) {
-          const sv = saved[g.groupKey];
-          next[g.groupKey] = sv != null ? String(sv) : g.currentPct.toFixed(1);
+          next[g.groupKey] = dashboardTargetInputString(saved, g.groupKey);
           changed = true;
         }
       }
@@ -476,10 +480,13 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
   }, [targets, ownerName]);
 
   const handleReset = useCallback(() => {
+    const saved = loadAllTargetStockWeights()[ownerName] ?? {};
     const init: Record<string, string> = {};
-    for (const g of groups) init[g.groupKey] = g.currentPct.toFixed(1);
+    for (const g of groups) {
+      init[g.groupKey] = dashboardTargetInputString(saved, g.groupKey);
+    }
     setTargets(init);
-  }, [groups]);
+  }, [groups, ownerName]);
 
   return (
     <div className="space-y-5">
@@ -604,9 +611,9 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
           </span>
         </div>
         <p className="mb-3 max-w-2xl text-[10px] leading-snug text-muted-foreground">
-          왼쪽 % 입력 칸은 목표 비중이며, 대시보드 원형 차트와 같은 localStorage 저장값입니다. 해당 그룹을
-          대시보드에 한 번도 저장하지 않은 경우 초기값으로 현재 비중을 넣습니다. 여기에서 바꾼 뒤
-          우측「저장」을 누르면 대시보드와 숫자가 맞춰 유지됩니다.
+          왼쪽 % 입력 칸은 목표 비중이며, 대시보드 원형 차트와 같은 localStorage 저장값을 기본으로 씁니다. 해당 그룹
+          목표가 저장소에 없으면 0%로 둡니다. 여기에서 바꾼 뒤 우측「저장」을 누르면 대시보드와 숫자가 맞춰
+          유지됩니다.
         </p>
 
         {/* 스케일 헤더 — 바 행과 동일한 레이아웃으로 정렬 */}
