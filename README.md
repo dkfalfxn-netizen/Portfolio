@@ -72,13 +72,11 @@ npm install --prefix my-app
 
    | 변수 | 용도 |
    |------|------|
-   | `RESEND_API_KEY` | 이메일 알림 (Resend) — 비중 이탈 알림 |
-   | `RESEND_FROM` | (선택) 발신자 표시명 |
    | `TELEGRAM_BOT_TOKEN` | 텔레그램 일일 시세 알림 (`/api/alert/kakao-price-move`) |
    | `TELEGRAM_CHAT_ID` | 수신 채팅 ID |
    | `TELEGRAM_ALERT_SYNC_KEY` | (권장) 본인 **동기화 키**와 동일하게 설정 시, 크론이 **그 키의 보유·관심종목만** 텔레그램 발송 |
    | `CRON_SECRET` | Vercel Cron GET 호출 시 `Authorization: Bearer …` 검증. **프로덕션에서는 설정 권장** |
-   | `OPENAI_API_KEY` | AI 데일리 마켓 인사이트 (`/api/cron/analyze-market`) |
+   | `OPENAI_API_KEY` | AI 마켓 인사이트 등 (`/api/cron/analyze-market` 수동·실험 호출 시) |
    | `DATABASE_URL` | Prisma CLI (`prisma migrate` 등) 사용 시에만 |
 
 ### 5. 로컬 실행
@@ -116,15 +114,14 @@ npm run build
 
 `my-app/vercel.json` 기준 (UTC → 한국은 **KST = UTC+9**):
 
-| 경로 | UTC | 대략 KST | 역할 |
-|------|-----|----------|------|
-| `/api/alert/check` | `0 7 * * *` | 매일 **16:00** | 일별 스냅샷 저장(`saveAllSnapshots`), 이메일 알림 처리 |
-| `/api/cron/liquidity-briefing` | `0 0 * * *` | 매일 **09:00** | 순유동성·DXY·미10년·신용스프레드·VIX·BTC·금 텔레그램 브리핑 |
-| `/api/alert/kakao-price-move` | `0 7 * * *` | 매일 **16:00** | 텔레그램 보유 브리핑 + 관심종목 시그널 (`TELEGRAM_ALERT_SYNC_KEY` 필요) |
-| `/api/cron/analyze-market` | `0 21 * * *` | 매일 **06:00** | AI 마켓 인사이트 |
-| `/api/cron/kcif-pdf-summary` | `1 9 * * *` | 매일 **18:01** | KCIF 보고서 PDF 본문 추출 후 AI 요약 텔레그램 발송 |
+| 경로 | UTC | 역할 |
+|------|-----|------|
+| `/api/cron/daily-snapshot` | `0 7 * * *`, `0 8 * * *` | 모든 동기화 키에 대해 **`saveAllSnapshots`** 로 일별 스냅만 저장 |
+| `/api/alert/kakao-price-move` | 슬롯별 (`0930`, `1400`, `2400` 쿼리) | 텔레그램 브리핑 (`TELEGRAM_ALERT_SYNC_KEY` 등) |
 
-**일별 자산 스냅샷**은 한국 장 마감(15:30) 직후에 가깝게 맞추기 위해 **오후 4시 KST**에 기록합니다. 앱에서 서버로 보내는 클라이언트 스냅샷도 같은 날 **KST 16시 이후**에만 전송되도록 되어 있습니다.
+**데이터 분석·이메일·유동성/거시 크론**은 현재 `vercel.json` 에서 제외했습니다. 해당 API 라우트는 필요 시 수동 호출용으로 남아 있습니다.
+
+**일별 자산 스냅샷**은 `daily-snapshot` 크론이 담당합니다. 앱에서 서버로 보내는 클라이언트 스냅과 병합됩니다.
 
 ### 9. Supabase 테이블 (신규 프로젝트·빈 DB)
 
@@ -133,7 +130,7 @@ Supabase SQL 편집기에서 **아래 순서**로 실행합니다 (파일은 `my
 1. `portfolio_snapshots.sql` — 동기화 본문(종목·현금)
 2. `portfolio_snapshots_holdings_sort.sql` — 정렬 컬럼 추가(기존 DB 업그레이드용)
 3. `portfolio_daily_snapshots.sql` — 일별 자산 (1번의 `sync_key` 참조)
-4. `alert_configs.sql` — 이메일 알림 규칙
+4. `alert_configs.sql` — (레거시) 예전 비중 이메일 기능용 테이블. 현재 UI/API는 비활성화되어 있으며 **미적용 가능**
 5. `price_move_alert_logs.sql` — 텔레그램 중복 발송 방지 로그
 6. `watchlist_column.sql` — 관심종목 JSON 컬럼 (`portfolio_snapshots.watchlist`)
 7. `market_reports.sql` — (해당 기능 사용 시)

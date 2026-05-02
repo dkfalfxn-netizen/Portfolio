@@ -349,7 +349,7 @@ export type SaveAllSnapshotsResult = {
 
 /**
  * 크론 또는 외부 호출: 모든 sync_key에 대해 오늘 스냅샷 저장
- * (alert/check 크론이 내부적으로 호출합니다)
+ * (`/api/cron/daily-snapshot` 크론이 호출합니다)
  */
 export async function saveAllSnapshots(): Promise<SaveAllSnapshotsResult> {
   const result: SaveAllSnapshotsResult = { total: 0, succeeded: 0, failed: 0, errors: [] };

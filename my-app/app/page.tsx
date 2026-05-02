@@ -1030,15 +1030,6 @@ export default function Home() {
   const [holdingsSortByOwner, setHoldingsSortByOwner] =
     useState<Record<OwnerName, HoldingsSortMode>>(defaultHoldingsSort);
 
-  // 알림 설정 상태
-  type AlertRule = { owner: string; symbol: string; minPct: string; maxPct: string };
-  const [alertEmail, setAlertEmail] = useState("");
-  const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
-  const [alertBusy, setAlertBusy] = useState(false);
-  const [alertMessage, setAlertMessage] = useState("");
-  const [alertLoaded, setAlertLoaded] = useState(false);
-
-  // 텔레그램 가격 변동 알림 테스트 상태
   const [telegramTestBusy, setTelegramTestBusy] = useState(false);
   const [telegramTestResult, setTelegramTestResult] = useState<{
     ok: boolean;
@@ -2531,32 +2522,6 @@ export default function Home() {
     );
   }
 
-  // 알림 설정 불러오기 (동기화 키가 준비되면 한 번)
-  useEffect(() => {
-    if (!syncReady || !cloudSyncKey || alertLoaded) return;
-    setAlertLoaded(true);
-    void (async () => {
-      try {
-        const r = await fetch(`/api/alert/config?sync_key=${encodeURIComponent(cloudSyncKey)}`);
-        if (!r.ok) return;
-        const j = (await r.json()) as { found?: boolean; email?: string; rules?: AlertRule[] };
-        if (j.found) {
-          setAlertEmail(j.email ?? "");
-          setAlertRules(
-            (j.rules ?? []).map((rule) => ({
-              owner: rule.owner ?? "전체",
-              symbol: rule.symbol ?? "전체",
-              minPct: rule.minPct != null ? String(rule.minPct) : "",
-              maxPct: rule.maxPct != null ? String(rule.maxPct) : "",
-            })),
-          );
-        }
-      } catch {
-        // 네트워크 오류는 조용히 무시
-      }
-    })();
-  }, [syncReady, cloudSyncKey, alertLoaded]);
-
   useEffect(() => {
     if (!syncReady || !cloudSyncKey || cloudSyncKey.length < 8 || watchlistLoaded) return;
     setWatchlistLoaded(true);
@@ -2622,73 +2587,6 @@ export default function Home() {
       setWatchlistMessage("네트워크 오류입니다.");
     } finally {
       setWatchlistBusy(false);
-    }
-  }
-
-  async function handleSaveAlertConfig() {
-    if (!cloudSyncKey || cloudSyncKey.length < 8) {
-      setAlertMessage("먼저 동기화 키를 저장해 주세요.");
-      return;
-    }
-    if (!alertEmail.includes("@")) {
-      setAlertMessage("유효한 이메일을 입력하세요.");
-      return;
-    }
-    setAlertBusy(true);
-    try {
-      const rules = alertRules
-        .filter((r) => r.owner && r.symbol)
-        .map((r) => ({
-          owner: r.owner,
-          symbol: r.symbol,
-          ...(r.minPct !== "" ? { minPct: Number(r.minPct) } : {}),
-          ...(r.maxPct !== "" ? { maxPct: Number(r.maxPct) } : {}),
-        }));
-      const res = await fetch("/api/alert/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sync_key: cloudSyncKey, email: alertEmail, rules }),
-      });
-      const j = (await res.json()) as { error?: string };
-      setAlertMessage(res.ok ? "알림 설정을 저장했습니다." : (j.error ?? "저장 실패"));
-    } catch {
-      setAlertMessage("네트워크 오류입니다.");
-    } finally {
-      setAlertBusy(false);
-    }
-  }
-
-  async function handleCheckAlertNow() {
-    if (!cloudSyncKey || cloudSyncKey.length < 8) {
-      setAlertMessage("먼저 동기화 키를 저장해 주세요.");
-      return;
-    }
-    setAlertBusy(true);
-    try {
-      const res = await fetch("/api/alert/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sync_key: cloudSyncKey }),
-      });
-      const j = (await res.json()) as { results?: { violations: number; sent: boolean }[]; error?: string };
-      if (!res.ok) {
-        setAlertMessage(j.error ?? "확인 실패");
-        return;
-      }
-      const r = j.results?.[0];
-      if (!r) {
-        setAlertMessage("저장된 알림 규칙이 없습니다.");
-      } else if (r.violations === 0) {
-        setAlertMessage("현재 이탈 종목 없음 — 모든 비중이 정상 범위입니다.");
-      } else {
-        setAlertMessage(
-          `${r.violations}건 이탈 감지${r.sent ? " — 이메일을 발송했습니다." : " — 이메일 발송 실패(RESEND_API_KEY 확인)"}`,
-        );
-      }
-    } catch {
-      setAlertMessage("네트워크 오류입니다.");
-    } finally {
-      setAlertBusy(false);
     }
   }
 
@@ -2956,7 +2854,6 @@ export default function Home() {
       ...prev,
       selectedOwners: prev.selectedOwners.map((o) => (o === name ? renamed : o)),
     }));
-    setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? renamed : r.owner })));
     setSellLog((prev) => {
       if (!prev[name]) return prev;
       const next = { ...prev };
@@ -3003,7 +2900,6 @@ export default function Home() {
       const selected = prev.selectedOwners.filter((o) => o !== name);
       return { ...prev, selectedOwners: selected.length > 0 ? selected : [fallbackOwner] };
     });
-    setAlertRules((prev) => prev.map((r) => ({ ...r, owner: r.owner === name ? "전체" : r.owner })));
     setSellLog((prev) => { const next = { ...prev }; delete next[name]; return next; });
     setSellLogForm((prev) => { const next = { ...prev }; delete next[name]; return next; });
     safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
@@ -3184,7 +3080,6 @@ export default function Home() {
                   { id: "section-add" as const, icon: "➕", label: "종목 추가" },
                   { id: "section-realized" as const, icon: "💰", label: "실현손익 입력" },
                   { id: "section-rebalance" as const, icon: "⚖️", label: "리밸런싱 계산기" },
-                  { id: "section-alert" as const, icon: "🔔", label: "이메일 알림" },
                   { id: "section-watchlist" as const, icon: "⭐", label: "관심종목" },
                   { id: "section-telegram" as const, icon: "📲", label: "텔레그램" },
                   { id: "section-sync" as const, icon: "🔑", label: "동기화 키" },
@@ -5582,153 +5477,6 @@ export default function Home() {
               enrichedPositions={enrichedPositions}
               usdKrw={usdKrw}
             />
-          </section>
-          </div>
-
-          <div
-            className={cn(
-              activeTopNav === "section-alert" ? "block" : "hidden",
-              "space-y-4 sm:space-y-6",
-            )}
-            aria-hidden={activeTopNav !== "section-alert"}
-          >
-          {/* 알림 설정 섹션 */}
-          <section id="section-alert" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
-            <h2 className="mb-1 font-semibold">비중 이탈 이메일 알림</h2>
-            <p className="mb-3 text-xs text-muted-foreground">
-              설정한 비중(%)을 벗어나면 매일 오전 9시(KST)에 이메일을 보내드립니다.
-              동기화 키가 저장되어 있어야 합니다.
-            </p>
-            <div className="space-y-3">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted-foreground" htmlFor="alert-email">수신 이메일</label>
-                <input
-                  id="alert-email"
-                  type="email"
-                  className="max-w-xs rounded-md border bg-background px-3 py-2 text-sm"
-                  placeholder="example@gmail.com"
-                  value={alertEmail}
-                  onChange={(e) => setAlertEmail(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-muted-foreground">알림 규칙</p>
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
-                    onClick={() =>
-                      setAlertRules((prev) => [
-                        ...prev,
-                        { owner: "전체", symbol: "전체", minPct: "", maxPct: "" },
-                      ])
-                    }
-                  >
-                    + 규칙 추가
-                  </button>
-                </div>
-                {alertRules.length === 0 && (
-                  <p className="text-xs text-muted-foreground">규칙이 없습니다. 위 버튼으로 추가하세요.</p>
-                )}
-                {alertRules.map((rule, idx) => (
-                  <div key={idx} className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                    <select
-                      className="rounded border bg-background px-2 py-1 text-xs"
-                      value={rule.owner}
-                      onChange={(e) =>
-                        setAlertRules((prev) =>
-                          prev.map((r, i) => (i === idx ? { ...r, owner: e.target.value } : r)),
-                        )
-                      }
-                    >
-                      <option value="전체">전체</option>
-                      {ownerNames.map((n) => (
-                        <option key={n} value={n}>{n}</option>
-                      ))}
-                    </select>
-                    <span className="text-xs text-muted-foreground">의</span>
-                    <input
-                      className="w-24 rounded border bg-background px-2 py-1 text-xs"
-                      placeholder="종목 (예: NVDA)"
-                      value={rule.symbol}
-                      onChange={(e) =>
-                        setAlertRules((prev) =>
-                          prev.map((r, i) =>
-                            i === idx ? { ...r, symbol: e.target.value.toUpperCase() } : r,
-                          ),
-                        )
-                      }
-                    />
-                    <span className="text-xs text-muted-foreground">비중이</span>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        className="w-16 rounded border bg-background px-2 py-1 text-xs text-right"
-                        placeholder="최소%"
-                        value={rule.minPct}
-                        onChange={(e) =>
-                          setAlertRules((prev) =>
-                            prev.map((r, i) => (i === idx ? { ...r, minPct: e.target.value } : r)),
-                          )
-                        }
-                      />
-                      <span className="text-xs text-muted-foreground">~</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        className="w-16 rounded border bg-background px-2 py-1 text-xs text-right"
-                        placeholder="최대%"
-                        value={rule.maxPct}
-                        onChange={(e) =>
-                          setAlertRules((prev) =>
-                            prev.map((r, i) => (i === idx ? { ...r, maxPct: e.target.value } : r)),
-                          )
-                        }
-                      />
-                    </div>
-                    <span className="text-xs text-muted-foreground">를 벗어나면 알림</span>
-                    <button
-                      type="button"
-                      className="ml-auto rounded px-1.5 py-0.5 text-xs text-destructive transition-all hover:bg-destructive/10 active:scale-95"
-                      onClick={() =>
-                        setAlertRules((prev) => prev.filter((_, i) => i !== idx))
-                      }
-                    >
-                      삭제
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={alertBusy}
-                  onClick={handleSaveAlertConfig}
-                >
-                  알림 설정 저장
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border px-4 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={alertBusy}
-                  onClick={handleCheckAlertNow}
-                >
-                  지금 확인 (수동)
-                </button>
-              </div>
-              {alertMessage && (
-                <p className="text-xs text-muted-foreground">{alertMessage}</p>
-              )}
-              {alertBusy && <p className="text-xs text-amber-600">처리 중…</p>}
-            </div>
           </section>
           </div>
 
