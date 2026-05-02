@@ -1040,6 +1040,10 @@ export default function Home() {
   const [lastSellLogSyncedAt, setLastSellLogSyncedAt] = useState<string | null>(null);
   const [sellLogDirty, setSellLogDirty] = useState(false);
   const [latestBackupAt, setLatestBackupAt] = useState<string | null>(null);
+  /** 서버 `portfolio_daily_snapshots` 최신 일자 행의 `created_at`(크론·upsert 최초 기록 시각 근사) */
+  const [cronDailySnapshotRecordedAt, setCronDailySnapshotRecordedAt] = useState<string | null>(
+    null,
+  );
   const [hasLoadedLatestBackup, setHasLoadedLatestBackup] = useState(false);
   /** 백업 선택 복원용: 파싱된 백업 파일 데이터 */
   const [pendingBackups, setPendingBackups] = useState<Array<{ id?: string; created_at: string; snapshot: Record<string, unknown> }> | null>(null);
@@ -2028,6 +2032,9 @@ export default function Home() {
     setSyncKeyDraft(savedKey);
     setLastSellLogSyncedAt(savedSellLogSyncTs.trim() || null);
     setSellLogDirty(savedSellLogDirty);
+    const savedLastSyncTs =
+      typeof window !== "undefined" ? window.localStorage.getItem(LAST_SYNC_TS_KEY) ?? "" : "";
+    setLastSyncedAt(savedLastSyncTs.trim() || null);
     const storedAuto = typeof window !== "undefined" ? window.localStorage.getItem(AUTO_SYNC_STORAGE) : null;
     const auto = storedAuto !== "0"; // 명시적으로 끈 경우(0)만 false, 나머지는 기본 true
     setAutoSync(auto);
@@ -2093,18 +2100,37 @@ export default function Home() {
     const key = (() => {
       try { return window.localStorage.getItem(SYNC_KEY_STORAGE) ?? ""; } catch { return ""; }
     })();
-    if (key.length < 8) return;
+    if (key.length < 8) {
+      setCronDailySnapshotRecordedAt(null);
+      return;
+    }
 
     void fetch(`/api/snapshot?sync_key=${encodeURIComponent(key)}&days=180`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((json: { snapshots?: DailySnapshot[] } | null) => {
-        if (!json?.snapshots?.length) return;
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (
+          json: {
+            snapshots?: DailySnapshot[];
+            latestDailySnapshotRecordedAt?: string | null;
+          } | null,
+        ) => {
+        if (!json) return;
+        const snaps = json.snapshots ?? [];
+        if (
+          typeof json.latestDailySnapshotRecordedAt === "string" &&
+          json.latestDailySnapshotRecordedAt.trim()
+        ) {
+          setCronDailySnapshotRecordedAt(json.latestDailySnapshotRecordedAt.trim());
+        } else {
+          setCronDailySnapshotRecordedAt(null);
+        }
+        if (!snaps.length) return;
         // 서버 스냅샷과 로컬 스냅샷 병합
         // ★ 경쟁 조건 방지: 서버 응답이 올 때 최신 localStorage를 다시 읽어서 병합합니다.
         //   (effect 시작 이후 saveDailySnapshot으로 새로 저장된 데이터를 포함시키기 위함)
         const freshLocal = loadDailySnapshots();
         const localMap = new Map(freshLocal.map((s) => [s.date, s]));
-        for (const s of json.snapshots) {
+        for (const s of snaps) {
           const existing = localMap.get(s.date);
 
           const serverLooksEmpty =
@@ -3108,19 +3134,47 @@ export default function Home() {
           {actionErrorToast}
         </div>
       ) : null}
-      <header className="sticky top-0 z-40 border-b border-slate-800/90 bg-[#0b1220]">
+      <header className="sticky top-0 z-40 border-b border-slate-800/90 bg-[#0b1220]/95 backdrop-blur-sm">
         <div className="mx-auto max-w-[1600px] px-3 py-3 sm:px-4">
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <h1 className="flex items-center gap-2 text-base font-bold tracking-tight sm:text-lg">
-              <span aria-hidden>📈</span>
-              주식 대시보드
-            </h1>
-            <span className="rounded-md bg-rose-500/15 px-2 py-0.5 text-[10px] font-medium text-rose-200 ring-1 ring-rose-500/25 sm:text-[11px]">
-              로컬
-            </span>
-            <span className="hidden text-[11px] text-slate-500 sm:inline">
-              USD/KRW {usdKrw.toLocaleString(MONEY_INT_LOCALE)} · EUR/KRW {eurKrw.toLocaleString(MONEY_INT_LOCALE)}
-            </span>
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <h1 className="flex items-center gap-2 text-base font-bold tracking-tight sm:text-lg">
+                <span aria-hidden>📈</span>
+                주식 대시보드
+              </h1>
+              <span className="rounded-md bg-rose-500/15 px-2 py-0.5 text-[10px] font-medium text-rose-200 ring-1 ring-rose-500/25 sm:text-[11px]">
+                로컬
+              </span>
+              <span className="hidden text-[11px] text-slate-500 sm:inline">
+                USD/KRW {usdKrw.toLocaleString(MONEY_INT_LOCALE)} · EUR/KRW{" "}
+                {eurKrw.toLocaleString(MONEY_INT_LOCALE)}
+              </span>
+            </div>
+            <div
+              role="status"
+              aria-label="동기화 및 일별 크론 기록 시각"
+              className="flex w-full min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-slate-500 sm:w-auto sm:max-w-[min(42rem,calc(100vw-10rem))] sm:justify-end sm:text-[11px]"
+            >
+              <span className="break-words sm:text-right">
+                동기화:{" "}
+                <time dateTime={lastSyncedAt ?? undefined} className="font-medium text-slate-300">
+                  {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "—"}
+                </time>
+              </span>
+              <span className="hidden text-slate-600 sm:inline" aria-hidden>
+                ·
+              </span>
+              <span className="break-words sm:text-right">
+                크론(일별 스냅):{" "}
+                <time dateTime={cronDailySnapshotRecordedAt ?? undefined} className="font-medium text-slate-300">
+                  {cronDailySnapshotRecordedAt
+                    ? new Date(cronDailySnapshotRecordedAt).toLocaleString()
+                    : cloudSyncKey.trim().length >= 8
+                      ? "미기록"
+                      : "—"}
+                </time>
+              </span>
+            </div>
           </div>
           <nav
             className="mt-2 flex max-w-full gap-0.5 overflow-x-auto border-t border-slate-800/80 pt-2 pb-0.5 [-ms-overflow-style:none] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1"

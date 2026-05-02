@@ -124,7 +124,9 @@ export async function GET(req: NextRequest) {
 
   const withBreakdown = await admin
     .from("portfolio_daily_snapshots")
-    .select("date, owner_values, breakdown_values, total_value, usd_krw, updated_at")
+    .select(
+      "date, owner_values, breakdown_values, total_value, usd_krw, updated_at, created_at",
+    )
     .eq("sync_key", syncKey)
     .gte("date", cutoffDate)
     .order("date", { ascending: true });
@@ -132,7 +134,7 @@ export async function GET(req: NextRequest) {
   if (withBreakdown.error) {
     const fallback = await admin
       .from("portfolio_daily_snapshots")
-      .select("date, owner_values, total_value, usd_krw")
+      .select("date, owner_values, total_value, usd_krw, updated_at, created_at")
       .eq("sync_key", syncKey)
       .gte("date", cutoffDate)
       .order("date", { ascending: true });
@@ -147,7 +149,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const snapshots = (data ?? []).map((row) => ({
+  type Row = Record<string, unknown>;
+  const rows = (data ?? []) as Row[];
+  const snapshots = rows.map((row) => ({
     date: String(row.date),
     ownerValues: (row.owner_values as Record<string, number>) ?? {},
     breakdownValues: (row.breakdown_values as BreakdownValues | undefined) ?? undefined,
@@ -156,7 +160,31 @@ export async function GET(req: NextRequest) {
     updatedAt: typeof row.updated_at === "string" ? row.updated_at : undefined,
   }));
 
-  return NextResponse.json({ snapshots });
+  /** 가장 최근 `date` 행 기준 저장 시각(우선 updated_at — 재upsert 반영, 없으면 created_at) */
+  let latestDailySnapshotRecordedAt: string | null = null;
+  function rowRecordedAtIso(r: Row): string | null {
+    const u = typeof r.updated_at === "string" ? r.updated_at.trim() : "";
+    if (u) return u;
+    const c = typeof r.created_at === "string" ? r.created_at.trim() : "";
+    return c || null;
+  }
+  if (rows.length > 0) {
+    let latestDate = "";
+    for (const row of rows) {
+      const d = String(row.date ?? "");
+      if (d.localeCompare(latestDate) > 0) latestDate = d;
+    }
+    const atLatestDate = rows.filter((r) => String(r.date ?? "") === latestDate);
+    const times = atLatestDate
+      .map((r) => rowRecordedAtIso(r))
+      .filter((t): t is string => t !== null && t.length > 0);
+    latestDailySnapshotRecordedAt =
+      times.length === 1
+        ? times[0].trim()
+        : times.slice().sort().at(-1) ?? null;
+  }
+
+  return NextResponse.json({ snapshots, latestDailySnapshotRecordedAt });
 }
 
 /**
