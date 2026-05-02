@@ -1,12 +1,21 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, type Dispatch, type SetStateAction } from "react";
+import { GripVertical } from "lucide-react";
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { fmtInt, parseKoreanIntDigits } from "@/lib/format-money";
 import {
   loadAllTargetStockWeights,
   TARGET_WEIGHT_STORAGE_KEY,
   HAS_LOCAL_CHANGES_KEY,
 } from "@/lib/portfolio-target-weights";
+import {
+  loadVisualOrderKeysForOwner,
+  persistVisualOrderForOwner,
+  REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
+} from "@/lib/rebalance-visual-order";
 
 // ─── 타입 ──────────────────────────────────────────────────────────────────────
 
@@ -63,13 +72,153 @@ function calcMemberAdjustments(g: GroupAllocation, diffKrw: number): MemberAdj[]
   });
 }
 
+/** 대시보드·리밸 바와 동일하게 현금 줄은 드래그 비활성·하단 고정 */
+function isPinnedCashPortfolioGroup(groupKey: string): boolean {
+  const t = groupKey.trim();
+  if (t === "현금" || t === "USD 현금" || t === "KRW 현금") return true;
+  return t.toLowerCase().includes("cash");
+}
+
+function orderPortfolioGroupsVisual(
+  groupsIn: GroupAllocation[],
+  visualKeys: string[] | null,
+  sortFallback: (a: GroupAllocation, b: GroupAllocation) => number,
+): GroupAllocation[] {
+  const pinned = groupsIn.filter((g) => isPinnedCashPortfolioGroup(g.groupKey));
+  const movable = groupsIn.filter((g) => !isPinnedCashPortfolioGroup(g.groupKey));
+  const keysFiltered = visualKeys?.filter((k) => movable.some((g) => g.groupKey === k)) ?? null;
+  let orderedNc: GroupAllocation[];
+  if (keysFiltered && keysFiltered.length > 0) {
+    const map = new Map(movable.map((g) => [g.groupKey, g]));
+    orderedNc = [];
+    for (const k of keysFiltered) {
+      const g = map.get(k);
+      if (g) {
+        orderedNc.push(g);
+        map.delete(k);
+      }
+    }
+    orderedNc.push(...[...map.values()].sort(sortFallback));
+  } else {
+    orderedNc = [...movable].sort(sortFallback);
+  }
+  return [...orderedNc, ...pinned.sort(sortFallback)];
+}
+
+function RebalancingBarSortableRow({
+  row,
+  targets,
+  setTargets,
+  maxScale,
+}: {
+  row: ComputedRow;
+  targets: Record<string, string>;
+  setTargets: Dispatch<SetStateAction<Record<string, string>>>;
+  maxScale: number;
+}) {
+  const pinned = isPinnedCashPortfolioGroup(row.groupKey);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: row.groupKey,
+    disabled: pinned,
+  });
+  const diff = row.targetPct - row.currentPct;
+  const absDiff = Math.abs(diff);
+  const rowIsOver = diff < -0.049;
+  const rowIsUnder = diff > 0.049;
+  const currentBarPct = Math.min((row.currentPct / maxScale) * 100, 100);
+  const targetLinePct = Math.min((row.targetPct / maxScale) * 100, 100);
+  const isCash = pinned;
+
+  const outerStyle =
+    !pinned ?
+      {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        ...(isDragging ? { opacity: 0.9, zIndex: 3, position: "relative" as const } : {}),
+      }
+    : undefined;
+
+  return (
+    <div ref={setNodeRef} style={outerStyle} className="flex items-center border-b border-slate-800/40 py-1.5 last:border-0">
+      {!pinned ?
+        <button
+          type="button"
+          className="touch-none mr-0.5 shrink-0 cursor-grab rounded p-0.5 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+          title="순서 이동 (드래그)"
+          {...attributes}
+          {...listeners}
+          aria-label={`${row.groupKey} 순서 변경`}
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+      : <span className="mr-0.5 w-5 shrink-0" aria-hidden />}
+
+      <div className="flex w-36 shrink-0 items-center gap-0.5 sm:w-44">
+        <span
+          className="min-w-0 flex-1 truncate text-[11px] font-medium sm:text-xs"
+          title={row.displayName || row.groupKey}
+        >
+          {row.displayName || row.groupKey}
+        </span>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={0.1}
+            className="w-12 rounded border bg-background px-1 py-0.5 text-right text-[11px] tabular-nums"
+            value={targets[row.groupKey] ?? ""}
+            onChange={(e) => setTargets((prev) => ({ ...prev, [row.groupKey]: e.target.value }))}
+          />
+          <span className="text-[10px] text-muted-foreground">%</span>
+        </div>
+      </div>
+
+      <div className="relative mx-1.5 h-5 flex-1 min-w-0">
+        <div className="absolute inset-y-1 inset-x-0 rounded-sm bg-slate-800/60" />
+        {[0.25, 0.5, 0.75].map((f) => (
+          <div
+            key={f}
+            className="pointer-events-none absolute inset-y-1 w-px bg-slate-700/40"
+            style={{ left: `${f * 100}%` }}
+          />
+        ))}
+        <div
+          className={`absolute inset-y-1 left-0 rounded-sm transition-all duration-300 ${
+            rowIsOver ? "bg-emerald-500/75" : rowIsUnder ? "bg-rose-500/75" : "bg-slate-500/60"
+          }`}
+          style={{ width: `${currentBarPct}%` }}
+        />
+        {row.targetPct > 0 ?
+          <div
+            className="absolute inset-y-0 w-0 border-l-2 border-dashed border-white/55 transition-all duration-300"
+            style={{ left: `${targetLinePct}%` }}
+          />
+        : null}
+      </div>
+
+      <div className="w-24 shrink-0 text-right text-[11px] sm:w-28">
+        {isCash ?
+          <span className="text-muted-foreground text-[10px]">현금</span>
+        : rowIsOver ?
+          <span className="font-medium tabular-nums text-emerald-400">▼+{absDiff.toFixed(1)}%p 초과</span>
+        : rowIsUnder ?
+          <span className="font-medium tabular-nums text-rose-400">▲{absDiff.toFixed(1)}%p 부족</span>
+        : (
+          <span className="text-muted-foreground">✓</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── RebalancingOwner ──────────────────────────────────────────────────────────
+
 /** 정수 주수 (floor 절대값, 부호는 호출자가 처리) */
 function floorShares(diffKrw: number, priceKrw: number): number {
   if (priceKrw <= 0) return 0;
   return Math.floor(Math.abs(diffKrw) / priceKrw);
 }
-
-// ─── RebalancingOwner ──────────────────────────────────────────────────────────
 
 function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
   // ── 목표 비중 state: localStorage 저장값 우선, 없으면 현재 비중 ──────────────
@@ -99,6 +248,52 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
     });
   }, [groups]);
 
+  const [visualOrderKeys, setVisualOrderKeys] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    setVisualOrderKeys(loadVisualOrderKeysForOwner(ownerName));
+  }, [ownerName]);
+
+  useEffect(() => {
+    const h = () => setVisualOrderKeys(loadVisualOrderKeysForOwner(ownerName));
+    window.addEventListener(REBALANCE_VISUAL_ORDER_REFRESH_EVENT, h);
+    return () => window.removeEventListener(REBALANCE_VISUAL_ORDER_REFRESH_EVENT, h);
+  }, [ownerName]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+
+  const sortGroupsByTarget = useCallback(
+    (a: GroupAllocation, b: GroupAllocation) => {
+      const ta = parseFloat(targets[a.groupKey] ?? "0") || 0;
+      const tb = parseFloat(targets[b.groupKey] ?? "0") || 0;
+      return tb - ta;
+    },
+    [targets],
+  );
+
+  const orderedGroups = useMemo(
+    () => orderPortfolioGroupsVisual(groups, visualOrderKeys, sortGroupsByTarget),
+    [groups, visualOrderKeys, sortGroupsByTarget],
+  );
+
+  const handleCalculatorBarDragEnd = useCallback(
+    (sortableIds: string[], e: DragEndEvent) => {
+      const { active, over } = e;
+      if (!over || active.id === over.id) return;
+      const a = String(active.id);
+      const o = String(over.id);
+      const oldIdx = sortableIds.indexOf(a);
+      const newIdx = sortableIds.indexOf(o);
+      if (oldIdx < 0 || newIdx < 0) return;
+      const nextOrder = arrayMove(sortableIds, oldIdx, newIdx);
+      setVisualOrderKeys(nextOrder);
+      persistVisualOrderForOwner(ownerName, nextOrder);
+    },
+    [ownerName],
+  );
+
   // ── 모드 & 신규 투자금 ─────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>("buy-sell");
   const [newMoneyInput, setNewMoneyInput] = useState("");
@@ -125,16 +320,10 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
     return Math.ceil((raw * 1.25) / 5) * 5;
   }, [groups, targets]);
 
-  // ── 행 계산 ──────────────────────────────────────────────────────────────
+  // ── 행 계산 (표시 순서 = orderedGroups, 대시보드와 같은 visual order 키) ───
   const rows = useMemo((): ComputedRow[] => {
-    const sorted = groups.slice().sort((a, b) => {
-      const ta = parseFloat(targets[a.groupKey] ?? "0") || 0;
-      const tb = parseFloat(targets[b.groupKey] ?? "0") || 0;
-      return tb - ta; // 목표 비중 내림차순
-    });
-
     if (mode === "buy-sell") {
-      return sorted.map((g) => {
+      return orderedGroups.map((g) => {
         const targetPct = parseFloat(targets[g.groupKey] ?? "0") || 0;
         const diffKrw = (targetPct / 100) * totalKrw - g.valueKrw;
         return { ...g, targetPct, diffKrw, memberAdjustments: calcMemberAdjustments(g, diffKrw) };
@@ -143,7 +332,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
 
     // buy-only
     const newTotal = totalKrw + Math.max(newMoneyKrw, 0);
-    const rawRows = sorted.map((g) => {
+    const rawRows = orderedGroups.map((g) => {
       const targetPct = parseFloat(targets[g.groupKey] ?? "0") || 0;
       const rawDiff = (targetPct / 100) * newTotal - g.valueKrw;
       return { g, targetPct, rawDiff };
@@ -157,7 +346,16 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
       const diffKrw = rawDiff > 0 ? rawDiff * scale : 0;
       return { ...g, targetPct, diffKrw, memberAdjustments: calcMemberAdjustments(g, diffKrw) };
     });
-  }, [groups, targets, totalKrw, mode, newMoneyKrw]);
+  }, [orderedGroups, targets, totalKrw, mode, newMoneyKrw]);
+
+  const { sortableBarGroupKeys, sortableContextIds } = useMemo(() => {
+    const nk = rows.filter((r) => !isPinnedCashPortfolioGroup(r.groupKey)).map((r) => r.groupKey);
+    const pin = rows.filter((r) => isPinnedCashPortfolioGroup(r.groupKey)).map((r) => r.groupKey);
+    return {
+      sortableBarGroupKeys: nk,
+      sortableContextIds: [...nk, ...pin],
+    };
+  }, [rows]);
 
   // ── 배분된 투자금 합계 (buy-only) ─────────────────────────────────────────
   const allocatedKrw = useMemo(
@@ -363,7 +561,10 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
 
         {/* 스케일 헤더 — 바 행과 동일한 레이아웃으로 정렬 */}
         <div className="mb-0.5 flex items-center">
-          <div className="w-36 shrink-0 sm:w-44" />
+          <div className="flex shrink-0">
+            <span className="w-5 shrink-0 sm:w-5" aria-hidden />
+            <div className="w-36 shrink-0 sm:w-44" />
+          </div>
           <div className="mx-1.5 flex-1">
             <div className="flex justify-between text-[9px] text-muted-foreground/50">
               {[0, 0.25, 0.5, 0.75, 1].map((f) => (
@@ -374,98 +575,20 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
           <div className="w-24 shrink-0 sm:w-28" />
         </div>
 
-        {/* 바 행 */}
-        <div>
-          {visibleRows.map((r) => {
-            const diff = r.targetPct - r.currentPct;
-            const absDiff = Math.abs(diff);
-            const rowIsOver = diff < -0.049;
-            const rowIsUnder = diff > 0.049;
-            const currentBarPct = Math.min((r.currentPct / maxScale) * 100, 100);
-            const targetLinePct = Math.min((r.targetPct / maxScale) * 100, 100);
-            const isCash = r.groupKey === "현금" || r.groupKey.toLowerCase().includes("cash");
-
-            return (
-              <div
-                key={r.groupKey}
-                className="flex items-center border-b border-slate-800/40 py-1.5 last:border-0"
-              >
-                {/* 그룹명 + 목표 입력: w-36 sm:w-44 */}
-                <div className="flex w-36 shrink-0 items-center gap-0.5 sm:w-44">
-                  <span
-                    className="min-w-0 flex-1 truncate text-[11px] font-medium sm:text-xs"
-                    title={r.displayName || r.groupKey}
-                  >
-                    {r.displayName || r.groupKey}
-                  </span>
-                  <div className="flex shrink-0 items-center gap-0.5">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.1"
-                      className="w-12 rounded border bg-background px-1 py-0.5 text-right text-[11px] tabular-nums"
-                      value={targets[r.groupKey] ?? ""}
-                      onChange={(e) =>
-                        setTargets((prev) => ({ ...prev, [r.groupKey]: e.target.value }))
-                      }
-                    />
-                    <span className="text-[10px] text-muted-foreground">%</span>
-                  </div>
-                </div>
-
-                {/* 바 트랙 */}
-                <div className="relative mx-1.5 h-5 flex-1 min-w-0">
-                  {/* 배경 트랙 */}
-                  <div className="absolute inset-y-1 inset-x-0 rounded-sm bg-slate-800/60" />
-                  {/* 1/4, 1/2, 3/4 그리드 선 */}
-                  {[0.25, 0.5, 0.75].map((f) => (
-                    <div
-                      key={f}
-                      className="pointer-events-none absolute inset-y-1 w-px bg-slate-700/40"
-                      style={{ left: `${f * 100}%` }}
-                    />
-                  ))}
-                  {/* 채워진 바 */}
-                  <div
-                    className={`absolute inset-y-1 left-0 rounded-sm transition-all duration-300 ${
-                      rowIsOver
-                        ? "bg-emerald-500/75"
-                        : rowIsUnder
-                          ? "bg-rose-500/75"
-                          : "bg-slate-500/60"
-                    }`}
-                    style={{ width: `${currentBarPct}%` }}
-                  />
-                  {/* 목표 마커 (세로 점선) */}
-                  {r.targetPct > 0 && (
-                    <div
-                      className="absolute inset-y-0 w-0 border-l-2 border-dashed border-white/55 transition-all duration-300"
-                      style={{ left: `${targetLinePct}%` }}
-                    />
-                  )}
-                </div>
-
-                {/* 이탈 텍스트: w-24 sm:w-28 */}
-                <div className="w-24 shrink-0 text-right text-[11px] sm:w-28">
-                  {isCash ? (
-                    <span className="text-muted-foreground text-[10px]">현금</span>
-                  ) : rowIsOver ? (
-                    <span className="font-medium tabular-nums text-emerald-400">
-                      ▼+{absDiff.toFixed(1)}%p 초과
-                    </span>
-                  ) : rowIsUnder ? (
-                    <span className="font-medium tabular-nums text-rose-400">
-                      ▲{absDiff.toFixed(1)}%p 부족
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">✓</span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {/* 바 행 — ⋮ 드래그로 순서 (현금 줄 고정, 대시보드와 동일 localStorage 키) */}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={(e) => handleCalculatorBarDragEnd(sortableBarGroupKeys, e)}
+        >
+          <SortableContext items={sortableContextIds} strategy={verticalListSortingStrategy}>
+            <div>
+              {visibleRows.map((r) => (
+                <RebalancingBarSortableRow key={r.groupKey} row={r} targets={targets} setTargets={setTargets} maxScale={maxScale} />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </div>
 
       {/* ── 매매 실행 순서 ──────────────────────────────────────────────────── */}

@@ -54,6 +54,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { GripVertical } from "lucide-react";
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableOrStaticTableRow } from "@/components/table-sortable-row";
 
 const DEFAULT_OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율", "퇴직연금"] as const;
 type OwnerName = string;
@@ -2820,6 +2824,39 @@ export default function Home() {
     });
   }
 
+  const holdingsDndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+
+  /** 입력 순 보기: 종목 행 순서 드래그 시 positions 배열을 보유자 구간 안에서 재배열 */
+  function reorderHoldingsDrag(owner: string, e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const activeIdx = Number(active.id);
+    const overIdx = Number(over.id);
+    if (
+      !Number.isFinite(activeIdx) ||
+      !Number.isFinite(overIdx) ||
+      activeIdx < 0 ||
+      overIdx < 0
+    ) {
+      return;
+    }
+    setPositions((prev) => {
+      const globalIndices = prev.map((p, i) => (p.owner === owner ? i : -1)).filter((i) => i >= 0);
+      const oldPos = globalIndices.indexOf(activeIdx);
+      const newPos = globalIndices.indexOf(overIdx);
+      if (oldPos < 0 || newPos < 0) return prev;
+      const ownerSlice = globalIndices.map((gi) => prev[gi]);
+      const movedSlice = arrayMove(ownerSlice, oldPos, newPos);
+      const next = [...prev];
+      globalIndices.forEach((gi, k) => {
+        next[gi] = movedSlice[k];
+      });
+      return next;
+    });
+  }
+
   function handleAddOwner() {
     const next = window.prompt("추가할 보유자 이름을 입력하세요.");
     const name = next?.trim();
@@ -3405,7 +3442,7 @@ export default function Home() {
                         {sortBtn("group", "그룹별")}
                       </div>
                       <p className="text-[10px] text-muted-foreground">
-                        입력 순은 ▲▼로 저장됩니다. 다른 정렬일 때는 순서 변경이 비활성화됩니다. 표는
+                        입력 순은 ⋮ 드래그 또는 ▲▼로 저장됩니다. 다른 정렬일 때는 순서 변경이 비활성화됩니다. 표는
                         차트 그룹(미입력 시 티커)별로 묶여 보입니다.
                       </p>
                     </div>
@@ -3523,7 +3560,8 @@ export default function Home() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        holdingsGroupBlocks.map((block) => {
+                        (() => {
+                          const blockRows = holdingsGroupBlocks.map((block) => {
                           // 오늘 등락
                           const groupDailyChangeKrw = block.items.reduce((sum, p) => {
                             if (p.previousClose === null) return sum;
@@ -3593,8 +3631,30 @@ export default function Home() {
                               const isEditing = editingRowIndex === rowIndex;
                               const foreignMarketValue = formatPositionMarketValueForeign(position);
                               return (
-                        <TableRow key={rowKey} className="group/row">
+                        <SortableOrStaticTableRow
+                          manual={sortMode === "manual"}
+                          id={position.sourceIndex}
+                          key={rowKey}
+                          disabled={sortMode === "manual" && isEditing}
+                          className="group/row"
+                        >
+                          {(drag) => (
+                          <>
                           <TableCell className="px-3 py-1.5">
+                            <div className="flex items-start gap-1">
+                              {sortMode === "manual" && !isEditing && drag ? (
+                                <button
+                                  type="button"
+                                  className="touch-none mt-0.5 inline-flex shrink-0 cursor-grab rounded p-0.5 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+                                  title="순서 이동 (드래그)"
+                                  aria-label={`${position.name ?? position.symbol} 순서 변경`}
+                                  {...drag.attributes}
+                                  {...drag.listeners}
+                                >
+                                  <GripVertical className="h-4 w-4 opacity-70" />
+                                </button>
+                              ) : null}
+                              <div className="min-w-0 flex-1">
                             {isEditing ? (
                               <div className="flex flex-col gap-1">
                                 <input
@@ -3626,6 +3686,8 @@ export default function Home() {
                                 <p className="text-[11px] text-muted-foreground">{position.symbol}</p>
                               </>
                             )}
+                              </div>
+                            </div>
                           </TableCell>
                           <TableCell className="px-3 py-1.5 text-right align-top">
                             <p className="text-[16px] font-semibold tabular-nums leading-none">
@@ -3912,12 +3974,31 @@ export default function Home() {
                               </div>
                             )}
                           </TableCell>
-                        </TableRow>
+                        </>
+                          )}
+                        </SortableOrStaticTableRow>
                               );
                             })}
                           </Fragment>
                         );
-                        })
+                        });
+                          return sortMode === "manual" ? (
+                            <DndContext
+                              sensors={holdingsDndSensors}
+                              collisionDetection={closestCenter}
+                              onDragEnd={(e) => reorderHoldingsDrag(group.ownerName, e)}
+                            >
+                              <SortableContext
+                                items={displayItems.map((p) => p.sourceIndex)}
+                                strategy={verticalListSortingStrategy}
+                              >
+                                {blockRows}
+                              </SortableContext>
+                            </DndContext>
+                          ) : (
+                            blockRows
+                          );
+                        })()
                       )}
                     </TableBody>
                   </Table>

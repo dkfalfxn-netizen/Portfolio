@@ -12,9 +12,16 @@ import {
   persistOneOwnerScratchpad,
   pushTargetWeightsAndScratchpadsToServer,
 } from "@/lib/portfolio-owner-scratchpad";
+import { GripVertical } from "lucide-react";
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  loadVisualOrderKeysForOwner,
+  persistVisualOrderForOwner,
+  REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
+} from "@/lib/rebalance-visual-order";
 import { fmtInt } from "@/lib/format-money";
-
-/** 네온 글로우용 팔레트 (한 단계 어둡게 — 채도는 유지) */
 const NEON_PALETTE = [
   "#0891B2",
   "#65A30D",
@@ -369,6 +376,186 @@ function fmtTargetPctLabel(targetPct: number): string {
   return rounded.toFixed(1);
 }
 
+/** 목표 바 한 줄 — 비현금만 드래그 정렬 가능 */
+function TargetWeightSortableBarRow({
+  slice,
+  targetsByTicker,
+  setTarget,
+  TARGET_AT,
+  MAX_RATIO,
+}: {
+  slice: AllocationSlice;
+  targetsByTicker: Record<string, number>;
+  setTarget: (ticker: string, raw: string) => void;
+  TARGET_AT: number;
+  MAX_RATIO: number;
+}) {
+  const isCashRow = isCashRebalanceTicker(slice.ticker);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: slice.ticker,
+    disabled: isCashRow,
+  });
+  const hasInputTarget = Object.prototype.hasOwnProperty.call(targetsByTicker, slice.ticker);
+  const target = targetsByTicker[slice.ticker] ?? 0;
+  const actual = slice.weight;
+  const hasPositiveTarget = target > 0;
+  const isOverTargetWhenZero = hasInputTarget && !hasPositiveTarget && actual > 0;
+
+  const NO_TARGET_REF = 10;
+  const ratio = hasPositiveTarget
+    ? actual / target
+    : isOverTargetWhenZero
+      ? MAX_RATIO
+      : !hasInputTarget && actual > 0
+        ? actual / NO_TARGET_REF
+        : 0;
+  const barWidthPct = (Math.min(ratio, MAX_RATIO) / MAX_RATIO) * 100;
+  const isClipped = ratio > MAX_RATIO;
+
+  const relDev = hasPositiveTarget ? (actual - target) / target : 0;
+  const withinBand = hasPositiveTarget && Math.abs(relDev) <= 0.05;
+  const belowBand = hasPositiveTarget && relDev < -0.05;
+  const diffPp = actual - target;
+
+  const barBg = !hasInputTarget
+    ? "rgba(255,255,255,0.07)"
+    : withinBand
+      ? "linear-gradient(to right, rgb(29,78,216), rgb(14,165,233))"
+      : belowBand
+        ? "linear-gradient(to right, rgb(153,27,27), rgb(220,38,38), rgb(248,113,113))"
+        : "linear-gradient(to right, rgb(20,83,45), rgb(22,163,74), rgb(52,211,153))";
+  const barGlow = !hasInputTarget
+    ? undefined
+    : withinBand
+      ? "0 0 8px rgba(56,189,248,0.35)"
+      : belowBand
+        ? "0 0 8px rgba(248,113,113,0.45)"
+        : "0 0 8px rgba(52,211,153,0.4)";
+
+  const tooltipEntries = entriesForAllocationTooltip(slice);
+  const isGrouped = tooltipEntries.length > 1;
+  const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
+
+  const outerStyle =
+    !isCashRow ?
+      ({
+        transform: CSS.Transform.toString(transform),
+        transition,
+        ...(isDragging ? { opacity: 0.92, zIndex: 4, position: "relative" as const } : {}),
+      })
+    : undefined;
+
+  return (
+    <div ref={setNodeRef} style={outerStyle} className="group relative flex items-center gap-1">
+      {!isCashRow ?
+        <button
+          type="button"
+          className="touch-none shrink-0 cursor-grab rounded p-0.5 text-zinc-500 hover:text-zinc-300 active:cursor-grabbing"
+          title="순서 이동 (드래그)"
+          {...attributes}
+          {...listeners}
+          aria-label={`${slice.ticker} 순서 변경`}
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </button>
+      : <span className="w-5 shrink-0" aria-hidden />}
+
+      {tooltipEntries.length > 0 && (
+        <div className="pointer-events-none absolute bottom-[calc(100%+4px)] left-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
+          {isGrouped ?
+            <div className="space-y-1">
+              <p className="font-bold text-cyan-400">{slice.ticker}</p>
+              {tooltipEntries.map((e, ei) => (
+                <div
+                  key={`${slice.ticker}-bar-${ei}-${e.symbol}-${e.name}`}
+                  className="flex items-baseline justify-between gap-2"
+                >
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="font-semibold text-zinc-300">{e.symbol}</span>
+                    <span className="text-zinc-500">{e.name}</span>
+                  </div>
+                  <span className="tabular-nums text-zinc-400">{tooltipPctText(e.weight)}</span>
+                </div>
+              ))}
+            </div>
+          : <div className="space-y-0.5">
+              <p className="font-bold text-cyan-400">{tooltipEntries[0].symbol || slice.ticker}</p>
+              <p className="font-semibold text-zinc-200">
+                {tooltipEntries[0].name || slice.displayName}{" "}
+                <span className="tabular-nums text-zinc-400">
+                  ({tooltipPctText(tooltipEntries[0].weight)})
+                </span>
+              </p>
+            </div>
+          }
+        </div>
+      )}
+
+      <div className="flex w-[108px] shrink-0 items-center justify-between gap-1">
+        <span className="truncate text-[11px] font-semibold text-zinc-200" title={slice.displayName}>
+          {slice.ticker}
+        </span>
+        <div className="flex shrink-0 items-center">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={0.1}
+            placeholder="—"
+            aria-label={`${slice.ticker} 목표 비중 %`}
+            className="w-9 rounded border border-white/10 bg-zinc-900/80 px-0.5 py-0 text-right text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
+            value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
+            onChange={(e) => setTarget(slice.ticker, e.target.value)}
+          />
+          <span className="ml-0.5 text-[9px] text-zinc-600">%</span>
+        </div>
+      </div>
+
+      <div
+        className="relative h-[18px] flex-1 overflow-hidden rounded-sm"
+        style={{ background: "rgba(255,255,255,0.04)" }}
+      >
+        <div
+          className="pointer-events-none absolute top-0 z-10 h-full w-px"
+          style={{
+            left: `${TARGET_AT * 100}%`,
+            borderRight: "1px dashed rgba(161,161,170,0.55)",
+          }}
+        />
+        {barWidthPct > 0 ?
+          <div
+            className="absolute left-0 top-[2px] bottom-[2px] rounded-sm transition-all duration-300"
+            style={{ width: `${barWidthPct}%`, background: barBg, boxShadow: barGlow }}
+          />
+        : hasInputTarget && !hasPositiveTarget ?
+          <div
+            className="absolute left-0 top-[2px] bottom-[2px] w-[3px] rounded-sm opacity-70"
+            style={{ background: "rgba(161,161,170,0.5)" }}
+          />
+        : null}
+        {isClipped ?
+          <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[8px] text-emerald-300/70">›</span>
+        : null}
+      </div>
+
+      <div className="w-[96px] shrink-0 text-right text-[10px] tabular-nums leading-none">
+        {!hasInputTarget ?
+          <span className="text-zinc-600">—</span>
+        : !hasPositiveTarget && actual > 0 ?
+          <span className="text-emerald-400">목표 0% ▼ +{actual.toFixed(1)}%p</span>
+        : !hasPositiveTarget ?
+          <span className="text-zinc-400">목표 0%</span>
+        : withinBand ?
+          <span className="text-sky-400">≈ 목표</span>
+        : belowBand ?
+          <span className="text-red-400">▲ {Math.abs(diffPp).toFixed(1)}%p 부족</span>
+        : <span className="text-emerald-400">▼ +{diffPp.toFixed(1)}%p 초과</span>}
+      </div>
+    </div>
+  );
+}
+
 function TargetStockWeightNeu({
   ownerName,
   slices,
@@ -392,6 +579,81 @@ function TargetStockWeightNeu({
   const [savedAtText, setSavedAtText] = useState<string | null>(null);
   const [saveFailedBrief, setSaveFailedBrief] = useState(false);
   const [splitCount, setSplitCount] = useState<string>("1");
+  const [barTickerOrder, setBarTickerOrder] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    setBarTickerOrder(loadVisualOrderKeysForOwner(ownerName));
+  }, [ownerName]);
+
+  useEffect(() => {
+    const h = () => setBarTickerOrder(loadVisualOrderKeysForOwner(ownerName));
+    window.addEventListener(REBALANCE_VISUAL_ORDER_REFRESH_EVENT, h);
+    return () => window.removeEventListener(REBALANCE_VISUAL_ORDER_REFRESH_EVENT, h);
+  }, [ownerName]);
+
+  const sortNonCashByTarget = useCallback(
+    (a: AllocationSlice, b: AllocationSlice) => {
+      const ta = targetsByTicker[a.ticker] ?? 0;
+      const tb = targetsByTicker[b.ticker] ?? 0;
+      if (Math.abs(tb - ta) > 1e-9) return tb - ta;
+      return b.weight - a.weight;
+    },
+    [targetsByTicker],
+  );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+
+  /** 목표 비중 바: 비현금은 저장된 순서(또는 목표%)·현금은 항상 하단 */
+  const { orderedNonCashSlices, cashSlices, sortableBarIds, sortableContextIds } = useMemo(() => {
+    const nc = slices.filter((s) => !isCashRebalanceTicker(s.ticker));
+    const cash = slices.filter((s) => isCashRebalanceTicker(s.ticker)).sort(sortNonCashByTarget);
+
+    let orderedNc: AllocationSlice[];
+    const keysFromStorage = barTickerOrder?.filter((t) => nc.some((s) => s.ticker === t)) ?? null;
+    if (keysFromStorage && keysFromStorage.length > 0) {
+      const map = new Map(nc.map((s) => [s.ticker, s]));
+      const out: AllocationSlice[] = [];
+      for (const t of keysFromStorage) {
+        const sl = map.get(t);
+        if (sl) {
+          out.push(sl);
+          map.delete(t);
+        }
+      }
+      const rest = [...map.values()].sort(sortNonCashByTarget);
+      orderedNc = [...out, ...rest];
+    } else {
+      orderedNc = [...nc].sort(sortNonCashByTarget);
+    }
+    const sortableIds = orderedNc.map((s) => s.ticker);
+    const cashIds = cash.map((s) => s.ticker);
+    return {
+      orderedNonCashSlices: orderedNc,
+      cashSlices: cash,
+      sortableBarIds: sortableIds,
+      sortableContextIds: [...sortableIds, ...cashIds],
+    };
+  }, [slices, targetsByTicker, barTickerOrder, sortNonCashByTarget]);
+
+  const handleBarDragEnd = useCallback(
+    (e: DragEndEvent) => {
+      const { active, over } = e;
+      if (!over || active.id === over.id) return;
+      const a = String(active.id);
+      const o = String(over.id);
+      const oldIdx = sortableBarIds.indexOf(a);
+      const newIdx = sortableBarIds.indexOf(o);
+      if (oldIdx < 0 || newIdx < 0) return;
+      const nextOrder = arrayMove(sortableBarIds, oldIdx, newIdx);
+      setBarTickerOrder(nextOrder);
+      persistVisualOrderForOwner(ownerName, nextOrder);
+    },
+    [sortableBarIds, ownerName],
+  );
+
+
 
   useEffect(() => {
     const onRefresh = () => {
@@ -496,22 +758,6 @@ function TargetStockWeightNeu({
     [slices, targetsByTicker],
   );
 
-  /** 목표 % 큰 그룹/종목이 먼저. 현금류(USD/KRW 현금·「현금」그룹)는 항상 맨 아래 */
-  const orderedSlices = useMemo(
-    () =>
-      [...slices].sort((a, b) => {
-        const cashRank = (sl: AllocationSlice) => (isCashRebalanceTicker(sl.ticker) ? 1 : 0);
-        const crA = cashRank(a);
-        const crB = cashRank(b);
-        if (crA !== crB) return crA - crB;
-        const ta = targetsByTicker[a.ticker] ?? 0;
-        const tb = targetsByTicker[b.ticker] ?? 0;
-        if (Math.abs(tb - ta) > 1e-9) return tb - ta;
-        return b.weight - a.weight;
-      }),
-    [slices, targetsByTicker],
-  );
-
   const targetSumOk = Math.abs(targetSum - 100) <= TARGET_SUM_TOLERANCE;
   const showTargetSumError = hasAnyTarget && !targetSumOk;
 
@@ -608,8 +854,8 @@ function TargetStockWeightNeu({
         </div>
       </div>
 
-      {/* ── Shared scale labels (relative to target: 0%=nothing, 100%=target) ── */}
-      <div className="mb-1 flex items-end gap-1.5 pl-[108px] pr-[96px]">
+      {/* ── Shared scale labels (비현금 행 왼쪽 드래그 핸들 폭 반영) ── */}
+      <div className="mb-1 flex items-end gap-1.5 pl-[128px] pr-[96px]">
         <div className="relative flex-1">
           {[0, 25, 50, 75, 100].map((pct) => (
             <span
@@ -624,154 +870,33 @@ function TargetStockWeightNeu({
         </div>
       </div>
 
-      {/* ── Bar rows ── */}
-      <div className="space-y-[3px]">
-        {orderedSlices.map((slice) => {
-          const hasInputTarget = Object.prototype.hasOwnProperty.call(targetsByTicker, slice.ticker);
-          const target = targetsByTicker[slice.ticker] ?? 0;
-          const actual = slice.weight;
-          const hasPositiveTarget = target > 0;
-          const isOverTargetWhenZero = hasInputTarget && !hasPositiveTarget && actual > 0;
-
-          // 목표 미설정이고 실제 보유가 있으면 10%를 기준 스케일로 삼아 회색 바 표시
-          const NO_TARGET_REF = 10;
-          const ratio = hasPositiveTarget
-            ? actual / target
-            : isOverTargetWhenZero
-            ? MAX_RATIO
-            : !hasInputTarget && actual > 0
-            ? actual / NO_TARGET_REF
-            : 0;
-          const barWidthPct = (Math.min(ratio, MAX_RATIO) / MAX_RATIO) * 100;
-          const isClipped = ratio > MAX_RATIO;
-
-          const relDev = hasPositiveTarget ? (actual - target) / target : 0;
-          const withinBand = hasPositiveTarget && Math.abs(relDev) <= 0.05;
-          const belowBand = hasPositiveTarget && relDev < -0.05;
-          const diffPp = actual - target;
-
-          const barBg = !hasInputTarget
-            ? "rgba(255,255,255,0.07)"
-            : withinBand
-            ? "linear-gradient(to right, rgb(29,78,216), rgb(14,165,233))"
-            : belowBand
-            ? "linear-gradient(to right, rgb(153,27,27), rgb(220,38,38), rgb(248,113,113))"
-            : "linear-gradient(to right, rgb(20,83,45), rgb(22,163,74), rgb(52,211,153))";
-          const barGlow = !hasInputTarget
-            ? undefined
-            : withinBand
-            ? "0 0 8px rgba(56,189,248,0.35)"
-            : belowBand
-            ? "0 0 8px rgba(248,113,113,0.45)"
-            : "0 0 8px rgba(52,211,153,0.4)";
-
-          const tooltipEntries = entriesForAllocationTooltip(slice);
-          const isGrouped = tooltipEntries.length > 1;
-          const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
-
-          return (
-            <div key={slice.name} className="group relative flex items-center gap-1.5">
-              {/* Hover tooltip */}
-              {tooltipEntries.length > 0 && (
-                <div className="pointer-events-none absolute bottom-[calc(100%+4px)] left-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
-                  {isGrouped ? (
-                    <div className="space-y-1">
-                      <p className="font-bold text-cyan-400">{slice.ticker}</p>
-                      {tooltipEntries.map((e, ei) => (
-                        <div
-                          key={`${slice.ticker}-bar-${ei}-${e.symbol}-${e.name}`}
-                          className="flex items-baseline justify-between gap-2"
-                        >
-                          <div className="flex items-baseline gap-1.5">
-                            <span className="font-semibold text-zinc-300">{e.symbol}</span>
-                            <span className="text-zinc-500">{e.name}</span>
-                          </div>
-                          <span className="tabular-nums text-zinc-400">{tooltipPctText(e.weight)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-0.5">
-                      <p className="font-bold text-cyan-400">{tooltipEntries[0].symbol || slice.ticker}</p>
-                      <p className="font-semibold text-zinc-200">
-                        {tooltipEntries[0].name || slice.displayName}{" "}
-                        <span className="tabular-nums text-zinc-400">({tooltipPctText(tooltipEntries[0].weight)})</span>
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Name + target input (inline) */}
-              <div className="flex w-[108px] shrink-0 items-center justify-between gap-1">
-                <span className="truncate text-[11px] font-semibold text-zinc-200" title={slice.displayName}>
-                  {slice.ticker}
-                </span>
-                <div className="flex shrink-0 items-center">
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={0.1}
-                    placeholder="—"
-                    aria-label={`${slice.ticker} 목표 비중 %`}
-                    className="w-9 rounded border border-white/10 bg-zinc-900/80 px-0.5 py-0 text-right text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
-                    value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
-                    onChange={(e) => setTarget(slice.ticker, e.target.value)}
-                  />
-                  <span className="ml-0.5 text-[9px] text-zinc-600">%</span>
-                </div>
-              </div>
-
-              {/* Horizontal bar (scale: 0→MAX_RATIO×target, marker at 100% of target) */}
-              <div
-                className="relative h-[18px] flex-1 overflow-hidden rounded-sm"
-                style={{ background: "rgba(255,255,255,0.04)" }}
-              >
-                <div
-                  className="pointer-events-none absolute top-0 z-10 h-full w-px"
-                  style={{
-                    left: `${TARGET_AT * 100}%`,
-                    borderRight: "1px dashed rgba(161,161,170,0.55)",
-                  }}
-                />
-                {barWidthPct > 0 ? (
-                  <div
-                    className="absolute left-0 top-[2px] bottom-[2px] rounded-sm transition-all duration-300"
-                    style={{ width: `${barWidthPct}%`, background: barBg, boxShadow: barGlow }}
-                  />
-                ) : hasInputTarget && !hasPositiveTarget ? (
-                  <div
-                    className="absolute left-0 top-[2px] bottom-[2px] w-[3px] rounded-sm opacity-70"
-                    style={{ background: "rgba(161,161,170,0.5)" }}
-                  />
-                ) : null}
-                {isClipped && (
-                  <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[8px] text-emerald-300/70">›</span>
-                )}
-              </div>
-
-              {/* Deviation label */}
-              <div className="w-[96px] shrink-0 text-right text-[10px] tabular-nums leading-none">
-                {!hasInputTarget ? (
-                  <span className="text-zinc-600">—</span>
-                ) : !hasPositiveTarget && actual > 0 ? (
-                  <span className="text-emerald-400">목표 0% ▼ +{actual.toFixed(1)}%p</span>
-                ) : !hasPositiveTarget ? (
-                  <span className="text-zinc-400">목표 0%</span>
-                ) : withinBand ? (
-                  <span className="text-sky-400">≈ 목표</span>
-                ) : belowBand ? (
-                  <span className="text-red-400">▲ {Math.abs(diffPp).toFixed(1)}%p 부족</span>
-                ) : (
-                  <span className="text-emerald-400">▼ +{diffPp.toFixed(1)}%p 초과</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {/* ── Bar rows (비현금 드래그 가능, 현금 고정 하단) ── */}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleBarDragEnd}>
+        <SortableContext items={sortableContextIds} strategy={verticalListSortingStrategy}>
+          <div className="space-y-[3px]">
+            {orderedNonCashSlices.map((slice) => (
+              <TargetWeightSortableBarRow
+                key={slice.ticker}
+                slice={slice}
+                targetsByTicker={targetsByTicker}
+                setTarget={setTarget}
+                TARGET_AT={TARGET_AT}
+                MAX_RATIO={MAX_RATIO}
+              />
+            ))}
+            {cashSlices.map((slice) => (
+              <TargetWeightSortableBarRow
+                key={slice.ticker}
+                slice={slice}
+                targetsByTicker={targetsByTicker}
+                setTarget={setTarget}
+                TARGET_AT={TARGET_AT}
+                MAX_RATIO={MAX_RATIO}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       {/* ── Rebalancing amounts (collapsible) ── */}
       {rebalanceItems.length > 0 && (
