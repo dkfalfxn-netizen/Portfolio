@@ -542,6 +542,7 @@ const SEED_강희진_보유: Omit<Position, "owner">[] = [
     currency: "KRW",
     accountType: "국내주식",
     accountName: "국내주식-주계좌",
+    chartGroup: "GOLD",
   },
 ];
 
