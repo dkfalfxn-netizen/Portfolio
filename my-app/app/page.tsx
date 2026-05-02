@@ -29,7 +29,7 @@ import {
   mergeAndPersistTargetStockWeightsFromServer,
 } from "@/lib/portfolio-target-weights";
 import { mergeAndPersistOwnerScratchpadsFromServer, loadAllOwnerScratchpads } from "@/lib/portfolio-owner-scratchpad";
-import { todayKST } from "@/lib/date-utils";
+import { todayKST, yesterdayKST } from "@/lib/date-utils";
 import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
@@ -116,6 +116,8 @@ const LAST_SYNC_TS_KEY = "portfolio_last_sync_ts_v1";
  */
 const SNAPSHOT_PUSHED_DATE_KEY = "portfolio_snapshot_pushed_date_v1";
 const SNAPSHOT_PUSHED_TOTAL_KEY = "portfolio_snapshot_pushed_total_v1";
+const SNAPSHOT_PREV_PUSHED_DATE_KEY = "portfolio_snapshot_prev_pushed_date_v1";
+const SNAPSHOT_PREV_PUSHED_TOTAL_KEY = "portfolio_snapshot_prev_pushed_total_v1";
 const SELL_LOG_KEY = "portfolio_sell_log_v1";
 const LAST_SELL_LOG_SYNC_TS_KEY = "portfolio_last_sell_log_sync_ts_v1";
 const SELL_LOG_DIRTY_KEY = "portfolio_sell_log_dirty_v1";
@@ -1716,6 +1718,54 @@ export default function Home() {
     saveDailySnapshot(snap);
     setDailySnapshots(loadDailySnapshots());
 
+    // ── 어제 스냅샷 자동 재계산: 현재 포지션 × 전일 종가 ────────────────────────
+    // 포지션이 바뀌어도 "어제 ↔ 오늘" 비교가 항상 동일한 포지션 기준이 되도록 함
+    const yday = yesterdayKST();
+    const prevOwnerValues: Record<string, number> = {};
+    const prevBreakdownValues: Record<string, number> = {};
+    let prevTotalValue = 0;
+    for (const g of positionsByOwner) {
+      const prevStock = g.items.reduce((s, p) => {
+        const price = (typeof p.previousClose === "number" && p.previousClose > 0)
+          ? p.previousClose : p.currentPrice;
+        const v =
+          p.currency === "USD" ? price * p.quantity * usdKrw
+          : p.currency === "EUR" ? price * p.quantity * eurKrw
+          : price * p.quantity;
+        return s + v;
+      }, 0);
+      const ownerPrevTotal = prevStock + g.sectionCashKrw;
+      prevOwnerValues[g.ownerName] = ownerPrevTotal;
+      prevTotalValue += ownerPrevTotal;
+      const blocks = buildHoldingsGroupBlocks(g.items);
+      for (const block of blocks) {
+        const blockPrev = block.items.reduce((s, p) => {
+          const price = (typeof p.previousClose === "number" && p.previousClose > 0)
+            ? p.previousClose : p.currentPrice;
+          const v =
+            p.currency === "USD" ? price * p.quantity * usdKrw
+            : p.currency === "EUR" ? price * p.quantity * eurKrw
+            : price * p.quantity;
+          return s + v;
+        }, 0);
+        prevBreakdownValues[`${g.ownerName} · ${block.label}`] = blockPrev;
+      }
+      if (g.sectionCashKrw > 0) {
+        prevBreakdownValues[`${g.ownerName} · 현금`] = g.sectionCashKrw;
+      }
+    }
+    if (prevTotalValue > 0) {
+      const prevSnap: DailySnapshot = {
+        date: yday,
+        ownerValues: prevOwnerValues,
+        breakdownValues: prevBreakdownValues,
+        totalValue: prevTotalValue,
+        savedAt: Date.now(),
+      };
+      saveDailySnapshot(prevSnap);
+      setDailySnapshots(loadDailySnapshots());
+    }
+
     // 서버 저장: KST 16시(오후 4시) 이후에만 push
     // → 한국 장 마감(15:30) 후 종가 기준으로 저장해 일별 비교가 정확해짐
     // → 미국 장 시작(22:30 KST) 전이라 전일 미국 종가 기준도 충족
@@ -1724,21 +1774,15 @@ export default function Home() {
       const nowKstHour = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCHours();
       const isAfterKoreanClose = nowKstHour >= 16; // KST 16:00 이후
       if (key.length >= 8 && isAfterKoreanClose) {
+        // 오늘 스냅샷 push
         const pushedDate = window.localStorage.getItem(SNAPSHOT_PUSHED_DATE_KEY) ?? "";
         const pushedTotal = Number(window.localStorage.getItem(SNAPSHOT_PUSHED_TOTAL_KEY) ?? "0");
-        // 오늘 이미 push했더라도 1% 이상 차이 나면 재전송 (현금 추가/삭제 반영)
         const valueDiff = pushedTotal > 0 ? Math.abs(totalValue - pushedTotal) / pushedTotal : 1;
         if (pushedDate !== today || valueDiff >= 0.01) {
           void fetch("/api/snapshot", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sync_key: key,
-              date: today,
-              ownerValues,
-              breakdownValues,
-              totalValue,
-            }),
+            body: JSON.stringify({ sync_key: key, date: today, ownerValues, breakdownValues, totalValue }),
           }).then((r) => {
             if (r.ok) {
               safeSetItem(SNAPSHOT_PUSHED_DATE_KEY, today);
@@ -1746,9 +1790,27 @@ export default function Home() {
             }
           }).catch(() => {});
         }
+        // 어제 스냅샷 push (포지션 변경 시 자동 수정)
+        if (prevTotalValue > 0) {
+          const pushedPrevDate = window.localStorage.getItem(SNAPSHOT_PREV_PUSHED_DATE_KEY) ?? "";
+          const pushedPrevTotal = Number(window.localStorage.getItem(SNAPSHOT_PREV_PUSHED_TOTAL_KEY) ?? "0");
+          const prevDiff = pushedPrevTotal > 0 ? Math.abs(prevTotalValue - pushedPrevTotal) / pushedPrevTotal : 1;
+          if (pushedPrevDate !== yday || prevDiff >= 0.01) {
+            void fetch("/api/snapshot", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sync_key: key, date: yday, ownerValues: prevOwnerValues, breakdownValues: prevBreakdownValues, totalValue: prevTotalValue }),
+            }).then((r) => {
+              if (r.ok) {
+                safeSetItem(SNAPSHOT_PREV_PUSHED_DATE_KEY, yday);
+                safeSetItem(SNAPSHOT_PREV_PUSHED_TOTAL_KEY, String(prevTotalValue));
+              }
+            }).catch(() => {});
+          }
+        }
       }
     } catch {}
-  }, [positionsByOwner, isHydrated]);
+  }, [positionsByOwner, isHydrated, usdKrw, eurKrw]);
 
   /** pull → 있으면 반영, 없으면 이 기기(pos/cash/정렬)를 push (최초 기기·키 저장 직후 공통) */
   const syncWithServerForKey = useCallback(
