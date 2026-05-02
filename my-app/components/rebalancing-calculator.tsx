@@ -133,11 +133,14 @@ function RebalancingBarSortableRow({
   targets,
   setTargets,
   maxScale,
+  dashboardHasStoredTarget,
 }: {
   row: ComputedRow;
   targets: Record<string, string>;
   setTargets: Dispatch<SetStateAction<Record<string, string>>>;
   maxScale: number;
+  /** 대시보드 저장소에 이 그룹 키의 목표가 있는지 (0% 저장도 true) */
+  dashboardHasStoredTarget: boolean;
 }) {
   const pinned = isPinnedCashPortfolioGroup(row.groupKey);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -192,6 +195,12 @@ function RebalancingBarSortableRow({
             className="w-12 rounded border bg-background px-1 py-0.5 text-right text-[11px] tabular-nums"
             value={targets[row.groupKey] ?? ""}
             onChange={(e) => setTargets((prev) => ({ ...prev, [row.groupKey]: e.target.value }))}
+            title={
+              dashboardHasStoredTarget ?
+                "대시보드(원형 차트)와 같은 저장소에 있는 목표 비중입니다. 수정 후 「저장」하면 대시보드에도 반영됩니다."
+              : "이 그룹은 대시보드에 목표가 아직 저장되지 않았습니다. 초깃값으로 현재 비중을 채워 두었으며, 수정·저장하면 대시보드 목표와 같아집니다."
+            }
+            aria-label={`${row.displayName || row.groupKey} 목표 비중 퍼센트`}
           />
           <span className="text-[10px] text-muted-foreground">%</span>
         </div>
@@ -244,7 +253,15 @@ function floorShares(diffKrw: number, priceKrw: number): number {
 }
 
 function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
-  // ── 목표 비중 state: localStorage 저장값 우선, 없으면 현재 비중 ──────────────
+  /** localStorage 재읽기(저장/불러오기 후 대시보드 스냅샷·툴팁 반영) */
+  const [targetStorageRevision, setTargetStorageRevision] = useState(0);
+
+  const dashboardSavedTargets = useMemo(
+    () => loadAllTargetStockWeights()[ownerName] ?? {},
+    [ownerName, targetStorageRevision],
+  );
+
+  // ── 목표 비중 state: 대시보드 저장값 우선, 없으면 현재 비중 ─────────────────
   const [targets, setTargets] = useState<Record<string, string>>(() => {
     const saved =
       typeof window !== "undefined" ? (loadAllTargetStockWeights()[ownerName] ?? {}) : {};
@@ -425,6 +442,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
       }
       return next;
     });
+    setTargetStorageRevision((n) => n + 1);
     setLoadToast(true);
     setTimeout(() => setLoadToast(false), 2000);
   }, [groups, ownerName]);
@@ -448,6 +466,8 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
       all[ownerName] = entry;
       window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
       window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+      window.dispatchEvent(new Event("portfolio-target-weights-refresh"));
+      setTargetStorageRevision((n) => n + 1);
       setSaveToast(true);
       setTimeout(() => setSaveToast(false), 2000);
     } catch {
@@ -583,6 +603,11 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
             목표
           </span>
         </div>
+        <p className="mb-3 max-w-2xl text-[10px] leading-snug text-muted-foreground">
+          왼쪽 % 입력 칸은 목표 비중이며, 대시보드 원형 차트와 같은 localStorage 저장값입니다. 해당 그룹을
+          대시보드에 한 번도 저장하지 않은 경우 초기값으로 현재 비중을 넣습니다. 여기에서 바꾼 뒤
+          우측「저장」을 누르면 대시보드와 숫자가 맞춰 유지됩니다.
+        </p>
 
         {/* 스케일 헤더 — 바 행과 동일한 레이아웃으로 정렬 */}
         <div className="mb-0.5 flex items-center">
@@ -609,7 +634,14 @@ function RebalancingOwner({ ownerName, groups, totalKrw }: Props) {
           <SortableContext items={sortableContextIds} strategy={verticalListSortingStrategy}>
             <div>
               {visibleRows.map((r) => (
-                <RebalancingBarSortableRow key={r.groupKey} row={r} targets={targets} setTargets={setTargets} maxScale={maxScale} />
+                <RebalancingBarSortableRow
+                  key={r.groupKey}
+                  row={r}
+                  targets={targets}
+                  setTargets={setTargets}
+                  maxScale={maxScale}
+                  dashboardHasStoredTarget={dashboardSavedTargets[r.groupKey] != null}
+                />
               ))}
             </div>
           </SortableContext>
