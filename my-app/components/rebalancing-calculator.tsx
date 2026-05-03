@@ -22,8 +22,10 @@ function mergeSavedTargetGroupsWithoutHoldings(ownerName: string, baseGroups: Gr
   const saved = loadAllCalculatorTargetWeights()[ownerName] ?? {};
   const seen = new Set(baseGroups.map((g) => g.groupKey.trim()));
   const extra: GroupAllocation[] = [];
-  for (const key of Object.keys(saved)) {
+  for (const [key, target] of Object.entries(saved)) {
     const k = key.trim();
+    // stale key 정리: 목표가 0% 이하인 미보유 그룹은 계산기 목록에 복원하지 않음
+    if (!(Number(target) > 0)) continue;
     if (!k || seen.has(k)) continue;
     seen.add(k);
     extra.push({
@@ -113,6 +115,32 @@ type Mode = "buy-sell" | "buy-only";
 
 function fmtKrw(n: number) {
   return `₩${fmtInt(Math.abs(n))}`;
+}
+
+function normalizeTickerKey(symbol: string): string {
+  return symbol.trim().toUpperCase();
+}
+
+function isLikelyKoreanTicker(symbol: string): boolean {
+  const s = symbol.trim().toUpperCase();
+  if (!s) return false;
+  if (s.startsWith("KRX:")) return /^[0-9][0-9A-Z]{5}$/.test(s.slice(4));
+  if (s.startsWith("KQ:")) return /^[0-9][0-9A-Z]{5}$/.test(s.slice(3));
+  return /^[0-9][0-9A-Z]{5}$/.test(s);
+}
+
+function formatTickerLabel(
+  symbol: string,
+  name: string,
+  resolvedNameBySymbol?: Record<string, string>,
+): string {
+  const s = symbol.trim();
+  const fallback = resolvedNameBySymbol?.[normalizeTickerKey(symbol)]?.trim() ?? "";
+  const n = (name.trim() || fallback).trim();
+  if (!s) return n;
+  if (!n) return s;
+  if (s.toLowerCase() === n.toLowerCase()) return s;
+  return `${s} (${n})`;
 }
 
 function calcMemberAdjustments(g: GroupAllocation, diffKrw: number): MemberAdj[] {
@@ -310,6 +338,8 @@ function floorShares(diffKrw: number, priceKrw: number): number {
 }
 
 function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Props) {
+  const [resolvedNameBySymbol, setResolvedNameBySymbol] = useState<Record<string, string>>({});
+
   // ── 목표 비중 state: 계산기 전용 키에서 초깃값 읽기 (대시보드와 독립) ──
   const [targets, setTargets] = useState<Record<string, string>>(() => {
     const saved =
@@ -386,10 +416,16 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
   // ── 모드 & 신규 투자금 ─────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>("buy-sell");
   const [newMoneyInput, setNewMoneyInput] = useState("");
+  const [splitCountInput, setSplitCountInput] = useState("1");
   const [hideSmall, setHideSmall] = useState(false);
   const [saveToast, setSaveToast] = useState(false);
 
   const newMoneyKrw = useMemo(() => parseKoreanIntDigits(newMoneyInput), [newMoneyInput]);
+  const splitCount = useMemo(() => {
+    const n = Math.floor(Number(splitCountInput));
+    if (!Number.isFinite(n) || n < 1) return 1;
+    return Math.min(20, n);
+  }, [splitCountInput]);
 
   // ── 목표 합계 ────────────────────────────────────────────────────────────
   const targetSum = useMemo(
@@ -474,6 +510,46 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
 
   // ── 자동저장: 계산기 전용 키에만 저장, 대시보드 이벤트 미발행 ─────────────
   const [loadToast, setLoadToast] = useState(false);
+
+  useEffect(() => {
+    const unresolved = new Set<string>();
+    for (const g of groups) {
+      if (
+        isLikelyKoreanTicker(g.repSymbol) &&
+        (!g.repName || g.repName.trim() === "" || g.repName.trim().toUpperCase() === g.repSymbol.trim().toUpperCase()) &&
+        !resolvedNameBySymbol[normalizeTickerKey(g.repSymbol)]
+      ) {
+        unresolved.add(g.repSymbol);
+      }
+      for (const m of g.members) {
+        if (
+          isLikelyKoreanTicker(m.symbol) &&
+          (!m.name || m.name.trim() === "" || m.name.trim().toUpperCase() === m.symbol.trim().toUpperCase()) &&
+          !resolvedNameBySymbol[normalizeTickerKey(m.symbol)]
+        ) {
+          unresolved.add(m.symbol);
+        }
+      }
+    }
+    if (unresolved.size === 0) return;
+    const ac = new AbortController();
+    const list = [...unresolved];
+    void fetch(`/api/symbol-name?symbols=${encodeURIComponent(list.join(","))}`, { signal: ac.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { names?: Record<string, string> } | null) => {
+        if (!j?.names) return;
+        setResolvedNameBySymbol((prev) => {
+          const next = { ...prev };
+          for (const [symbol, nm] of Object.entries(j.names)) {
+            if (typeof nm !== "string" || !nm.trim()) continue;
+            next[normalizeTickerKey(symbol)] = nm.trim();
+          }
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [groups, resolvedNameBySymbol]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -567,6 +643,19 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
             )}
           </div>
         )}
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-muted-foreground shrink-0">분할</span>
+          <input
+            type="number"
+            min={1}
+            max={20}
+            step={1}
+            className="w-14 rounded border bg-background px-2 py-1 text-right tabular-nums text-xs"
+            value={splitCountInput}
+            onChange={(e) => setSplitCountInput(e.target.value)}
+          />
+          <span className="text-muted-foreground shrink-0">회</span>
+        </div>
 
         {/* 우측 컨트롤 */}
         <div className="ml-auto flex items-center gap-2 flex-wrap">
@@ -692,6 +781,9 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
             <span className="ml-1 font-normal text-[10px]">
               {mode === "buy-only" ? "(투자금 배분 · 크기순)" : "(매도 먼저 · 이탈 크기순)"}
             </span>
+            <span className="ml-1 font-normal text-[10px] text-muted-foreground/80">
+              · {splitCount}분할
+            </span>
           </p>
           <div className="space-y-1.5 text-xs">
             {actionItems.map((r) => {
@@ -705,18 +797,32 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
 
               // 주수 표시 계산
               let sharesDisplay = "";
+              let perSplitSharesDisplay = "";
               if (!isCash) {
                 if (r.members.length <= 1 && r.repPrice > 0) {
                   const sh = floorShares(r.diffKrw, r.repPrice);
-                  sharesDisplay = `${r.repName} ${isBuy ? "+" : "-"}${sh}주`;
+                  sharesDisplay = `${formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)} ${isBuy ? "+" : "-"}${sh}주`;
+                  if (splitCount > 1) {
+                    const perSh = floorShares(r.diffKrw / splitCount, r.repPrice);
+                    perSplitSharesDisplay = `회당 ${isBuy ? "+" : "-"}${perSh}주`;
+                  }
                 } else if (r.memberAdjustments.length > 0) {
                   const parts = r.memberAdjustments
                     .filter((m) => Math.abs(m.diffKrw) >= 10000 && m.priceKrw > 0)
                     .map((m) => {
                       const sh = floorShares(m.diffKrw, m.priceKrw);
-                      return `${m.name} ${m.diffKrw >= 0 ? "+" : "-"}${sh}주`;
+                      return `${formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)} ${m.diffKrw >= 0 ? "+" : "-"}${sh}주`;
                     });
                   sharesDisplay = parts.join(" / ");
+                  if (splitCount > 1) {
+                    const perParts = r.memberAdjustments
+                      .filter((m) => Math.abs(m.diffKrw) >= 10000 && m.priceKrw > 0)
+                      .map((m) => {
+                        const perSh = floorShares(m.diffKrw / splitCount, m.priceKrw);
+                        return `${formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)} ${m.diffKrw >= 0 ? "+" : "-"}${perSh}주`;
+                      });
+                    perSplitSharesDisplay = `회당 ${perParts.join(" / ")}`;
+                  }
                 }
               }
 
@@ -732,8 +838,16 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
                   <span className={`shrink-0 tabular-nums ${actionColor}`}>
                     {fmtKrw(r.diffKrw)}
                   </span>
+                  {splitCount > 1 && (
+                    <span className="text-muted-foreground tabular-nums">
+                      (회당 {fmtKrw(r.diffKrw / splitCount)} ×{splitCount})
+                    </span>
+                  )}
                   {sharesDisplay && (
                     <span className="text-muted-foreground tabular-nums">{sharesDisplay}</span>
+                  )}
+                  {perSplitSharesDisplay && (
+                    <span className="text-muted-foreground/80 tabular-nums">[{perSplitSharesDisplay}]</span>
                   )}
                 </div>
               );
@@ -773,7 +887,9 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
                 <th className="py-1.5 px-2 text-right font-medium">목표%</th>
                 <th className="py-1.5 px-2 text-right font-medium">목표액</th>
                 <th className="py-1.5 px-2 text-right font-medium">매수/매도</th>
+                <th className="py-1.5 px-2 text-right font-medium">회당</th>
                 <th className="py-1.5 px-2 text-right font-medium">종목(주수)</th>
+                <th className="py-1.5 px-2 text-right font-medium">회당 주수</th>
               </tr>
             </thead>
             <tbody>
@@ -818,6 +934,21 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
                         ? "—"
                         : `${r.diffKrw > 0 ? "▲" : "▼"} ${fmtKrw(r.diffKrw)}`}
                     </td>
+                    <td
+                      className={`py-1.5 px-2 text-right tabular-nums ${
+                        !significant
+                          ? "text-muted-foreground"
+                          : r.diffKrw > 0
+                            ? "text-rose-400"
+                            : "text-blue-400"
+                      }`}
+                    >
+                      {!significant
+                        ? "—"
+                        : splitCount > 1
+                          ? `${r.diffKrw > 0 ? "▲" : "▼"} ${fmtKrw(r.diffKrw / splitCount)}`
+                          : "—"}
+                    </td>
                     <td className="py-1.5 px-2 text-right">
                       {isCash ? (
                         <span className="text-muted-foreground">현금</span>
@@ -827,7 +958,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
                         <span
                           className={r.diffKrw > 0 ? "tabular-nums text-rose-400" : "tabular-nums text-blue-400"}
                         >
-                          {r.repName}{" "}
+                          {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
                           {r.diffKrw > 0 ? "+" : "-"}
                           {floorShares(r.diffKrw, r.repPrice)}주
                         </span>
@@ -837,7 +968,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
                             .filter((m) => Math.abs(m.diffKrw) >= 10000)
                             .map((m) => (
                               <p key={m.symbol} className="tabular-nums">
-                                <span className="text-muted-foreground">{m.name}</span>{" "}
+                                <span className="text-muted-foreground">{formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
                                 <span
                                   className={
                                     m.diffKrw >= 0 ? "text-rose-400" : "text-blue-400"
@@ -845,6 +976,37 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
                                 >
                                   {m.priceKrw > 0
                                     ? `${m.diffKrw >= 0 ? "+" : "-"}${floorShares(m.diffKrw, m.priceKrw)}주`
+                                    : "—"}
+                                </span>
+                              </p>
+                            ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-1.5 px-2 text-right">
+                      {isCash || !significant || splitCount <= 1 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : r.members.length <= 1 && r.repPrice > 0 ? (
+                        <span
+                          className={r.diffKrw > 0 ? "tabular-nums text-rose-400" : "tabular-nums text-blue-400"}
+                        >
+                          {r.diffKrw > 0 ? "+" : "-"}
+                          {floorShares(r.diffKrw / splitCount, r.repPrice)}주
+                        </span>
+                      ) : (
+                        <div className="space-y-0.5">
+                          {r.memberAdjustments
+                            .filter((m) => Math.abs(m.diffKrw) >= 10000)
+                            .map((m) => (
+                              <p key={`${m.symbol}-per-split`} className="tabular-nums">
+                                <span className="text-muted-foreground">{formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
+                                <span
+                                  className={
+                                    m.diffKrw >= 0 ? "text-rose-400" : "text-blue-400"
+                                  }
+                                >
+                                  {m.priceKrw > 0
+                                    ? `${m.diffKrw >= 0 ? "+" : "-"}${floorShares(m.diffKrw / splitCount, m.priceKrw)}주`
                                     : "—"}
                                 </span>
                               </p>
@@ -870,7 +1032,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
                 >
                   {targetSum.toFixed(1)}%
                 </td>
-                <td colSpan={3} />
+                <td colSpan={5} />
               </tr>
             </tfoot>
           </table>
