@@ -1001,6 +1001,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
                         <span
                           className={r.diffKrw > 0 ? "tabular-nums text-rose-400" : "tabular-nums text-blue-400"}
                         >
+                          {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
                           {r.diffKrw > 0 ? "+" : "-"}
                           {floorShares(r.diffKrw / splitCount, r.repPrice)}주
                         </span>
