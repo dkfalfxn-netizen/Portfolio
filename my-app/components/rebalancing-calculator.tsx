@@ -815,7 +815,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
                   sharesDisplay = `${formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)} ${isBuy ? "+" : "-"}${sh}주`;
                   if (splitCount > 1) {
                     const perSh = floorShares(r.diffKrw / splitCount, r.repPrice);
-                    perSplitSharesDisplay = `회당 ${isBuy ? "+" : "-"}${perSh}주`;
+                    perSplitSharesDisplay = `회당 ${formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)} ${isBuy ? "+" : "-"}${perSh}주`;
                   }
                 } else if (r.memberAdjustments.length > 0) {
                   const parts = r.memberAdjustments
