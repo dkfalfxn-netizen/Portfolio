@@ -447,12 +447,22 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
 
   // ── 행 계산 (표시 순서 = orderedGroups, 대시보드와 같은 visual order 키) ───
   const rows = useMemo((): ComputedRow[] => {
+    const isGhostRow = (row: { valueKrw: number; currentPct: number; targetPct: number; members: { valueKrw: number }[] }) => {
+      const hasMemberValue = row.members.some((m) => Math.abs(m.valueKrw) > 0);
+      return (
+        Math.abs(row.valueKrw) < 1 &&
+        Math.abs(row.currentPct) < 0.0001 &&
+        Math.abs(row.targetPct) < 0.0001 &&
+        !hasMemberValue
+      );
+    };
+
     if (mode === "buy-sell") {
       return orderedGroups.map((g) => {
         const targetPct = parseFloat(targets[g.groupKey] ?? "0") || 0;
         const diffKrw = (targetPct / 100) * totalKrw - g.valueKrw;
         return { ...g, targetPct, diffKrw, memberAdjustments: calcMemberAdjustments(g, diffKrw) };
-      });
+      }).filter((r) => !isGhostRow(r));
     }
 
     // buy-only
@@ -470,7 +480,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
     return rawRows.map(({ g, targetPct, rawDiff }) => {
       const diffKrw = rawDiff > 0 ? rawDiff * scale : 0;
       return { ...g, targetPct, diffKrw, memberAdjustments: calcMemberAdjustments(g, diffKrw) };
-    });
+    }).filter((r) => !isGhostRow(r));
   }, [orderedGroups, targets, totalKrw, mode, newMoneyKrw]);
 
   const { sortableBarGroupKeys, sortableContextIds } = useMemo(() => {
@@ -537,10 +547,11 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
     void fetch(`/api/symbol-name?symbols=${encodeURIComponent(list.join(","))}`, { signal: ac.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((j: { names?: Record<string, string> } | null) => {
-        if (!j?.names) return;
+        const names = j?.names;
+        if (!names) return;
         setResolvedNameBySymbol((prev) => {
           const next = { ...prev };
-          for (const [symbol, nm] of Object.entries(j.names)) {
+          for (const [symbol, nm] of Object.entries(names)) {
             if (typeof nm !== "string" || !nm.trim()) continue;
             next[normalizeTickerKey(symbol)] = nm.trim();
           }
