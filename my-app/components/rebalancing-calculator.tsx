@@ -128,6 +128,37 @@ function calcMemberAdjustments(g: GroupAllocation, diffKrw: number): MemberAdj[]
   });
 }
 
+/** 차트 리밸런싱 위젯과 동일: 현금 행 목표·현재 비중(%p) 편차 */
+function CashAllocationDeviationLabel({
+  targetPct,
+  actualPct,
+}: {
+  targetPct: number;
+  actualPct: number;
+}) {
+  const hasPositiveTarget = targetPct > 0;
+  const diffPp = actualPct - targetPct;
+  const relDev = hasPositiveTarget ? (actualPct - targetPct) / targetPct : 0;
+  const withinBand = hasPositiveTarget && Math.abs(relDev) <= 0.05;
+  const belowBand = hasPositiveTarget && relDev < -0.05;
+
+  if (!hasPositiveTarget && actualPct > 0) {
+    return <span className="text-emerald-400">목표 0% ▼ +{actualPct.toFixed(1)}%p</span>;
+  }
+  if (!hasPositiveTarget) {
+    return <span className="text-zinc-400">목표 0%</span>;
+  }
+  if (withinBand) {
+    return <span className="text-sky-400">≈ 목표</span>;
+  }
+  if (belowBand) {
+    return (
+      <span className="text-rose-400">▲ {Math.abs(diffPp).toFixed(1)}%p 부족</span>
+    );
+  }
+  return <span className="text-emerald-400">▼ +{diffPp.toFixed(1)}%p 초과</span>;
+}
+
 /** 대시보드·리밸 바와 동일하게 현금 줄은 드래그 비활성·하단 고정 */
 function isPinnedCashPortfolioGroup(groupKey: string): boolean {
   const t = groupKey.trim();
@@ -257,7 +288,7 @@ function RebalancingBarSortableRow({
 
       <div className="w-24 shrink-0 text-right text-[11px] sm:w-28">
         {isCash ?
-          <span className="text-muted-foreground text-[10px]">현금</span>
+          <CashAllocationDeviationLabel targetPct={row.targetPct} actualPct={row.currentPct} />
         : rowIsOver ?
           <span className="font-medium tabular-nums text-emerald-400">▼+{absDiff.toFixed(1)}%p 초과</span>
         : rowIsUnder ?

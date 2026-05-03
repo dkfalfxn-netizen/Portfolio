@@ -1992,7 +1992,20 @@ export default function Home() {
     setPositions(pos);
     setCashByOwner(cash);
     setSellLog(log);
-    const savedKey = typeof window !== "undefined" ? window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "" : "";
+    // URL ?key=... 파라미터가 있으면 localStorage보다 우선 적용 (북마크 복원용)
+    const urlKey = (() => {
+      try {
+        const p = new URLSearchParams(window.location.search).get("key") ?? "";
+        return p.trim();
+      } catch { return ""; }
+    })();
+    const savedKey = urlKey.length >= 8
+      ? urlKey
+      : (typeof window !== "undefined" ? window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "" : "");
+    // URL 파라미터 키가 localStorage 키와 다르면 덮어씀
+    if (urlKey.length >= 8 && urlKey !== window.localStorage.getItem(SYNC_KEY_STORAGE)) {
+      safeSetItem(SYNC_KEY_STORAGE, urlKey);
+    }
     const savedSellLogSyncTs =
       typeof window !== "undefined" ? window.localStorage.getItem(LAST_SELL_LOG_SYNC_TS_KEY) ?? "" : "";
     const savedSellLogDirty =
@@ -2060,15 +2073,14 @@ export default function Home() {
     }
   }, [sellLog, isHydrated]);
 
-  // 초기 로드 시 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
+  // 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
+  // cloudSyncKey 의존: 키가 뒤늦게 설정돼도(UI 입력·URL 파라미터 등) 서버 fetch가 즉시 재실행됨
   useEffect(() => {
     if (!isHydrated) return;
     const local = loadDailySnapshots();
     setDailySnapshots(local);
 
-    const key = (() => {
-      try { return window.localStorage.getItem(SYNC_KEY_STORAGE) ?? ""; } catch { return ""; }
-    })();
+    const key = cloudSyncKey.trim();
     if (key.length < 8) {
       setCronDailySnapshotRecordedAt(null);
       return;
@@ -2151,7 +2163,7 @@ export default function Home() {
         safeSetItem(DAILY_SNAPSHOTS_KEY, JSON.stringify(merged));
       })
       .catch(() => {});
-  }, [isHydrated]);
+  }, [isHydrated, cloudSyncKey]);
 
   useEffect(() => {
     if (!isHydrated || !syncReady || !autoSync || cloudSyncKey.length < 8) return;
