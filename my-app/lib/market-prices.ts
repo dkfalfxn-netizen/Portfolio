@@ -27,7 +27,9 @@ export function toYahooSymbol(symbol: string): string {
   const aliased = YAHOO_INPUT_ALIASES[normalized];
   if (aliased) return aliased;
   if (normalized.startsWith("KRX:")) return `${normalized.replace("KRX:", "")}.KS`;
-  if (/^[0-9][0-9A-Z]{5}$/.test(normalized)) return `${normalized}.KS`;
+  // 한국 6자리 코드: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
+  if (/^[0-9]{6}$/.test(normalized)) return `${normalized}.KS`;
+  if (/^[A-Z][0-9]{6}$/.test(normalized)) return `${normalized.slice(1)}.KS`;
   if (normalized.startsWith("KQ:")) return `${normalized.replace("KQ:", "")}.KQ`;
   return normalized;
 }
@@ -89,7 +91,9 @@ async function fetchNaverGoldPrice(): Promise<PriceQuote> {
  */
 async function fetchNaverStockPrice(code: string): Promise<PriceQuote> {
   try {
-    const url = `https://m.stock.naver.com/api/stock/${encodeURIComponent(code)}/basic`;
+    // A458730 등 거래소 접두사가 붙은 경우 제거 (네이버 API는 순수 숫자 코드 사용)
+    const cleanCode = /^[A-Z][0-9]{6}$/i.test(code.trim()) ? code.trim().slice(1) : code.trim();
+    const url = `https://m.stock.naver.com/api/stock/${encodeURIComponent(cleanCode)}/basic`;
     const res = await fetch(url, {
       method: "GET",
       cache: "no-store",
@@ -121,9 +125,9 @@ export async function fetchPrices(inputSymbols: string[]): Promise<PricesResult>
   const commodities = unique.filter(isKrxCommodity);
   const nonCommodities = unique.filter((s) => !isKrxCommodity(s));
 
-  // 6자리 숫자로 시작하는 한국 주식/ETF 코드 (예: 069500, 0022T0)
-  const krSixDigit = nonCommodities.filter((s) => /^[0-9][0-9A-Z]{5}$/i.test(s.trim()));
-  const nonKr = nonCommodities.filter((s) => !/^[0-9][0-9A-Z]{5}$/i.test(s.trim()));
+  // 한국 주식/ETF 코드: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
+  const krSixDigit = nonCommodities.filter((s) => /^[0-9]{6}$|^[A-Z][0-9]{6}$/i.test(s.trim()));
+  const nonKr = nonCommodities.filter((s) => !/^[0-9]{6}$|^[A-Z][0-9]{6}$/i.test(s.trim()));
 
   const mapping = nonKr.map((s) => ({ input: s, yahoo: toYahooSymbol(s) }));
   const yahooSet = [...new Set([...mapping.map((m) => m.yahoo), "KRW=X", "EURKRW=X"])];

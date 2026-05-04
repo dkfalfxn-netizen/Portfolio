@@ -110,7 +110,9 @@ async function fetchNaverGoldPrice(): Promise<ChartQuote> {
 /** 네이버 증권 모바일 API — 6자리 한국 주식 코드 (거래소 자동 판별) */
 async function fetchNaverStockPrice(code: string): Promise<ChartQuote> {
   try {
-    const url = `https://m.stock.naver.com/api/stock/${encodeURIComponent(code)}/basic`;
+    // A458730 등 거래소 접두사가 붙은 경우 제거 (네이버 API는 순수 숫자 코드 사용)
+    const cleanCode = /^[A-Z][0-9]{6}$/i.test(code.trim()) ? code.trim().slice(1) : code.trim();
+    const url = `https://m.stock.naver.com/api/stock/${encodeURIComponent(cleanCode)}/basic`;
     const res = await fetch(url, {
       method: "GET",
       cache: "no-store",
@@ -154,9 +156,9 @@ function toYahooSymbol(symbol: string): string {
   if (normalized.startsWith("KRX:")) {
     return `${normalized.replace("KRX:", "")}.KS`;
   }
-  if (/^[0-9][0-9A-Z]{5}$/.test(normalized)) {
-    return `${normalized}.KS`;
-  }
+  // 한국 6자리 코드: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
+  if (/^[0-9]{6}$/.test(normalized)) return `${normalized}.KS`;
+  if (/^[A-Z][0-9]{6}$/.test(normalized)) return `${normalized.slice(1)}.KS`;
   if (normalized.startsWith("KQ:")) {
     return `${normalized.replace("KQ:", "")}.KQ`;
   }
@@ -272,9 +274,9 @@ export async function GET(req: NextRequest) {
     > = {};
     const intraday: Record<string, number[]> = {};
 
-    // 6자리 한국 코드는 네이버 증권으로 우선 조회 (거래소 자동 판별, Yahoo보다 정확)
+    // 한국 주식/ETF: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
     const krSixDigit = yahooInputSymbols.filter((s) =>
-      /^[0-9][0-9A-Z]{5}$/.test(s.trim().toUpperCase()),
+      /^[0-9]{6}$|^[A-Z][0-9]{6}$/.test(s.trim().toUpperCase()),
     );
     const naverResults = krSixDigit.length > 0
       ? await Promise.all(krSixDigit.map(async (s) => [s, await fetchNaverStockPrice(s)] as const))
@@ -283,18 +285,20 @@ export async function GET(req: NextRequest) {
 
     for (const mapItem of mapping) {
       const naverQ = byNaver.get(mapItem.input);
+      const yahooQ = byYahooSymbol.get(mapItem.yahoo.toUpperCase());
       if (naverQ?.price) {
-        // 네이버에서 정확히 조회된 한국 주식
+        // 네이버에서 정확히 조회된 한국 주식/ETF — 현재가는 네이버, 분봉 sparkline은 Yahoo 사용
         quotes[mapItem.input] = { price: naverQ.price, currency: "KRW", previousClose: naverQ.previousClose };
+        const sl = yahooQ?.sparkline;
+        if (sl && sl.length >= 2) intraday[mapItem.input] = sl;
       } else {
         // 해외주식 등 — Yahoo 결과 사용
-        const quote = byYahooSymbol.get(mapItem.yahoo.toUpperCase());
         quotes[mapItem.input] = {
-          price: quote?.price ?? null,
-          currency: quote?.currency ?? null,
-          previousClose: quote?.previousClose ?? null,
+          price: yahooQ?.price ?? null,
+          currency: yahooQ?.currency ?? null,
+          previousClose: yahooQ?.previousClose ?? null,
         };
-        const sl = quote?.sparkline;
+        const sl = yahooQ?.sparkline;
         if (sl && sl.length >= 2) intraday[mapItem.input] = sl;
       }
     }

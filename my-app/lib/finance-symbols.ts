@@ -7,7 +7,9 @@ export function toYahooSymbol(symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
   if (normalized === "RMS") return "RMS.PA";
   if (normalized.startsWith("KRX:")) return `${normalized.replace("KRX:", "")}.KS`;
-  if (/^[0-9][0-9A-Z]{5}$/.test(normalized)) return `${normalized}.KS`;
+  // 한국 6자리 코드: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
+  if (/^[0-9]{6}$/.test(normalized)) return `${normalized}.KS`;
+  if (/^[A-Z][0-9]{6}$/.test(normalized)) return `${normalized.slice(1)}.KS`;
   if (normalized.startsWith("KQ:")) return `${normalized.replace("KQ:", "")}.KQ`;
   return normalized;
 }
@@ -22,7 +24,9 @@ export function inferTradingCurrencyFromTicker(raw: string): "KRW" | "USD" | "EU
   if (isKrxCommodity(s)) return "KRW";
   const prefixed = /^KRX:|^KQ:/i.test(raw.trim());
   if (prefixed) return "KRW";
-  if (/^[0-9][0-9A-Z]{5}$/.test(s)) return "KRW";
+  // 6자리 숫자 또는 알파벳 접두사(A/Q 등) + 6자리 숫자
+  if (/^[0-9]{6}$/.test(s)) return "KRW";
+  if (/^[A-Z][0-9]{6}$/.test(s)) return "KRW";
 
   const eurHints = /\.(PA|DE|AS|MI|MC|BR|VI|SW|LS|MX|WA)$/i;
   if (eurHints.test(s) || s === "RMS") return "EUR";
