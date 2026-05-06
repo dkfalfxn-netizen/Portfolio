@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ResponsiveContainer, Tooltip, Treemap } from "recharts";
 import {
   HAS_LOCAL_CHANGES_KEY,
@@ -567,10 +568,59 @@ export type OwnerDailyPortfolioSummary = {
     label: string;
     dailyChangeKrw: number;
     dailyChangePct: number | null;
-    /** 그룹명 hover 시 표시할 포함 종목(줄바꿈) */
-    holdingsTooltip: string;
+    /** 그룹명 hover 툴팁용 종목 목록 (ticker · name · 개별 등락%) */
+    holdingsItems: { ticker: string; name: string; pct: number | null }[];
   }[];
 };
+
+/** 그룹명 위에 hover 시 나타나는 종목별 등락 팝업 */
+function GroupLabelWithTooltip({
+  label,
+  holdingsItems,
+}: {
+  label: string;
+  holdingsItems: { ticker: string; name: string; pct: number | null }[];
+}) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const pctColor = (pct: number | null) =>
+    pct === null ? "text-zinc-500" : pct > 0 ? "text-red-400" : pct < 0 ? "text-blue-400" : "text-zinc-500";
+
+  return (
+    <>
+      <span
+        className="min-w-0 cursor-help truncate border-b border-dotted border-zinc-600/60 text-zinc-400 hover:text-zinc-200"
+        onMouseEnter={(e) => setPos({ x: e.clientX, y: e.clientY })}
+        onMouseMove={(e) => setPos({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setPos(null)}
+      >
+        {label}
+      </span>
+      {pos !== null &&
+        typeof window !== "undefined" &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-[9999] min-w-[120px] rounded-xl border border-white/15 bg-zinc-900/96 px-3 py-2 shadow-2xl backdrop-blur-sm"
+            style={{ left: pos.x + 14, top: pos.y - 6 }}
+          >
+            <p className="mb-1 border-b border-white/10 pb-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500">
+              {label}
+            </p>
+            {holdingsItems.map((item) => (
+              <div key={item.ticker} className="flex items-baseline gap-3 py-[3px] text-[11px]">
+                <span className="w-[5rem] shrink-0 truncate font-bold text-zinc-100">{item.ticker}</span>
+                <span className={`tabular-nums ${pctColor(item.pct)}`}>
+                  {item.pct !== null
+                    ? `${item.pct > 0 ? "+" : ""}${item.pct.toFixed(2)}%`
+                    : "—"}
+                </span>
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 
 export function PortfolioAllOwnersTodayProfitCard({
   owners,
@@ -582,7 +632,7 @@ export function PortfolioAllOwnersTodayProfitCard({
 
   return (
     <div
-      className="relative flex max-h-[min(76vh,640px)] flex-col rounded-2xl border border-white/[0.08] p-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
+      className="relative rounded-2xl border border-white/[0.08] p-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
       style={{
         backgroundImage: `
           repeating-linear-gradient(
@@ -601,60 +651,52 @@ export function PortfolioAllOwnersTodayProfitCard({
         `,
       }}
     >
-      <div className="mb-2 shrink-0 flex-wrap items-start justify-between gap-2 border-b border-white/10 pb-2">
-        <div>
-          <h3 className="text-xs font-bold leading-tight text-zinc-100 sm:text-[13px]">오늘 수익 요약</h3>
-          <p className="mt-0.5 text-[9px] text-zinc-500">보유자별 · 그룹명 위에 마우스를 올리면 포함 종목</p>
-        </div>
+      <div className="mb-2 border-b border-white/10 pb-2">
+        <h3 className="text-xs font-bold leading-tight text-zinc-100 sm:text-[13px]">오늘 수익 요약</h3>
+        <p className="mt-0.5 text-[9px] text-zinc-500">보유자별 · 그룹명에 마우스를 올리면 종목별 등락</p>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5 [scrollbar-width:thin]">
-        {owners.length === 0 ? (
-          <p className="py-4 text-center text-[11px] text-zinc-500">요약 데이터가 없습니다.</p>
-        ) : (
-          owners.map((owner) => (
+      {owners.length === 0 ? (
+        <p className="py-4 text-center text-[11px] text-zinc-500">요약 데이터가 없습니다.</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          {owners.map((owner) => (
             <div
               key={owner.ownerName}
               className="rounded-lg border border-white/[0.07] bg-zinc-950/35 px-2 py-1.5"
             >
-              {/* 보유자 합계: 1줄 또는 좁으면 자연 개행 */}
-              <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 border-b border-white/[0.06] pb-1">
-                <span className="text-[11px] font-semibold text-zinc-200">{owner.ownerName}</span>
-                <div className="flex flex-wrap items-baseline justify-end gap-x-1.5 text-[11px] tabular-nums">
-                  <span className={`font-bold ${krwTone(owner.totalDailyKrw)}`}>
+              {/* 보유자 합계 헤더 */}
+              <div className="mb-1 border-b border-white/[0.06] pb-1">
+                <span className="block text-[11px] font-semibold text-zinc-200">{owner.ownerName}</span>
+                <div className={`flex flex-wrap items-baseline gap-x-1 text-[11px] tabular-nums ${krwTone(owner.totalDailyKrw)}`}>
+                  <span className="font-bold">
                     {owner.totalDailyKrw > 0 ? "+" : ""}₩{fmtInt(owner.totalDailyKrw)}
                   </span>
-                  {owner.totalDailyPct !== null && owner.totalDailyKrw !== 0 ? (
-                    <span className={`font-semibold ${krwTone(owner.totalDailyKrw)}`}>
+                  {owner.totalDailyPct !== null && owner.totalDailyKrw !== 0 && (
+                    <span className="font-semibold">
                       ({owner.totalDailyPct > 0 ? "+" : ""}
                       {owner.totalDailyPct.toFixed(1)}%)
                     </span>
-                  ) : null}
+                  )}
                 </div>
               </div>
 
-              {/* 그룹별: flex 행 — 라벨 flex-1 shrink, 숫자 no-shrink */}
+              {/* 그룹별 행 */}
               <div className="space-y-0">
                 {owner.groups.map((g) => (
                   <div
                     key={`${owner.ownerName}-${g.label}`}
-                    className="flex items-baseline gap-1.5 border-t border-white/[0.05] py-[2px] text-[10px] first:border-0"
+                    className="flex items-baseline gap-1 border-t border-white/[0.05] py-[2px] text-[10px] first:border-0"
                   >
-                    <span
-                      title={g.holdingsTooltip}
-                      className="min-w-0 flex-1 cursor-help truncate border-b border-dotted border-zinc-600/60 text-zinc-400 hover:text-zinc-200"
-                    >
-                      {g.label}
-                    </span>
-                    <span
-                      className={`shrink-0 tabular-nums font-semibold whitespace-nowrap ${krwTone(g.dailyChangeKrw)}`}
-                    >
+                    <GroupLabelWithTooltip label={g.label} holdingsItems={g.holdingsItems} />
+                    <span className="flex-1" />
+                    <span className={`shrink-0 tabular-nums font-semibold whitespace-nowrap ${krwTone(g.dailyChangeKrw)}`}>
                       {g.dailyChangeKrw !== 0
                         ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}`
                         : "—"}
                     </span>
                     <span
-                      className={`w-[3.2rem] shrink-0 text-right tabular-nums whitespace-nowrap ${
+                      className={`w-[3rem] shrink-0 text-right tabular-nums whitespace-nowrap ${
                         g.dailyChangePct !== null && g.dailyChangeKrw !== 0
                           ? krwTone(g.dailyChangeKrw)
                           : "text-zinc-600/50"
@@ -668,9 +710,9 @@ export function PortfolioAllOwnersTodayProfitCard({
                 ))}
               </div>
             </div>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

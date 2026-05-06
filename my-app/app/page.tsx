@@ -1675,8 +1675,22 @@ export default function Home() {
           return sum + v;
         }, 0);
         const dailyChangePct = prevSumKrw > 0 ? (dailyChangeKrw / prevSumKrw) * 100 : null;
-        const holdingsTooltip = formatGroupHoldingsTooltip(block.items);
-        return { label: block.label, dailyChangeKrw, dailyChangePct, holdingsTooltip };
+        const holdingsItems = (() => {
+          const seen = new Set<string>();
+          return block.items.flatMap((p) => {
+            const sym = typeof p.symbol === "string" ? p.symbol.trim() : "";
+            const nm = typeof p.name === "string" ? p.name.trim() : "";
+            const key = sym || nm;
+            if (!key || seen.has(key)) return [];
+            seen.add(key);
+            const pct =
+              typeof p.previousClose === "number" && p.previousClose > 0
+                ? ((p.currentPrice - p.previousClose) / p.previousClose) * 100
+                : null;
+            return [{ ticker: sym || nm, name: nm || sym, pct }];
+          });
+        })();
+        return { label: block.label, dailyChangeKrw, dailyChangePct, holdingsItems };
       }).sort((a, b) => b.dailyChangeKrw - a.dailyChangeKrw);
       const totalDailyKrw = groups.reduce((s, g) => s + g.dailyChangeKrw, 0);
       const prevStockKrw = group.items.reduce((s, p) => {
@@ -3354,7 +3368,9 @@ export default function Home() {
               불러오기』하세요.
             </p>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              <PortfolioAllOwnersTodayProfitCard owners={ownerGroupDailySummaryForGrid} />
+              <div className="col-span-1 sm:col-span-2">
+                <PortfolioAllOwnersTodayProfitCard owners={ownerGroupDailySummaryForGrid} />
+              </div>
               {allocationByOwnerForGrid.map(({ ownerName, data, total }) => (
                 <FamilyAllocationDonut
                   key={ownerName}
