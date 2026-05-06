@@ -573,7 +573,7 @@ export type OwnerDailyPortfolioSummary = {
   }[];
 };
 
-/** 그룹명 위에 hover 시 나타나는 종목별 등락 팝업 */
+/** 그룹명 위에 hover 시 나타나는 종목별 팝업 — [티커] [종목명] [등락%] 3열 */
 function GroupLabelWithTooltip({
   label,
   holdingsItems,
@@ -599,22 +599,34 @@ function GroupLabelWithTooltip({
         typeof window !== "undefined" &&
         createPortal(
           <div
-            className="pointer-events-none fixed z-[9999] min-w-[120px] rounded-xl border border-white/15 bg-zinc-900/96 px-3 py-2 shadow-2xl backdrop-blur-sm"
+            className="pointer-events-none fixed z-[9999] rounded-lg border border-white/[0.12] bg-[#1a1f2e] shadow-2xl"
             style={{ left: pos.x + 14, top: pos.y - 6 }}
           >
-            <p className="mb-1 border-b border-white/10 pb-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500">
-              {label}
-            </p>
-            {holdingsItems.map((item) => (
-              <div key={item.ticker} className="flex items-baseline gap-3 py-[3px] text-[11px]">
-                <span className="w-[5rem] shrink-0 truncate font-bold text-zinc-100">{item.ticker}</span>
-                <span className={`tabular-nums ${pctColor(item.pct)}`}>
-                  {item.pct !== null
-                    ? `${item.pct > 0 ? "+" : ""}${item.pct.toFixed(2)}%`
-                    : "—"}
-                </span>
-              </div>
-            ))}
+            {/* 그룹명 헤더 — 이미지의 "S&P500" 스타일 */}
+            <div className="border-b border-white/[0.1] px-3 py-2">
+              <span className="text-[13px] font-bold text-zinc-100">{label}</span>
+            </div>
+            {/* 종목 행: [티커] [종목명] [등락%] */}
+            <div className="px-3 py-1.5">
+              {holdingsItems.map((item) => (
+                <div
+                  key={item.ticker}
+                  className="flex items-center gap-3 py-[3px] text-[12px]"
+                >
+                  <span className="w-[4.5rem] shrink-0 tabular-nums font-medium text-zinc-300">
+                    {item.ticker}
+                  </span>
+                  <span className="min-w-[8rem] flex-1 text-zinc-200">
+                    {item.name !== item.ticker ? item.name : ""}
+                  </span>
+                  <span className={`w-[3.5rem] shrink-0 text-right tabular-nums ${pctColor(item.pct)}`}>
+                    {item.pct !== null
+                      ? `${item.pct > 0 ? "+" : ""}${item.pct.toFixed(1)}%`
+                      : "0.0%"}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>,
           document.body,
         )}
