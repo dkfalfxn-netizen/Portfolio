@@ -557,80 +557,102 @@ function TargetWeightSortableBarRow({
   );
 }
 
-/** 보유자별 오늘 등락 — 리밸런싱 목록에 삽입용 */
-export type TodayProfitSummaryForOwner = {
+/** 포트폴리오 비중 그리드 첫 칸용 — 모든 보유자 오늘 수익 요약 */
+export type OwnerDailyPortfolioSummary = {
+  ownerName: string;
   totalDailyKrw: number;
   groups: { label: string; dailyChangeKrw: number; dailyChangePct: number | null }[];
 };
 
-function TodayProfitSummaryRebalanceInset({ summary }: { summary: TodayProfitSummaryForOwner }) {
+export function PortfolioAllOwnersTodayProfitCard({
+  owners,
+}: {
+  owners: OwnerDailyPortfolioSummary[];
+}) {
   return (
-    <div className="flex items-start gap-1">
-      <span className="w-5 shrink-0" aria-hidden />
-      <div
-        className="min-w-0 flex-1 rounded-md border border-cyan-500/25 bg-zinc-950/50 px-2 py-1.5 pr-[100px]"
-        style={{ boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)" }}
-      >
-        <div className="mb-1 flex items-center justify-between gap-2 border-b border-white/10 pb-1">
-          <span className="text-[10px] font-semibold tracking-wide text-zinc-200">오늘 수익 요약</span>
-          <span
-            className={`text-[10px] font-bold tabular-nums ${
-              summary.totalDailyKrw > 0
-                ? "text-red-400"
-                : summary.totalDailyKrw < 0
-                  ? "text-blue-400"
-                  : "text-zinc-500"
-            }`}
-          >
-            {summary.totalDailyKrw > 0 ? "+" : ""}
-            {fmtInt(summary.totalDailyKrw)}
-          </span>
-        </div>
-        <table className="w-full text-[9px]">
-          <tbody>
-            {summary.groups.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="py-0.5 text-zinc-600">
-                  그룹 데이터 없음
-                </td>
-              </tr>
-            ) : (
-              summary.groups.map((g) => (
-                <tr key={g.label} className="border-t border-white/[0.06] first:border-0">
-                  <td className="max-w-[72px] truncate py-0.5 pr-1 text-zinc-500" title={g.label}>
-                    {g.label}
-                  </td>
-                  <td
-                    className={`py-0.5 text-right tabular-nums font-medium ${
-                      g.dailyChangeKrw > 0
-                        ? "text-red-400"
-                        : g.dailyChangeKrw < 0
-                          ? "text-blue-400"
-                          : "text-zinc-500/60"
-                    }`}
-                  >
-                    {g.dailyChangeKrw !== 0
-                      ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}`
-                      : "—"}
-                  </td>
-                  <td
-                    className={`py-0.5 pl-1 text-right tabular-nums ${
-                      g.dailyChangePct !== null && g.dailyChangeKrw !== 0
-                        ? g.dailyChangeKrw > 0
-                          ? "text-red-400"
-                          : "text-blue-400"
-                        : "text-zinc-600/50"
-                    }`}
-                  >
-                    {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
-                      ? `${g.dailyChangePct > 0 ? "+" : ""}${g.dailyChangePct.toFixed(1)}%`
-                      : ""}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+    <div
+      className="relative flex min-h-[260px] flex-col rounded-2xl border border-white/[0.08] p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
+      style={{
+        backgroundImage: `
+          repeating-linear-gradient(
+            -42deg,
+            transparent,
+            transparent 10px,
+            rgba(255, 255, 255, 0.03) 10px,
+            rgba(255, 255, 255, 0.03) 11px
+          ),
+          linear-gradient(
+            160deg,
+            oklch(0.19 0.015 260) 0%,
+            oklch(0.11 0.02 260) 55%,
+            oklch(0.09 0.02 260) 100%
+          )
+        `,
+      }}
+    >
+      <div className="mb-3 border-b border-white/10 pb-2">
+        <h3 className="text-sm font-bold text-zinc-100">오늘 수익 요약</h3>
+        <p className="mt-0.5 text-[10px] text-zinc-500">보유자별 · 차트 그룹 기준 당일 등락</p>
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5 [scrollbar-width:thin]">
+        {owners.length === 0 ? (
+          <p className="py-8 text-center text-xs text-zinc-500">요약 데이터가 없습니다.</p>
+        ) : (
+          owners.map((owner) => (
+            <div key={owner.ownerName} className="rounded-lg border border-white/[0.07] bg-zinc-950/35 px-2.5 py-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold text-zinc-300">{owner.ownerName}</p>
+                <p
+                  className={`text-[11px] font-bold tabular-nums ${
+                    owner.totalDailyKrw > 0
+                      ? "text-red-400"
+                      : owner.totalDailyKrw < 0
+                        ? "text-blue-400"
+                        : "text-zinc-500"
+                  }`}
+                >
+                  {owner.totalDailyKrw > 0 ? "+" : ""}
+                  {fmtInt(owner.totalDailyKrw)}
+                </p>
+              </div>
+              <table className="w-full text-[10px]">
+                <tbody>
+                  {owner.groups.map((g) => (
+                    <tr key={`${owner.ownerName}-${g.label}`} className="border-t border-white/[0.06] first:border-0">
+                      <td className="max-w-[80px] truncate py-0.5 pr-1 text-zinc-500" title={g.label}>
+                        {g.label}
+                      </td>
+                      <td
+                        className={`py-0.5 text-right tabular-nums font-medium ${
+                          g.dailyChangeKrw > 0
+                            ? "text-red-400"
+                            : g.dailyChangeKrw < 0
+                              ? "text-blue-400"
+                              : "text-zinc-500/55"
+                        }`}
+                      >
+                        {g.dailyChangeKrw !== 0 ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}` : "—"}
+                      </td>
+                      <td
+                        className={`py-0.5 pl-1 text-right tabular-nums ${
+                          g.dailyChangePct !== null && g.dailyChangeKrw !== 0
+                            ? g.dailyChangeKrw > 0
+                              ? "text-red-400"
+                              : "text-blue-400"
+                            : "text-zinc-600/55"
+                        }`}
+                      >
+                        {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
+                          ? `${g.dailyChangePct > 0 ? "+" : ""}${g.dailyChangePct.toFixed(1)}%`
+                          : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -641,7 +663,6 @@ function TargetStockWeightNeu({
   slices,
   cloudSyncKey,
   total,
-  todayProfitSummary,
 }: {
   ownerName: string;
   slices: AllocationSlice[];
@@ -649,8 +670,6 @@ function TargetStockWeightNeu({
   cloudSyncKey: string;
   /** 보유자 총 평가금액 (KRW) — 리밸런싱 금액 계산에 사용 */
   total: number;
-  /** 리밸런싱 비현금 3번째 줄(기존 3번째 행 앞)에 삽입 */
-  todayProfitSummary?: TodayProfitSummaryForOwner | null;
 }) {
   const skipSaveRef = useRef(true);
   const saveDebounceRef = useRef<number | null>(null);
@@ -883,9 +902,6 @@ function TargetStockWeightNeu({
   const MAX_RATIO = 1.5;
   const TARGET_AT = 1 / MAX_RATIO; // target marker at 66.7% of bar width
 
-  const nonCashBeforeSummary = orderedNonCashSlices.slice(0, 2);
-  const nonCashAfterSummary = orderedNonCashSlices.slice(2);
-
   return (
     <div
       className="flex flex-col rounded-2xl p-3"
@@ -963,20 +979,7 @@ function TargetStockWeightNeu({
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleBarDragEnd}>
         <SortableContext items={sortableContextIds} strategy={verticalListSortingStrategy}>
           <div className="space-y-[3px]">
-            {nonCashBeforeSummary.map((slice) => (
-              <TargetWeightSortableBarRow
-                key={slice.ticker}
-                slice={slice}
-                targetsByTicker={targetsByTicker}
-                setTarget={setTarget}
-                TARGET_AT={TARGET_AT}
-                MAX_RATIO={MAX_RATIO}
-              />
-            ))}
-            {todayProfitSummary ?
-              <TodayProfitSummaryRebalanceInset summary={todayProfitSummary} />
-            : null}
-            {nonCashAfterSummary.map((slice) => (
+            {orderedNonCashSlices.map((slice) => (
               <TargetWeightSortableBarRow
                 key={slice.ticker}
                 slice={slice}
@@ -1058,7 +1061,6 @@ export function FamilyAllocationDonut({
   total,
   watchlistEntries,
   cloudSyncKey = "",
-  todayProfitSummary,
 }: {
   ownerName: string;
   data: AllocationSlice[];
@@ -1066,8 +1068,6 @@ export function FamilyAllocationDonut({
   watchlistEntries?: Array<{ symbol: string; name: string; group?: string }>;
   /** 동기화 키(8자 이상) — 목표 비중을 서버에도 남길 때 사용 */
   cloudSyncKey?: string;
-  /** 리밸런싱 목록 3번째 줄: 오늘 그룹별 등락 */
-  todayProfitSummary?: TodayProfitSummaryForOwner | null;
 }) {
   const chartData = useMemo(
     () => [...data].sort((a, b) => b.weight - a.weight || b.value - a.value),
@@ -1216,13 +1216,7 @@ export function FamilyAllocationDonut({
       </div>
 
       {/* ── 리밸런싱 바 차트 ── */}
-      <TargetStockWeightNeu
-        ownerName={ownerName}
-        slices={stockSlicesForTargets}
-        cloudSyncKey={cloudSyncKey}
-        total={total}
-        todayProfitSummary={todayProfitSummary ?? null}
-      />
+      <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} cloudSyncKey={cloudSyncKey} total={total} />
 
       {/* ── 트리맵 (아코디언) ── */}
       <details className="mt-3 group/treemap">

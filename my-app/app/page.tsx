@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { FamilyAllocationDonut } from "@/components/family-allocation-chart";
+import { FamilyAllocationDonut, PortfolioAllOwnersTodayProfitCard } from "@/components/family-allocation-chart";
 import { IntradaySparkline } from "@/components/intraday-sparkline";
 import { LivePriceCell } from "@/components/live-price-cell";
 import { DailyTrendChart } from "@/components/daily-trend-chart";
@@ -60,6 +60,26 @@ import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-ki
 import { SortableOrStaticTableRow } from "@/components/table-sortable-row";
 
 const DEFAULT_OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율", "퇴직연금"] as const;
+/** 포트폴리오 비중 그리드: 기본 순서 후 나머지 보유자 */
+function sortPortfolioGridRows<T extends { ownerName: string }>(
+  rows: T[],
+  preferred: readonly string[],
+): T[] {
+  const byName = new Map(rows.map((r) => [r.ownerName, r]));
+  const used = new Set<string>();
+  const out: T[] = [];
+  for (const name of preferred) {
+    const row = byName.get(name);
+    if (row) {
+      out.push(row);
+      used.add(name);
+    }
+  }
+  for (const row of rows) {
+    if (!used.has(row.ownerName)) out.push(row);
+  }
+  return out;
+}
 type OwnerName = string;
 type Position = {
   symbol: string;
@@ -1645,6 +1665,16 @@ export default function Home() {
       return { ownerName: group.ownerName, groups, totalDailyKrw };
     });
   }, [positionsByOwner, usdKrw, eurKrw]);
+
+  const allocationByOwnerForGrid = useMemo(
+    () => sortPortfolioGridRows(allocationByOwner, DEFAULT_OWNER_NAMES),
+    [allocationByOwner],
+  );
+
+  const ownerGroupDailySummaryForGrid = useMemo(
+    () => sortPortfolioGridRows(ownerGroupDailySummary, DEFAULT_OWNER_NAMES),
+    [ownerGroupDailySummary],
+  );
 
   const dailyLiveChangeByDate = useMemo<Record<string, DailyLiveChange>>(() => {
     const date = todayKST();
@@ -3290,13 +3320,15 @@ export default function Home() {
           <section className="space-y-4">
             <h2 className="font-semibold">포트폴리오 비중 (가족·퇴직연금)</h2>
             <p className="text-xs text-muted-foreground">
-              왼쪽 트리맵은 비중(%)·당일 등락, 오른쪽은 종목별 목표 비중(%)과 달성 여부입니다. 「목표 비중 저장」으로 이
-              브라우저와 서버(동기화 키가 맞는 경우)에 둘 다 남깁니다. 다른 PC에서는 먼저 『서버에서 불러오기』하세요.
+              첫 번째 카드는 전 보유자의 오늘 수익 요약입니다. 나머지는{" "}
+              <span className="font-medium text-foreground">김승주 → 강희진 → 김도율 → 김찬율 → 퇴직연금</span> 순으로
+              표시됩니다. 왼쪽 트리맵은 비중(%)·당일 등락, 오른쪽은 종목별 목표 비중(%)과 달성 여부입니다. 「목표 비중
+              저장」으로 이 브라우저와 서버(동기화 키가 맞는 경우)에 둘 다 남깁니다. 다른 PC에서는 먼저 『서버에서
+              불러오기』하세요.
             </p>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              {allocationByOwner.map(({ ownerName, data, total }) => {
-                const profit = ownerGroupDailySummary.find((o) => o.ownerName === ownerName);
-                return (
+              <PortfolioAllOwnersTodayProfitCard owners={ownerGroupDailySummaryForGrid} />
+              {allocationByOwnerForGrid.map(({ ownerName, data, total }) => (
                 <FamilyAllocationDonut
                   key={ownerName}
                   ownerName={ownerName}
@@ -3311,14 +3343,8 @@ export default function Home() {
                         row.owners.includes(ownerName)),
                   )}
                   cloudSyncKey={cloudSyncKey}
-                  todayProfitSummary={
-                    profit
-                      ? { totalDailyKrw: profit.totalDailyKrw, groups: profit.groups }
-                      : { totalDailyKrw: 0, groups: [] }
-                  }
                 />
-              );
-              })}
+              ))}
             </div>
           </section>
           </div>
