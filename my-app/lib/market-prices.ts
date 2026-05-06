@@ -3,6 +3,10 @@
  * /api/market 라우트와 크론 작업 모두에서 사용합니다.
  */
 
+import { isKrxCommodity, isKrxListedEquityCode, toYahooSymbol } from "./finance-symbols";
+
+export { isKrxCommodity, toYahooSymbol };
+
 export type PriceQuote = {
   price: number | null;
   currency: string | null;
@@ -13,26 +17,6 @@ export type PricesResult = {
   usdKrw: number | null;
   eurKrw: number | null;
 };
-
-const YAHOO_INPUT_ALIASES: Record<string, string> = {
-  RMS: "RMS.PA",
-};
-
-export function isKrxCommodity(symbol: string): boolean {
-  return /^M\d{8}$/i.test(symbol.trim());
-}
-
-export function toYahooSymbol(symbol: string): string {
-  const normalized = symbol.trim().toUpperCase();
-  const aliased = YAHOO_INPUT_ALIASES[normalized];
-  if (aliased) return aliased;
-  if (normalized.startsWith("KRX:")) return `${normalized.replace("KRX:", "")}.KS`;
-  // 한국 6자리 코드: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
-  if (/^[0-9]{6}$/.test(normalized)) return `${normalized}.KS`;
-  if (/^[A-Z][0-9]{6}$/.test(normalized)) return `${normalized.slice(1)}.KS`;
-  if (normalized.startsWith("KQ:")) return `${normalized.replace("KQ:", "")}.KQ`;
-  return normalized;
-}
 
 async function fetchYahooPrice(yahooSymbol: string): Promise<PriceQuote> {
   try {
@@ -125,9 +109,9 @@ export async function fetchPrices(inputSymbols: string[]): Promise<PricesResult>
   const commodities = unique.filter(isKrxCommodity);
   const nonCommodities = unique.filter((s) => !isKrxCommodity(s));
 
-  // 한국 주식/ETF 코드: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
-  const krSixDigit = nonCommodities.filter((s) => /^[0-9]{6}$|^[A-Z][0-9]{6}$/i.test(s.trim()));
-  const nonKr = nonCommodities.filter((s) => !/^[0-9]{6}$|^[A-Z][0-9]{6}$/i.test(s.trim()));
+  // KRX 상장 주식·ETF (숫자 6자리, 0022T0·0118S0 등 혼합 6자리, A458730 등 7자리)
+  const krSixDigit = nonCommodities.filter((s) => isKrxListedEquityCode(s));
+  const nonKr = nonCommodities.filter((s) => !isKrxListedEquityCode(s));
 
   const mapping = nonKr.map((s) => ({ input: s, yahoo: toYahooSymbol(s) }));
   const yahooSet = [...new Set([...mapping.map((m) => m.yahoo), "KRW=X", "EURKRW=X"])];

@@ -3,13 +3,24 @@ export function isKrxCommodity(symbol: string): boolean {
   return /^M\d{8}$/i.test(symbol.trim());
 }
 
+/**
+ * KRX 상장 주식·ETF 코드 (네이버/Yahoo 공통 분기용).
+ * - 6글자: 첫 글자 숫자, 이어 5글자 숫자·대문자 (예: 005930, 0022T0, 0118S0)
+ * - 7글자: 알파벳 1 + 숫자 6 (증권사 HTS 접두 예: A458730)
+ */
+export function isKrxListedEquityCode(symbol: string): boolean {
+  const s = symbol.trim().toUpperCase();
+  return /^(?:[0-9][0-9A-Z]{5}|[A-Z][0-9]{6})$/.test(s);
+}
+
 export function toYahooSymbol(symbol: string): string {
   const normalized = symbol.trim().toUpperCase();
   if (normalized === "RMS") return "RMS.PA";
   if (normalized.startsWith("KRX:")) return `${normalized.replace("KRX:", "")}.KS`;
-  // 한국 6자리 코드: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
-  if (/^[0-9]{6}$/.test(normalized)) return `${normalized}.KS`;
+  // 7글자 접두(A458730) → Yahoo는 숫자 6자리.KS
   if (/^[A-Z][0-9]{6}$/.test(normalized)) return `${normalized.slice(1)}.KS`;
+  // 6글자 (숫자만 또는 ETF 혼합코드 0022T0 등) → 그대로 .KS
+  if (/^[0-9][0-9A-Z]{5}$/.test(normalized)) return `${normalized}.KS`;
   if (normalized.startsWith("KQ:")) return `${normalized.replace("KQ:", "")}.KQ`;
   return normalized;
 }
@@ -24,9 +35,7 @@ export function inferTradingCurrencyFromTicker(raw: string): "KRW" | "USD" | "EU
   if (isKrxCommodity(s)) return "KRW";
   const prefixed = /^KRX:|^KQ:/i.test(raw.trim());
   if (prefixed) return "KRW";
-  // 6자리 숫자 또는 알파벳 접두사(A/Q 등) + 6자리 숫자
-  if (/^[0-9]{6}$/.test(s)) return "KRW";
-  if (/^[A-Z][0-9]{6}$/.test(s)) return "KRW";
+  if (isKrxListedEquityCode(s)) return "KRW";
 
   const eurHints = /\.(PA|DE|AS|MI|MC|BR|VI|SW|LS|MX|WA)$/i;
   if (eurHints.test(s) || s === "RMS") return "EUR";

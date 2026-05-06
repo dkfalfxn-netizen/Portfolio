@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isKrxListedEquityCode, toYahooSymbol } from "@/lib/finance-symbols";
 
 type ChartQuote = {
   price: number | null;
@@ -143,28 +144,6 @@ async function fetchNaverPrice(code: string): Promise<ChartQuote> {
   return emptyQuote();
 }
 
-/** 티커만 넣는 경우가 많은 종목 → Yahoo 표준 심볼 */
-const YAHOO_INPUT_ALIASES: Record<string, string> = {
-  /** 에르메스 — Euronext Paris (RMS 단독은 미국/다른 종목과 충돌 가능성 있어 .PA 고정) */
-  RMS: "RMS.PA",
-};
-
-function toYahooSymbol(symbol: string): string {
-  const normalized = symbol.trim().toUpperCase();
-  const aliased = YAHOO_INPUT_ALIASES[normalized];
-  if (aliased) return aliased;
-  if (normalized.startsWith("KRX:")) {
-    return `${normalized.replace("KRX:", "")}.KS`;
-  }
-  // 한국 6자리 코드: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
-  if (/^[0-9]{6}$/.test(normalized)) return `${normalized}.KS`;
-  if (/^[A-Z][0-9]{6}$/.test(normalized)) return `${normalized.slice(1)}.KS`;
-  if (normalized.startsWith("KQ:")) {
-    return `${normalized.replace("KQ:", "")}.KQ`;
-  }
-  return normalized;
-}
-
 export async function GET(req: NextRequest) {
   const symbolsParam = req.nextUrl.searchParams.get("symbols") ?? "";
   const rawSymbols = symbolsParam
@@ -274,10 +253,7 @@ export async function GET(req: NextRequest) {
     > = {};
     const intraday: Record<string, number[]> = {};
 
-    // 한국 주식/ETF: 숫자 6자리 또는 거래소 알파벳 접두사(A/Q 등) + 숫자 6자리
-    const krSixDigit = yahooInputSymbols.filter((s) =>
-      /^[0-9]{6}$|^[A-Z][0-9]{6}$/.test(s.trim().toUpperCase()),
-    );
+    const krSixDigit = yahooInputSymbols.filter((s) => isKrxListedEquityCode(s));
     const naverResults = krSixDigit.length > 0
       ? await Promise.all(krSixDigit.map(async (s) => [s, await fetchNaverStockPrice(s)] as const))
       : [];
