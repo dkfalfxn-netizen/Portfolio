@@ -633,45 +633,39 @@ export function PortfolioAllOwnersTodayProfitCard({
                 </div>
               </div>
 
-              {/* 그룹별: 컴팩트 표 */}
-              <div className="-mx-0.5 overflow-x-auto">
-                <table className="w-full min-w-[200px] text-[10px]">
-                  <tbody>
-                    {owner.groups.map((g) => (
-                      <tr
-                        key={`${owner.ownerName}-${g.label}`}
-                        className="border-t border-white/[0.05] first:border-0"
-                      >
-                        <td className="max-w-[7rem] py-0.5 pr-2 align-middle">
-                          <span
-                            title={g.holdingsTooltip}
-                            className="inline-block cursor-help truncate border-b border-dotted border-zinc-600/70 text-zinc-400 underline-offset-2 hover:text-zinc-200"
-                          >
-                            {g.label}
-                          </span>
-                        </td>
-                        <td
-                          className={`py-0.5 text-right tabular-nums font-semibold align-middle whitespace-nowrap ${krwTone(g.dailyChangeKrw)}`}
-                        >
-                          {g.dailyChangeKrw !== 0
-                            ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}`
-                            : "—"}
-                        </td>
-                        <td
-                          className={`py-0.5 pl-1 text-right tabular-nums align-middle whitespace-nowrap w-[3rem] sm:w-[3.25rem] ${
-                            g.dailyChangePct !== null && g.dailyChangeKrw !== 0
-                              ? krwTone(g.dailyChangeKrw)
-                              : "text-zinc-600/50"
-                          }`}
-                        >
-                          {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
-                            ? `${g.dailyChangePct > 0 ? "+" : ""}${g.dailyChangePct.toFixed(1)}%`
-                            : ""}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              {/* 그룹별: flex 행 — 라벨 flex-1 shrink, 숫자 no-shrink */}
+              <div className="space-y-0">
+                {owner.groups.map((g) => (
+                  <div
+                    key={`${owner.ownerName}-${g.label}`}
+                    className="flex items-baseline gap-1.5 border-t border-white/[0.05] py-[2px] text-[10px] first:border-0"
+                  >
+                    <span
+                      title={g.holdingsTooltip}
+                      className="min-w-0 flex-1 cursor-help truncate border-b border-dotted border-zinc-600/60 text-zinc-400 hover:text-zinc-200"
+                    >
+                      {g.label}
+                    </span>
+                    <span
+                      className={`shrink-0 tabular-nums font-semibold whitespace-nowrap ${krwTone(g.dailyChangeKrw)}`}
+                    >
+                      {g.dailyChangeKrw !== 0
+                        ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}`
+                        : "—"}
+                    </span>
+                    <span
+                      className={`w-[3.2rem] shrink-0 text-right tabular-nums whitespace-nowrap ${
+                        g.dailyChangePct !== null && g.dailyChangeKrw !== 0
+                          ? krwTone(g.dailyChangeKrw)
+                          : "text-zinc-600/50"
+                      }`}
+                    >
+                      {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
+                        ? `${g.dailyChangePct > 0 ? "+" : ""}${g.dailyChangePct.toFixed(1)}%`
+                        : ""}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           ))
