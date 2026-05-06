@@ -443,6 +443,22 @@ function buildHoldingsGroupBlocks<
   });
 }
 
+/** 그룹 헤더 툴팁: 포함 종목(이름·티커), 줄바꿈 목록 */
+function formatGroupHoldingsTooltip(items: Array<{ name?: string; symbol?: string }>): string {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const p of items) {
+    const sym = typeof p.symbol === "string" ? p.symbol.trim() : "";
+    const nm = typeof p.name === "string" ? p.name.trim() : "";
+    const key = sym || nm;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    if (nm && sym && nm !== sym) lines.push(`${nm} (${sym})`);
+    else lines.push(sym || nm);
+  }
+  return lines.length > 0 ? lines.join("\n") : "(포함 종목 없음)";
+}
+
 /** 강희진 실제 보유 기준 시드 — 김도율·김찬율도 동일 수량·평단가로 복제 */
 const SEED_강희진_보유: Omit<Position, "owner">[] = [
   {
@@ -1659,7 +1675,8 @@ export default function Home() {
           return sum + v;
         }, 0);
         const dailyChangePct = prevSumKrw > 0 ? (dailyChangeKrw / prevSumKrw) * 100 : null;
-        return { label: block.label, dailyChangeKrw, dailyChangePct };
+        const holdingsTooltip = formatGroupHoldingsTooltip(block.items);
+        return { label: block.label, dailyChangeKrw, dailyChangePct, holdingsTooltip };
       }).sort((a, b) => b.dailyChangeKrw - a.dailyChangeKrw);
       const totalDailyKrw = groups.reduce((s, g) => s + g.dailyChangeKrw, 0);
       const prevStockKrw = group.items.reduce((s, p) => {
@@ -3330,7 +3347,7 @@ export default function Home() {
           <section className="space-y-4">
             <h2 className="font-semibold">포트폴리오 비중 (가족·퇴직연금)</h2>
             <p className="text-xs text-muted-foreground">
-              첫 번째 카드는 전 보유자의 오늘 수익 요약(한 줄 요약, 그룹은 펼치기)입니다. 나머지는{" "}
+              첫 번째 카드는 전 보유자의 오늘 수익 요약(사람별 그룹 표, 그룹명 호버 시 종목)입니다. 나머지는{" "}
               <span className="font-medium text-foreground">김승주 → 강희진 → 김도율 → 김찬율 → 퇴직연금</span> 순으로
               표시됩니다. 왼쪽 트리맵은 비중(%)·당일 등락, 오른쪽은 종목별 목표 비중(%)과 달성 여부입니다. 「목표 비중
               저장」으로 이 브라우저와 서버(동기화 키가 맞는 경우)에 둘 다 남깁니다. 다른 PC에서는 먼저 『서버에서
