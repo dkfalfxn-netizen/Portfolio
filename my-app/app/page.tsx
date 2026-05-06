@@ -3024,10 +3024,6 @@ export default function Home() {
     if (!holdingsViewOwner) return positionsByOwner;
     return positionsByOwner.filter((g) => g.ownerName === holdingsViewOwner);
   }, [holdingsViewOwner, positionsByOwner]);
-  const ownerGroupDailySummaryForTab = useMemo(() => {
-    if (!holdingsViewOwner) return ownerGroupDailySummary;
-    return ownerGroupDailySummary.filter((o) => o.ownerName === holdingsViewOwner);
-  }, [holdingsViewOwner, ownerGroupDailySummary]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -3298,7 +3294,9 @@ export default function Home() {
               브라우저와 서버(동기화 키가 맞는 경우)에 둘 다 남깁니다. 다른 PC에서는 먼저 『서버에서 불러오기』하세요.
             </p>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              {allocationByOwner.map(({ ownerName, data, total }) => (
+              {allocationByOwner.map(({ ownerName, data, total }) => {
+                const profit = ownerGroupDailySummary.find((o) => o.ownerName === ownerName);
+                return (
                 <FamilyAllocationDonut
                   key={ownerName}
                   ownerName={ownerName}
@@ -3313,8 +3311,14 @@ export default function Home() {
                         row.owners.includes(ownerName)),
                   )}
                   cloudSyncKey={cloudSyncKey}
+                  todayProfitSummary={
+                    profit
+                      ? { totalDailyKrw: profit.totalDailyKrw, groups: profit.groups }
+                      : { totalDailyKrw: 0, groups: [] }
+                  }
                 />
-              ))}
+              );
+              })}
             </div>
           </section>
           </div>
@@ -3467,7 +3471,7 @@ export default function Home() {
               !(activeTopNav === "section-holdings" || activeTopNav.startsWith("owner-"))
             }
           >
-          <div id="section-holdings" className="flex flex-col gap-4 xl:flex-row xl:items-start">
+          <div id="section-holdings" className="flex flex-col gap-4">
           <section className="min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-sm">
             <div className="border-b border-slate-700/60 px-4 py-3">
               <h2 className="flex flex-wrap items-center gap-2 font-semibold text-slate-100">
@@ -3555,7 +3559,7 @@ export default function Home() {
                         <span className="hidden sm:inline">
                           {" "}
                           · 현금 ₩{fmtInt(group.sectionCashKrw)} (USD{" "}
-                          {fmtUsdNumber(group.cashUsd, 2, 4)} / KRW {fmtInt(group.cashKrw)})
+                          {fmtUsdNumber(group.cashUsd, 2, 2)} / KRW {fmtInt(group.cashKrw)})
                         </span>
                       </p>
                     </div>
@@ -3567,19 +3571,28 @@ export default function Home() {
                       <input
                         type="number"
                         min="0"
-                        step="any"
-                        className="w-28 rounded-md border bg-background px-2 py-1.5 text-right"
+                        step="0.01"
+                        className="w-28 rounded-md border bg-background px-2 py-1.5 text-right tabular-nums"
                         placeholder="0"
-                        value={group.cashUsd === 0 ? "" : group.cashUsd}
-                        onChange={(e) =>
+                        value={
+                          group.cashUsd === 0
+                            ? ""
+                            : Math.round(group.cashUsd * 100) / 100
+                        }
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const n = Number(raw);
                           setCashByOwner((prev) => ({
                             ...prev,
                             [group.ownerName]: {
                               ...prev[group.ownerName],
-                              usd: e.target.value === "" ? 0 : Number(e.target.value),
+                              usd:
+                                raw === "" || !Number.isFinite(n)
+                                  ? 0
+                                  : Math.round(n * 100) / 100,
                             },
-                          }))
-                        }
+                          }));
+                        }}
                       />
                     </label>
                     <label className="flex flex-col gap-0.5">
@@ -4674,43 +4687,7 @@ export default function Home() {
             </div>
           </section>
 
-          {/* 오늘 수익 요약 패널 */}
-          <div className="shrink-0 overflow-hidden rounded-2xl border bg-card shadow-sm xl:w-56">
-            <div className="border-b px-4 py-3">
-              <h2 className="text-sm font-semibold">오늘 수익 요약</h2>
-            </div>
-            <div className="divide-y">
-              {ownerGroupDailySummaryForTab.map((owner) => (
-                <div key={owner.ownerName} className="px-3 py-2.5">
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <p className="text-[11px] font-semibold text-muted-foreground">{owner.ownerName}</p>
-                    <p className={`text-[11px] font-bold tabular-nums ${owner.totalDailyKrw > 0 ? "text-red-400" : owner.totalDailyKrw < 0 ? "text-blue-400" : "text-muted-foreground"}`}>
-                      {owner.totalDailyKrw > 0 ? "+" : ""}{fmtInt(owner.totalDailyKrw)}
-                    </p>
-                  </div>
-                  <table className="w-full text-[11px]">
-                    <tbody>
-                      {owner.groups.map((g) => (
-                        <tr key={g.label} className="border-t border-border/40 first:border-0">
-                          <td className="py-0.5 pr-1 text-muted-foreground truncate max-w-[80px]">{g.label}</td>
-                          <td className={`py-0.5 text-right tabular-nums font-medium ${g.dailyChangeKrw > 0 ? "text-red-400" : g.dailyChangeKrw < 0 ? "text-blue-400" : "text-muted-foreground/50"}`}>
-                            {g.dailyChangeKrw !== 0 ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}` : "—"}
-                          </td>
-                          <td className={`py-0.5 pl-1 text-right tabular-nums ${g.dailyChangePct !== null && g.dailyChangeKrw !== 0 ? (g.dailyChangeKrw > 0 ? "text-red-400" : "text-blue-400") : "text-muted-foreground/40"}`}>
-                            {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
-                              ? `${g.dailyChangePct > 0 ? "+" : ""}${g.dailyChangePct.toFixed(1)}%`
-                              : ""}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          </div>{/* flex wrapper end */}
+          </div>{/* section-holdings */}
 
           </div>
 
