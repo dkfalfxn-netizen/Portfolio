@@ -561,6 +561,8 @@ function TargetWeightSortableBarRow({
 export type OwnerDailyPortfolioSummary = {
   ownerName: string;
   totalDailyKrw: number;
+  /** 보유 평가(전일 종가 기준 주식·현금 포함) 대비 오늘 등락 % */
+  totalDailyPct: number | null;
   groups: { label: string; dailyChangeKrw: number; dailyChangePct: number | null }[];
 };
 
@@ -569,9 +571,36 @@ export function PortfolioAllOwnersTodayProfitCard({
 }: {
   owners: OwnerDailyPortfolioSummary[];
 }) {
+  const krwTone = (n: number) =>
+    n > 0 ? "text-red-400" : n < 0 ? "text-blue-400" : "text-zinc-500";
+
+  const line = owners.length === 0 ? (
+    <span className="text-[11px] text-zinc-500">요약 데이터가 없습니다.</span>
+  ) : (
+    <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1.5">
+      {owners.map((owner) => (
+        <div
+          key={owner.ownerName}
+          className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0 text-[11px] tabular-nums"
+        >
+          <span className="font-semibold text-zinc-200">{owner.ownerName}</span>
+          <span className={`font-bold ${krwTone(owner.totalDailyKrw)}`}>
+            {owner.totalDailyKrw > 0 ? "+" : ""}₩{fmtInt(owner.totalDailyKrw)}
+          </span>
+          {owner.totalDailyPct !== null && owner.totalDailyKrw !== 0 ? (
+            <span className={`font-medium ${krwTone(owner.totalDailyKrw)}`}>
+              ({owner.totalDailyPct > 0 ? "+" : ""}
+              {owner.totalDailyPct.toFixed(1)}%)
+            </span>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div
-      className="relative flex min-h-[260px] flex-col rounded-2xl border border-white/[0.08] p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
+      className="relative rounded-2xl border border-white/[0.08] p-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
       style={{
         backgroundImage: `
           repeating-linear-gradient(
@@ -590,70 +619,54 @@ export function PortfolioAllOwnersTodayProfitCard({
         `,
       }}
     >
-      <div className="mb-3 border-b border-white/10 pb-2">
-        <h3 className="text-sm font-bold text-zinc-100">오늘 수익 요약</h3>
-        <p className="mt-0.5 text-[10px] text-zinc-500">보유자별 · 차트 그룹 기준 당일 등락</p>
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-2 border-b border-white/10 pb-2">
+        <div>
+          <h3 className="text-xs font-bold leading-tight text-zinc-100 sm:text-[13px]">오늘 수익 요약</h3>
+          <p className="mt-0.5 hidden text-[9px] text-zinc-500 sm:block">보유자 · 합계 — 그룹은 아래 펼치기</p>
+        </div>
       </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5 [scrollbar-width:thin]">
-        {owners.length === 0 ? (
-          <p className="py-8 text-center text-xs text-zinc-500">요약 데이터가 없습니다.</p>
-        ) : (
-          owners.map((owner) => (
-            <div key={owner.ownerName} className="rounded-lg border border-white/[0.07] bg-zinc-950/35 px-2.5 py-2">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <p className="text-[11px] font-semibold text-zinc-300">{owner.ownerName}</p>
-                <p
-                  className={`text-[11px] font-bold tabular-nums ${
-                    owner.totalDailyKrw > 0
-                      ? "text-red-400"
-                      : owner.totalDailyKrw < 0
-                        ? "text-blue-400"
-                        : "text-zinc-500"
-                  }`}
-                >
-                  {owner.totalDailyKrw > 0 ? "+" : ""}
-                  {fmtInt(owner.totalDailyKrw)}
-                </p>
-              </div>
-              <table className="w-full text-[10px]">
-                <tbody>
+
+      <div className="mb-1">{line}</div>
+
+      <details className="group/details-profit group mt-2 border-t border-white/[0.07] pt-2">
+        <summary className="cursor-pointer select-none text-[10px] text-zinc-500 underline-offset-2 hover:text-zinc-300 group-open/details-profit:mb-2">
+          <span className="group-open/details-profit:hidden">▶ 그룹별 세부</span>
+          <span className="hidden group-open/details-profit:inline">▼ 그룹별 세부 접기</span>
+        </summary>
+        <div className="max-h-[min(40vh,220px)] space-y-2 overflow-y-auto pr-0.5 [scrollbar-width:thin]">
+          {owners.length === 0 ? null : (
+            owners.map((owner) => (
+              <div key={`d-${owner.ownerName}`} className="rounded-md border border-white/[0.06] bg-zinc-950/30 px-2 py-1.5">
+                <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
+                  <span className="font-semibold text-zinc-400">{owner.ownerName}</span>
+                  <span className={`tabular-nums font-bold ${krwTone(owner.totalDailyKrw)}`}>
+                    {owner.totalDailyKrw > 0 ? "+" : ""}
+                    {fmtInt(owner.totalDailyKrw)}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[9px] leading-snug">
                   {owner.groups.map((g) => (
-                    <tr key={`${owner.ownerName}-${g.label}`} className="border-t border-white/[0.06] first:border-0">
-                      <td className="max-w-[80px] truncate py-0.5 pr-1 text-zinc-500" title={g.label}>
-                        {g.label}
-                      </td>
-                      <td
-                        className={`py-0.5 text-right tabular-nums font-medium ${
-                          g.dailyChangeKrw > 0
-                            ? "text-red-400"
-                            : g.dailyChangeKrw < 0
-                              ? "text-blue-400"
-                              : "text-zinc-500/55"
-                        }`}
-                      >
-                        {g.dailyChangeKrw !== 0 ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}` : "—"}
-                      </td>
-                      <td
-                        className={`py-0.5 pl-1 text-right tabular-nums ${
-                          g.dailyChangePct !== null && g.dailyChangeKrw !== 0
-                            ? g.dailyChangeKrw > 0
-                              ? "text-red-400"
-                              : "text-blue-400"
-                            : "text-zinc-600/55"
-                        }`}
-                      >
-                        {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
-                          ? `${g.dailyChangePct > 0 ? "+" : ""}${g.dailyChangePct.toFixed(1)}%`
-                          : ""}
-                      </td>
-                    </tr>
+                    <span key={`${owner.ownerName}-${g.label}`} className="inline-flex gap-1 tabular-nums">
+                      <span className="text-zinc-500">{g.label}</span>
+                      <span className={`font-medium ${krwTone(g.dailyChangeKrw)}`}>
+                        {g.dailyChangeKrw !== 0
+                          ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}`
+                          : "—"}
+                      </span>
+                      {g.dailyChangePct !== null && g.dailyChangeKrw !== 0 ? (
+                        <span className={krwTone(g.dailyChangeKrw)}>
+                          ({g.dailyChangePct > 0 ? "+" : ""}
+                          {g.dailyChangePct.toFixed(1)}%)
+                        </span>
+                      ) : null}
+                    </span>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          ))
-        )}
-      </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </details>
     </div>
   );
 }
