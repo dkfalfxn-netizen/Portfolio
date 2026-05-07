@@ -1102,6 +1102,8 @@ export default function Home() {
     avgPrice: "",
     purchaseUsdKrw: "",
     purchaseEurKrw: "",
+    /** USD 매입 환율 자동입력용 매입일(한국 달력). 입력 시 매입일+2일 09:00(KST) 근처 Yahoo USD/KRW 반영 */
+    purchaseDateForFx: "",
     /** 원형 차트·보유 표 그룹(미입력 시 티커); 현금성 자산은 「현금」 등으로 묶기 */
     chartGroup: "",
     currency: "USD" as "USD" | "EUR" | "KRW",
@@ -1109,6 +1111,9 @@ export default function Home() {
     /** 종목 추가 시 한 번에 넣을 담당자(복수) */
     selectedOwners: ["김승주"] as OwnerName[],
   });
+  /** 매입 USD/KRW를 직접 수정한 뒤에는 매입일 자동 환율이 덮어쓰지 않음 */
+  const addFormFxManualRef = useRef(false);
+  const [purchaseFxAutoBusy, setPurchaseFxAutoBusy] = useState(false);
   const [addPositionError, setAddPositionError] = useState("");
   const actionSuccessToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [actionSuccessToast, setActionSuccessToast] = useState("");
@@ -1229,7 +1234,48 @@ export default function Home() {
     form.chartGroup,
     form.purchaseUsdKrw,
     form.purchaseEurKrw,
+    form.purchaseDateForFx,
   ]);
+
+  useEffect(() => {
+    if (form.currency !== "USD") return;
+    if (addFormFxManualRef.current) return;
+    const ymd = form.purchaseDateForFx.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return;
+
+    const ac = new AbortController();
+    let cancelled = false;
+
+    void (async () => {
+      setPurchaseFxAutoBusy(true);
+      try {
+        const r = await fetch(
+          `/api/market/fx-settlement?purchaseDate=${encodeURIComponent(ymd)}`,
+          { signal: ac.signal },
+        );
+        const j = (await r.json()) as { rate?: number; error?: string };
+        if (!r.ok) throw new Error(j.error ?? "조회 실패");
+        if (typeof j.rate !== "number" || !Number.isFinite(j.rate) || j.rate <= 0) {
+          throw new Error("환율 데이터 없음");
+        }
+        if (cancelled) return;
+        const rounded = Math.round(j.rate * 1000) / 1000;
+        setForm((prev) => ({ ...prev, purchaseUsdKrw: String(rounded) }));
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        if (!cancelled) {
+          showActionErrorToast(e instanceof Error ? e.message : "과거 환율 조회 실패");
+        }
+      } finally {
+        if (!cancelled) setPurchaseFxAutoBusy(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [form.currency, form.purchaseDateForFx, showActionErrorToast]);
 
   const refreshLatestBackupAt = useCallback(async () => {
     const key = cloudSyncKey.trim();
@@ -2876,6 +2922,7 @@ export default function Home() {
       avgPrice: "",
       purchaseUsdKrw: "",
       purchaseEurKrw: "",
+      purchaseDateForFx: "",
       chartGroup: "",
       currency: form.currency,
       accountType,
@@ -4874,9 +4921,10 @@ export default function Home() {
                   className="rounded-md border bg-background px-3 py-2 text-sm"
                   placeholder={`매입 USD/KRW (예: ${fmtInt(usdKrw)})`}
                   value={form.purchaseUsdKrw}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, purchaseUsdKrw: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    addFormFxManualRef.current = true;
+                    setForm((prev) => ({ ...prev, purchaseUsdKrw: e.target.value }));
+                  }}
                 />
               ) : form.currency === "EUR" ? (
                 <input
@@ -4894,17 +4942,43 @@ export default function Home() {
               ) : (
                 <div />
               )}
+              {form.currency === "USD" ? (
+                <div className="col-span-2 flex flex-col gap-1 sm:col-span-3 md:col-span-6">
+                  <label className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <span className="font-medium text-foreground">매입일 (선택)</span>
+                    <input
+                      type="date"
+                      className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                      value={form.purchaseDateForFx}
+                      onChange={(e) => {
+                        addFormFxManualRef.current = false;
+                        setForm((prev) => ({ ...prev, purchaseDateForFx: e.target.value }));
+                      }}
+                    />
+                    {purchaseFxAutoBusy ? (
+                      <span className="text-[11px] text-muted-foreground">환율 조회 중…</span>
+                    ) : null}
+                  </label>
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    입력하면 매입일 다음날부터 이틀째 되는 날{" "}
+                    <span className="font-medium text-foreground">09:00 한국시각</span> 부근 Yahoo
+                    USD/KRW로 매입 환율 칸을 채웁니다. 증권사 결제(T+2 영업일 등)와 다를 수 있습니다.
+                  </p>
+                </div>
+              ) : null}
               <select
                 className="rounded-md border bg-background px-3 py-2 text-sm"
                 value={form.currency}
                 onChange={(e) => {
                   const c = e.target.value as "USD" | "EUR" | "KRW";
+                  addFormFxManualRef.current = false;
                   setForm((prev) => ({
                     ...prev,
                     currency: c,
                     accountType: c === "KRW" ? "국내주식" : "해외주식",
                     purchaseUsdKrw: c === "USD" ? prev.purchaseUsdKrw : "",
                     purchaseEurKrw: c === "EUR" ? prev.purchaseEurKrw : "",
+                    purchaseDateForFx: c === "USD" ? prev.purchaseDateForFx : "",
                   }));
                 }}
               >
