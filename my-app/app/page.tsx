@@ -209,9 +209,30 @@ function calcSellRealizedKrw(entry: Pick<SellLogEntry, "qty" | "sellPrice" | "av
   return netProceedsKrw - buyNotionalKrw;
 }
 
-/** 종목 추가 시 현금 차감: 명목 + 매입 수수료 (통화별) */
+/**
+ * USD 종목 매수: 달러 예수금이 충분하면 USD만 차감, 아니면 EUR와 같이 전액을 현재(또는 입력) USD/KRW로 원화 차감.
+ */
+function usdPurchaseCashPlan(
+  quantity: number,
+  avgPrice: number,
+  purchaseUsdKrw: number,
+  wallet: { usd: number; krw: number },
+): { deductUsd: number; deductKrw: number } | null {
+  const qty = Number(quantity);
+  const px = Number(avgPrice);
+  const fx = Number(purchaseUsdKrw);
+  if (!Number.isFinite(qty) || !Number.isFinite(px) || qty <= 0 || px <= 0) return null;
+  if (!Number.isFinite(fx) || fx <= 0) return null;
+  const withFee = qty * px * (1 + TRADING_FEE_RATE);
+  const krwNeed = withFee * fx;
+  if (wallet.usd >= withFee - CASH_CHECK_EPS) return { deductUsd: withFee, deductKrw: 0 };
+  if (wallet.krw >= krwNeed - CASH_CHECK_EPS) return { deductUsd: 0, deductKrw: krwNeed };
+  return null;
+}
+
+/** 종목 추가 시 현금 차감: KRW·EUR (USD는 usdPurchaseCashPlan) */
 function purchaseCashDeduction(params: {
-  currency: "USD" | "EUR" | "KRW";
+  currency: "EUR" | "KRW";
   quantity: number;
   avgPrice: number;
   purchaseEurKrw: number;
@@ -221,7 +242,6 @@ function purchaseCashDeduction(params: {
   if (!Number.isFinite(qty) || !Number.isFinite(px)) return { deductUsd: 0, deductKrw: 0 };
   const withFee = qty * px * (1 + TRADING_FEE_RATE);
   if (params.currency === "KRW") return { deductUsd: 0, deductKrw: withFee };
-  if (params.currency === "USD") return { deductUsd: withFee, deductKrw: 0 };
   const eurKrw = Number(params.purchaseEurKrw);
   if (!Number.isFinite(eurKrw) || eurKrw <= 0) return { deductUsd: 0, deductKrw: 0 };
   return { deductUsd: 0, deductKrw: withFee * eurKrw };
@@ -2826,12 +2846,15 @@ export default function Home() {
 
     const purchaseUsdKrwNum = Number(form.purchaseUsdKrw);
     const purchaseEurKrwNum = Number(form.purchaseEurKrw);
-    if (form.currency === "USD") {
-      if (!Number.isFinite(purchaseUsdKrwNum) || purchaseUsdKrwNum <= 0) return;
-    }
+    /** USD 매수: 매입 USD/KRW가 비어 있으면 현재 환율로 원화 차감(달러 예수 부족 시) */
+    const effectivePurchaseUsdKrw =
+      Number.isFinite(purchaseUsdKrwNum) && purchaseUsdKrwNum > 0 ? purchaseUsdKrwNum : usdKrw;
     /** EUR 매수: 매입환율 필드가 비어 있거나 잘못되면 현재 EUR/KRW로 원화 차감 */
     const effectivePurchaseEurKrw =
       Number.isFinite(purchaseEurKrwNum) && purchaseEurKrwNum > 0 ? purchaseEurKrwNum : eurKrw;
+    if (form.currency === "USD") {
+      if (!Number.isFinite(effectivePurchaseUsdKrw) || effectivePurchaseUsdKrw <= 0) return;
+    }
     if (form.currency === "EUR") {
       if (!Number.isFinite(effectivePurchaseEurKrw) || effectivePurchaseEurKrw <= 0) return;
     }
@@ -2858,19 +2881,35 @@ export default function Home() {
     }
     setAddPositionError("");
 
-    const { deductUsd, deductKrw } = purchaseCashDeduction({
-      currency: form.currency,
-      quantity,
-      avgPrice,
-      purchaseEurKrw: form.currency === "EUR" ? effectivePurchaseEurKrw : purchaseEurKrwNum,
-    });
-
     const shortOwners: OwnerName[] = [];
-    for (const owner of ownersOrdered) {
-      const w = cashByOwner[owner] ?? { usd: 0, krw: 0 };
-      const usdOk = deductUsd <= CASH_CHECK_EPS || w.usd >= deductUsd - CASH_CHECK_EPS;
-      const krwOk = deductKrw <= CASH_CHECK_EPS || w.krw >= deductKrw - CASH_CHECK_EPS;
-      if (!usdOk || !krwOk) shortOwners.push(owner);
+    /** USD 매수 보유자별: 달러로 전액 vs 원화로 전액 */
+    let usdDeductPlans: Record<string, { deductUsd: number; deductKrw: number }> | null = null;
+    let fxDeductUsd = 0;
+    let fxDeductKrw = 0;
+
+    if (form.currency === "USD") {
+      usdDeductPlans = {};
+      for (const owner of ownersOrdered) {
+        const w = cashByOwner[owner] ?? { usd: 0, krw: 0 };
+        const plan = usdPurchaseCashPlan(quantity, avgPrice, effectivePurchaseUsdKrw, w);
+        if (!plan) shortOwners.push(owner);
+        else usdDeductPlans[owner] = plan;
+      }
+    } else {
+      const { deductUsd, deductKrw } = purchaseCashDeduction({
+        currency: form.currency,
+        quantity,
+        avgPrice,
+        purchaseEurKrw: form.currency === "EUR" ? effectivePurchaseEurKrw : purchaseEurKrwNum,
+      });
+      fxDeductUsd = deductUsd;
+      fxDeductKrw = deductKrw;
+      for (const owner of ownersOrdered) {
+        const w = cashByOwner[owner] ?? { usd: 0, krw: 0 };
+        const usdOk = fxDeductUsd <= CASH_CHECK_EPS || w.usd >= fxDeductUsd - CASH_CHECK_EPS;
+        const krwOk = fxDeductKrw <= CASH_CHECK_EPS || w.krw >= fxDeductKrw - CASH_CHECK_EPS;
+        if (!usdOk || !krwOk) shortOwners.push(owner);
+      }
     }
     if (shortOwners.length > 0) {
       const msg =
@@ -2892,7 +2931,7 @@ export default function Home() {
       currency: form.currency,
       accountType,
       accountName,
-      ...(form.currency === "USD" ? { purchaseUsdKrw: purchaseUsdKrwNum } : {}),
+      ...(form.currency === "USD" ? { purchaseUsdKrw: effectivePurchaseUsdKrw } : {}),
       ...(form.currency === "EUR" ? { purchaseEurKrw: effectivePurchaseEurKrw } : {}),
       ...(cg ? { chartGroup: cg } : {}),
     };
@@ -2910,10 +2949,12 @@ export default function Home() {
       const next = { ...prev };
       for (const owner of ownersOrdered) {
         const w = next[owner] ?? { usd: 0, krw: 0 };
-        next[owner] = {
-          usd: w.usd - deductUsd,
-          krw: w.krw - deductKrw,
-        };
+        const plan = usdDeductPlans?.[owner];
+        if (plan) {
+          next[owner] = { usd: w.usd - plan.deductUsd, krw: w.krw - plan.deductKrw };
+        } else {
+          next[owner] = { usd: w.usd - fxDeductUsd, krw: w.krw - fxDeductKrw };
+        }
       }
       return next;
     });
