@@ -2829,8 +2829,11 @@ export default function Home() {
     if (form.currency === "USD") {
       if (!Number.isFinite(purchaseUsdKrwNum) || purchaseUsdKrwNum <= 0) return;
     }
+    /** EUR 매수: 매입환율 필드가 비어 있거나 잘못되면 현재 EUR/KRW로 원화 차감 */
+    const effectivePurchaseEurKrw =
+      Number.isFinite(purchaseEurKrwNum) && purchaseEurKrwNum > 0 ? purchaseEurKrwNum : eurKrw;
     if (form.currency === "EUR") {
-      if (!Number.isFinite(purchaseEurKrwNum) || purchaseEurKrwNum <= 0) return;
+      if (!Number.isFinite(effectivePurchaseEurKrw) || effectivePurchaseEurKrw <= 0) return;
     }
 
     const ownersOrdered = ownerNames.filter((o) => form.selectedOwners.includes(o));
@@ -2859,7 +2862,7 @@ export default function Home() {
       currency: form.currency,
       quantity,
       avgPrice,
-      purchaseEurKrw: purchaseEurKrwNum,
+      purchaseEurKrw: form.currency === "EUR" ? effectivePurchaseEurKrw : purchaseEurKrwNum,
     });
 
     const shortOwners: OwnerName[] = [];
@@ -2890,7 +2893,7 @@ export default function Home() {
       accountType,
       accountName,
       ...(form.currency === "USD" ? { purchaseUsdKrw: purchaseUsdKrwNum } : {}),
-      ...(form.currency === "EUR" ? { purchaseEurKrw: purchaseEurKrwNum } : {}),
+      ...(form.currency === "EUR" ? { purchaseEurKrw: effectivePurchaseEurKrw } : {}),
       ...(cg ? { chartGroup: cg } : {}),
     };
 
@@ -5320,13 +5323,12 @@ export default function Home() {
                           },
                         };
                       } else {
-                        // EUR 현금 필드는 없어 원화로 환산 반영
-                        const fxApplied = Number(form.fxRate) || eurKrw;
+                        // 원화 입금만 현재 EUR/KRW(실현손익 폼 환율과 별도)
                         next = {
                           ...next,
                           [targetOwner]: {
                             ...currentCash,
-                            krw: currentCash.krw + grossProceeds * fxApplied,
+                            krw: currentCash.krw + grossProceeds * eurKrw,
                           },
                         };
                       }
