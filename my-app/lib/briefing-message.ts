@@ -446,22 +446,6 @@ export function buildTelegramBriefingHtml(opts: {
     });
   }
 
-  /** 보유자 보유종목 등락 중 |평균| 최대 그룹으로 짧은 괄호 설명 */
-  function inferOwnerDriverPhrase(owner: string, slice: BriefingItem[]): string | null {
-    const mine = slice.filter((i) => (i.ownerLabel ?? "").trim() === owner);
-    if (mine.length === 0) return null;
-    const gs = computeGroupsWithAvg(mine).filter((g) => g.avg !== null && Number.isFinite(g.avg));
-    if (gs.length === 0) return null;
-    let best = gs[0]!;
-    for (const g of gs) {
-      if (Math.abs(g.avg!) > Math.abs(best.avg!)) best = g;
-    }
-    const label = escapeHtml(best.label.trim());
-    if (best.avg! >= 0.2) return `${label} 강세`;
-    if (best.avg! <= -0.2) return `${label} 조정`;
-    return label;
-  }
-
   const timeLine = slotLabel ? `⏰ <i>${escapeHtml(slotLabel)}</i>\n\n` : "";
   const cronFooter =
     "\n\n<i>📡 자동(KST): 01:00 · 09:30 · 12:00 · 15:40 · 23:00</i>";
@@ -488,9 +472,7 @@ export function buildTelegramBriefingHtml(opts: {
         return `• ${escapeHtml(r.owner)}: <i>전일 스냅 없음</i>`;
       }
       const arrow = r.changePct >= 0 ? "▲" : "▼";
-      const hint = inferOwnerDriverPhrase(r.owner, items);
-      const tail = hint ? ` <i>(${hint})</i>` : "";
-      return `• ${escapeHtml(r.owner)}: <b>${arrow} ${r.changePct >= 0 ? "+" : ""}${r.changePct.toFixed(2)}%</b>${tail}`;
+      return `• ${escapeHtml(r.owner)}: <b>${arrow} ${r.changePct >= 0 ? "+" : ""}${r.changePct.toFixed(2)}%</b>`;
     });
     ownerBlock = `\n\n<b>👤 보유자별 요약</b>\n${lines.join("\n")}`;
   }
