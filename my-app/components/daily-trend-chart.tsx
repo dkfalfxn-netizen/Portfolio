@@ -141,15 +141,6 @@ const Y_PAD_RATIO = 0.025;
 const TRADE_HIT_ATTR = "data-daily-trend-trade-hit";
 const TRADE_POPOVER_ATTR = "data-daily-trend-trade-popover";
 
-function isOverTradeUi(clientX: number, clientY: number): boolean {
-  const el = document.elementFromPoint(clientX, clientY);
-  if (!el) return false;
-  return (
-    el.closest(`[${TRADE_HIT_ATTR}]`) != null ||
-    el.closest(`[${TRADE_POPOVER_ATTR}]`) != null
-  );
-}
-
 /** 같은 날짜 툴팁: 보유자 순서(설정 순)대로 묶음 */
 function groupTradesByOwner(
   trades: DailyTradeMarker[],
@@ -222,6 +213,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
   const [hoverTooltip, setHoverTooltip] = useState<HoverTooltip | null>(null);
   const [tradeHover, setTradeHover] = useState<TradeHover | null>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
+  const tradePopoverRef = useRef<HTMLDivElement>(null);
 
   const filtered = snapshots.slice(-range);
   const firstFull = filtered[0]?.date;
@@ -231,22 +223,29 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
     setTradeHover(null);
   }, [range, valueAxisMode, displayMode, filtered.length, snapshots.length]);
 
-  /** 거래 툴팁이 열린 채로 스크롤·탭 전환 시 닫기 */
+  /** 거래 툴팁: 페이지·다른 요소 스크롤 시에만 닫기(툴팁 안 스크롤은 무시) */
   useEffect(() => {
     if (tradeHover == null) return;
-    const clear = () => setTradeHover(null);
-    window.addEventListener("scroll", clear, true);
-    document.addEventListener("visibilitychange", clear);
+    const onWindowScroll = (e: Event) => {
+      const t = e.target;
+      if (tradePopoverRef.current && t instanceof Node && tradePopoverRef.current.contains(t)) return;
+      setTradeHover(null);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") setTradeHover(null);
+    };
+    window.addEventListener("scroll", onWindowScroll, true);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      window.removeEventListener("scroll", clear, true);
-      document.removeEventListener("visibilitychange", clear);
+      window.removeEventListener("scroll", onWindowScroll, true);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [tradeHover]);
 
   /**
    * 거래 점·툴팁은 SVG pointerleave가 가끔 안 나가 창이 남는 경우가 있어,
-   * 전역 pointer + elementFromPoint로 마커/툴팁 밖이면 닫습니다.
-   * 마커 → 툴팁 사이 빈 구역은 100ms 지연으로 잠깐 허용합니다.
+   * 전역 pointer로 마커/툴팁 밖이면 닫습니다.
+   * 툴팁 ref.contains + 스크롤바 드래그 중(buttons≠0)은 닫지 않습니다.
    */
   useEffect(() => {
     if (tradeHover == null) return;
@@ -259,17 +258,28 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
         hideTimer = null;
       }
     };
+    const pointInTradeUi = (clientX: number, clientY: number) => {
+      const el = document.elementFromPoint(clientX, clientY);
+      if (!el) return false;
+      if (el.closest(`[${TRADE_HIT_ATTR}]`)) return true;
+      if (tradePopoverRef.current?.contains(el)) return true;
+      return false;
+    };
     const scheduleMaybeHide = () => {
       clearTimer();
       hideTimer = setTimeout(() => {
         hideTimer = null;
-        if (!isOverTradeUi(lastX, lastY)) setTradeHover(null);
-      }, 100);
+        if (!pointInTradeUi(lastX, lastY)) setTradeHover(null);
+      }, 150);
     };
     const onMove = (e: PointerEvent) => {
+      if (e.buttons !== 0) {
+        clearTimer();
+        return;
+      }
       lastX = e.clientX;
       lastY = e.clientY;
-      if (isOverTradeUi(e.clientX, e.clientY)) {
+      if (pointInTradeUi(e.clientX, e.clientY)) {
         clearTimer();
         return;
       }
@@ -278,7 +288,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
     const onUp = (e: PointerEvent) => {
       lastX = e.clientX;
       lastY = e.clientY;
-      if (!isOverTradeUi(e.clientX, e.clientY)) setTradeHover(null);
+      if (e.buttons === 0 && !pointInTradeUi(e.clientX, e.clientY)) setTradeHover(null);
     };
     const onBlur = () => {
       clearTimer();
@@ -758,11 +768,12 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
 
       {tradeHover && displayMode === "chart" && (
         <div
+          ref={tradePopoverRef}
           {...{ [TRADE_POPOVER_ATTR]: "" }}
-          className="pointer-events-auto fixed z-[200] min-w-[240px] max-w-[min(380px,calc(100vw-24px))] rounded-xl border bg-popover p-3 text-xs shadow-lg"
+          className="pointer-events-auto fixed z-[200] w-[min(560px,calc(100vw-20px))] min-w-[280px] max-w-[calc(100vw-20px)] rounded-xl border bg-popover p-3 text-xs shadow-lg"
           style={(() => {
             const pad = 12;
-            const wEst = 320;
+            const wEst = 400;
             const placeRight = tradeHover.x < window.innerWidth * 0.45;
             const left = placeRight
               ? Math.min(tradeHover.x + pad, window.innerWidth - wEst - pad)
@@ -787,11 +798,11 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                     </span>
                   </p>
                 ) : null}
-                <div className="max-h-[min(320px,50vh)] space-y-3 overflow-y-auto pr-0.5">
+                <div className="max-h-[min(360px,55vh)] space-y-3 overflow-y-auto overscroll-contain pr-1">
                   {groups.map(({ owner, items }) => (
                     <div
                       key={owner}
-                      className="rounded-md border border-white/10 bg-zinc-950/70 px-2.5 py-2 shadow-sm"
+                      className="rounded-md border border-white/10 bg-zinc-950/70 px-2 py-2 shadow-sm"
                     >
                       <p
                         className="mb-2 border-b border-white/5 pb-1.5 text-[11px] font-semibold"
@@ -800,36 +811,53 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                         보유자 · {owner}
                         <span className="ml-1.5 font-normal text-zinc-500">({items.length}건)</span>
                       </p>
-                      <div className="space-y-3">
-                        {items.map((t) => (
-                          <div
-                            key={t.id ?? `${t.kind}-${t.isoDate}-${t.owner}-${t.symbol}-${t.qty}-${t.unitPrice}`}
-                            className="border-l-2 pl-2"
-                            style={{
-                              borderLeftColor: t.kind === "buy" ? "#22c55e" : "#ef4444",
-                            }}
-                          >
-                            <p className="mb-1 font-semibold text-foreground">
-                              <span className={t.kind === "buy" ? "text-emerald-400" : "text-red-400"}>
-                                {t.kind === "buy" ? "매수" : "매도"}
-                              </span>
-                              {" · "}
-                              {t.stockName}
-                              {t.symbol ? ` (${t.symbol})` : ""}
-                            </p>
-                            <p className="text-muted-foreground">
-                              수량 {fmtUsdNumber(t.qty, 0, 6)} · 단가 {fmtUnitPrice(t)}
-                            </p>
-                            {t.currency !== "KRW" && t.fxRate != null && t.fxRate > 0 ? (
-                              <p className="text-[10px] text-muted-foreground/80">
-                                적용 환율 ₩{fmtInt(t.fxRate)}
-                              </p>
-                            ) : null}
-                            <p className="mt-0.5 font-medium text-foreground">
-                              거래 총액(원화 환산) {fmtFull(Math.round(t.totalKrw))}
-                            </p>
-                          </div>
-                        ))}
+                      <div className="-mx-1 overflow-x-auto">
+                        <table className="w-full min-w-[420px] border-collapse text-[10px]">
+                          <thead>
+                            <tr className="border-b border-white/15 text-left text-zinc-400">
+                              <th className="whitespace-nowrap py-1 pr-2 font-medium">구분</th>
+                              <th className="py-1 pr-2 font-medium">종목(코드)</th>
+                              <th className="whitespace-nowrap py-1 pr-2 text-right font-medium">수량</th>
+                              <th className="whitespace-nowrap py-1 pr-2 text-right font-medium">단가</th>
+                              <th className="whitespace-nowrap py-1 pr-2 text-right font-medium">환율</th>
+                              <th className="whitespace-nowrap py-1 text-right font-medium">총액(₩)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {items.map((t) => (
+                              <tr
+                                key={t.id ?? `${t.kind}-${t.isoDate}-${t.owner}-${t.symbol}-${t.qty}-${t.unitPrice}`}
+                                className="border-b border-white/[0.06] last:border-0"
+                              >
+                                <td className="align-top py-1.5 pr-2 font-medium">
+                                  <span className={t.kind === "buy" ? "text-emerald-400" : "text-red-400"}>
+                                    {t.kind === "buy" ? "매수" : "매도"}
+                                  </span>
+                                </td>
+                                <td className="max-w-[10rem] break-words align-top py-1.5 pr-2 text-foreground leading-snug">
+                                  {t.stockName}
+                                  {t.symbol ? (
+                                    <span className="text-zinc-500"> ({t.symbol})</span>
+                                  ) : null}
+                                </td>
+                                <td className="whitespace-nowrap py-1.5 pr-2 text-right tabular-nums text-zinc-300">
+                                  {fmtUsdNumber(t.qty, 0, 6)}
+                                </td>
+                                <td className="whitespace-nowrap py-1.5 pr-2 text-right tabular-nums text-zinc-300">
+                                  {fmtUnitPrice(t)}
+                                </td>
+                                <td className="whitespace-nowrap py-1.5 pr-2 text-right tabular-nums text-zinc-400">
+                                  {t.currency === "KRW" || t.fxRate == null || t.fxRate <= 0
+                                    ? "—"
+                                    : `₩${fmtInt(t.fxRate)}`}
+                                </td>
+                                <td className="whitespace-nowrap py-1.5 text-right tabular-nums font-medium text-foreground">
+                                  {fmtFull(Math.round(t.totalKrw))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   ))}
