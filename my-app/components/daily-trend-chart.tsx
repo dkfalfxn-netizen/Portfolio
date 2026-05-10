@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -186,6 +186,23 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
   const filtered = snapshots.slice(-range);
   const firstFull = filtered[0]?.date;
   const lastFull = filtered[filtered.length - 1]?.date;
+
+  useEffect(() => {
+    setTradeHover(null);
+  }, [range, valueAxisMode, displayMode, filtered.length, snapshots.length]);
+
+  /** 거래 툴팁이 열린 채로 스크롤·탭 전환 시 닫기 */
+  useEffect(() => {
+    if (tradeHover == null) return;
+    const clear = () => setTradeHover(null);
+    window.addEventListener("scroll", clear, true);
+    document.addEventListener("visibilitychange", clear);
+    return () => {
+      window.removeEventListener("scroll", clear, true);
+      document.removeEventListener("visibilitychange", clear);
+    };
+  }, [tradeHover]);
+
   const visibleOwners = useMemo(() => [...ownerNames, "전체"] as string[], [ownerNames]);
   /** 금액 모드에서는 총자산(전체) 라인을 빼고 보유자별만 표시 → Y축이 개별 추이에 맞게 확대됨 */
   const chartLineKeys = useMemo(
@@ -344,7 +361,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
               <Tooltip
                 shared={false}
                 isAnimationActive={false}
-                cursor={{ stroke: "rgba(148,163,184,0.35)", strokeWidth: 1 }}
+                cursor={false}
                 content={({ active, payload }) => {
                   if (tradeHover) return null;
                   if (!active || !payload?.length) return null;
@@ -409,7 +426,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                   const r = 4;
                   const stroke = "rgba(0,0,0,0.35)";
                   const hitR = hasBuy && hasSell ? 12 : 8;
-                  const showTip = (e: ReactMouseEvent<SVGCircleElement>) =>
+                  const showTip = (e: React.PointerEvent<SVGCircleElement>) =>
                     setTradeHover({ x: e.clientX, y: e.clientY, trades });
                   return (
                     <g>
@@ -418,10 +435,11 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                         cy={cy}
                         r={hitR}
                         fill="transparent"
-                        style={{ pointerEvents: "auto", cursor: "default" }}
-                        onMouseEnter={showTip}
-                        onMouseMove={showTip}
-                        onMouseLeave={() => setTradeHover(null)}
+                        style={{ pointerEvents: "auto", cursor: "default", touchAction: "none" }}
+                        onPointerEnter={showTip}
+                        onPointerMove={showTip}
+                        onPointerLeave={() => setTradeHover(null)}
+                        onPointerCancel={() => setTradeHover(null)}
                       />
                       {hasBuy ? (
                         <circle
