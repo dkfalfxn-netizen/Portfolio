@@ -359,37 +359,48 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                 width={56}
               />
               <Tooltip
-                shared={false}
+                shared
                 isAnimationActive={false}
                 cursor={false}
                 content={({ active, payload }) => {
                   if (tradeHover) return null;
                   if (!active || !payload?.length) return null;
-                  const row = payload[0];
-                  if (!row) return null;
-                  const name = String(row.name ?? "");
-                  const v = Number(row.value ?? 0);
-                  const display =
-                    valueAxisMode === "return"
-                      ? `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`
-                      : fmtFull(v);
-                  const iso = (row.payload as Record<string, unknown>)?.isoDate as string | undefined;
-                  const dotColor = OWNER_COLORS[name] ?? "#94a3b8";
+                  const byKey = new Map(
+                    payload.map((p) => [String(p.dataKey ?? p.name ?? ""), p]),
+                  );
+                  const rows = chartLineKeys
+                    .map((k) => byKey.get(k))
+                    .filter((p): p is NonNullable<typeof payload[number]> => p != null);
+                  if (rows.length === 0) return null;
+                  const iso = (rows[0]!.payload as Record<string, unknown>)?.isoDate as string | undefined;
                   return (
                     <div
-                      className="rounded-lg border border-white/12 px-3 py-2 text-xs shadow-lg"
+                      className="max-h-64 min-w-[200px] overflow-y-auto rounded-lg border border-white/12 px-3 py-2 text-xs shadow-lg"
                       style={{
                         background: "rgba(9,9,11,0.95)",
                       }}
                     >
-                      {iso ? <p className="mb-1.5 text-[11px] text-zinc-400">{iso}</p> : null}
-                      <p className="leading-snug text-foreground">
-                        <span className="font-medium" style={{ color: dotColor }}>
-                          {name}
-                        </span>
-                        <span className="text-zinc-500"> · </span>
-                        <span className="tabular-nums">{display}</span>
-                      </p>
+                      {iso ? <p className="mb-2 text-[11px] text-zinc-400">{iso}</p> : null}
+                      <ul className="space-y-1.5">
+                        {rows.map((row) => {
+                          const name = String(row.name ?? row.dataKey ?? "");
+                          const v = Number(row.value ?? 0);
+                          const display =
+                            valueAxisMode === "return"
+                              ? `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`
+                              : fmtFull(v);
+                          const dotColor = OWNER_COLORS[name] ?? "#94a3b8";
+                          return (
+                            <li key={name} className="leading-snug">
+                              <span className="font-medium" style={{ color: dotColor }}>
+                                {name}
+                              </span>
+                              <span className="text-zinc-500"> · </span>
+                              <span className="tabular-nums text-foreground">{display}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </div>
                   );
                 }}
