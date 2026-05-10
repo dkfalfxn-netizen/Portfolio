@@ -187,13 +187,18 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
   const firstFull = filtered[0]?.date;
   const lastFull = filtered[filtered.length - 1]?.date;
   const visibleOwners = useMemo(() => [...ownerNames, "전체"] as string[], [ownerNames]);
+  /** 금액 모드에서는 총자산(전체) 라인을 빼고 보유자별만 표시 → Y축이 개별 추이에 맞게 확대됨 */
+  const chartLineKeys = useMemo(
+    () => (valueAxisMode === "krw" ? [...ownerNames] : visibleOwners),
+    [valueAxisMode, ownerNames, visibleOwners],
+  );
 
   const chartData = useMemo(() => {
     const first = filtered[0];
     if (!first) return [];
     return filtered.map((s) => {
       const row: Record<string, string | number> = { isoDate: s.date, date: s.date.slice(5) };
-      for (const o of visibleOwners) {
+      for (const o of chartLineKeys) {
         const raw = Math.round(o === "전체" ? s.totalValue : (s.ownerValues[o] ?? 0));
         if (valueAxisMode === "return") {
           const b = o === "전체" ? first.totalValue : (first.ownerValues[o] ?? 0);
@@ -204,11 +209,11 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
       }
       return row;
     });
-  }, [filtered, valueAxisMode, visibleOwners]);
+  }, [filtered, valueAxisMode, chartLineKeys]);
 
   const [yMin, yMax] = useMemo(
-    () => computeYDomain(chartData, visibleOwners),
-    [chartData, visibleOwners],
+    () => computeYDomain(chartData, chartLineKeys),
+    [chartData, chartLineKeys],
   );
 
   const snapshotDateSet = useMemo(() => new Set(filtered.map((s) => s.date)), [filtered]);
@@ -257,7 +262,10 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
           . 30·90·180일은 <span className="underline decoration-dotted">보여줄 최대 구간</span>이며, 그 안에서
           실제로 기록된 날만 차트에 표시됩니다.
           <span className="block mt-1">
-            세로축은 선택한 구간의 최소·최대 평가액(또는 수익률)에 맞춰 자동으로 맞춰지며, 위아래로 약 2.5% 여백을 둡니다.
+            세로축은 선택한 구간의 최소·최대 평가액(또는 수익률)에 맞춰 자동으로 맞춰지며, 위아래로 약 2.5% 여백을 둡니다.{" "}
+            <span className="text-muted-foreground/90">
+              금액 차트는 보유자별 선만 표시하고 총자산(전체) 선은 빼 두었습니다. 수익률 모드에서는 전체·보유자가 함께 표시됩니다.
+            </span>
           </span>
           <span className="block mt-1 text-muted-foreground/90">
             거래 점은 해당 일자에 일별 스냅샷이 있을 때만 보입니다.{" "}
@@ -313,7 +321,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
       </div>
 
       {displayMode === "chart" ? (
-        <div className="h-[300px] w-full">
+        <div className="h-[420px] w-full sm:h-[480px]">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData} margin={{ top: 4, right: 12, bottom: 4, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
@@ -354,7 +362,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                 labelStyle={{ color: "#a1a1aa", marginBottom: 4 }}
               />
               <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} iconType="circle" iconSize={8} />
-              {visibleOwners.map((o) => (
+              {chartLineKeys.map((o) => (
                 <Line
                   key={o}
                   type="monotone"
