@@ -321,7 +321,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
       </div>
 
       {displayMode === "chart" ? (
-        <div className="h-[420px] w-full sm:h-[480px]">
+        <div className="h-[504px] w-full sm:h-[576px]">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData} margin={{ top: 4, right: 12, bottom: 4, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
@@ -342,24 +342,40 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                 width={56}
               />
               <Tooltip
-                contentStyle={{
-                  background: "rgba(9,9,11,0.95)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 8,
-                  fontSize: 12,
+                shared={false}
+                isAnimationActive={false}
+                cursor={{ stroke: "rgba(148,163,184,0.35)", strokeWidth: 1 }}
+                content={({ active, payload }) => {
+                  if (tradeHover) return null;
+                  if (!active || !payload?.length) return null;
+                  const row = payload[0];
+                  if (!row) return null;
+                  const name = String(row.name ?? "");
+                  const v = Number(row.value ?? 0);
+                  const display =
+                    valueAxisMode === "return"
+                      ? `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`
+                      : fmtFull(v);
+                  const iso = (row.payload as Record<string, unknown>)?.isoDate as string | undefined;
+                  const dotColor = OWNER_COLORS[name] ?? "#94a3b8";
+                  return (
+                    <div
+                      className="rounded-lg border border-white/12 px-3 py-2 text-xs shadow-lg"
+                      style={{
+                        background: "rgba(9,9,11,0.95)",
+                      }}
+                    >
+                      {iso ? <p className="mb-1.5 text-[11px] text-zinc-400">{iso}</p> : null}
+                      <p className="leading-snug text-foreground">
+                        <span className="font-medium" style={{ color: dotColor }}>
+                          {name}
+                        </span>
+                        <span className="text-zinc-500"> · </span>
+                        <span className="tabular-nums">{display}</span>
+                      </p>
+                    </div>
+                  );
                 }}
-                formatter={(v, name) => {
-                  const n = Number(v ?? 0);
-                  if (valueAxisMode === "return") {
-                    return [`${n >= 0 ? "+" : ""}${n.toFixed(2)}%`, String(name)];
-                  }
-                  return [fmtFull(n), String(name)];
-                }}
-                labelFormatter={(_, payload) => {
-                  const iso = payload?.[0]?.payload?.isoDate as string | undefined;
-                  return iso ?? "";
-                }}
-                labelStyle={{ color: "#a1a1aa", marginBottom: 4 }}
               />
               <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} iconType="circle" iconSize={8} />
               {chartLineKeys.map((o) => (
@@ -599,12 +615,20 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
 
       {tradeHover && displayMode === "chart" && (
         <div
-          className="pointer-events-none fixed z-[100] min-w-[240px] max-w-[380px] rounded-xl border bg-popover p-3 text-xs shadow-lg"
-          style={{
-            left: tradeHover.x,
-            top: tradeHover.y + 14,
-            transform: "translate(-50%, 0)",
-          }}
+          className="pointer-events-none fixed z-[200] min-w-[240px] max-w-[min(380px,calc(100vw-24px))] rounded-xl border bg-popover p-3 text-xs shadow-lg"
+          style={(() => {
+            const pad = 12;
+            const wEst = 320;
+            const placeRight = tradeHover.x < window.innerWidth * 0.45;
+            const left = placeRight
+              ? Math.min(tradeHover.x + pad, window.innerWidth - wEst - pad)
+              : Math.max(pad, tradeHover.x - wEst - pad);
+            const top = Math.min(
+              Math.max(pad, tradeHover.y - 8),
+              window.innerHeight - 120,
+            );
+            return { left, top };
+          })()}
         >
           {tradeHover.trades.map((t) => (
             <div
