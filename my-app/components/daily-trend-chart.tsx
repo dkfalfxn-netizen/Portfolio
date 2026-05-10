@@ -40,6 +40,10 @@ export type DailyTradeMarker = {
   currency: "USD" | "EUR" | "KRW";
   /** USD/EUR 일 때 표시용 */
   fxRate?: number;
+  /** 매도만. 실현손익 입력값(원) */
+  realizedKrw?: number;
+  /** 매도만. 매수원가(₩)=평단×수량(환산) 대비 수익률(%) */
+  realizedPct?: number | null;
 };
 
 function fmt(n: number) {
@@ -812,7 +816,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                         <span className="ml-1.5 font-normal text-zinc-500">({items.length}건)</span>
                       </p>
                       <div className="-mx-1 overflow-x-auto">
-                        <table className="w-full min-w-[420px] border-collapse text-[10px]">
+                        <table className="w-full min-w-[520px] border-collapse text-[10px]">
                           <thead>
                             <tr className="border-b border-white/15 text-left text-zinc-400">
                               <th className="whitespace-nowrap py-1 pr-2 font-medium">구분</th>
@@ -820,7 +824,9 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                               <th className="whitespace-nowrap py-1 pr-2 text-right font-medium">수량</th>
                               <th className="whitespace-nowrap py-1 pr-2 text-right font-medium">단가</th>
                               <th className="whitespace-nowrap py-1 pr-2 text-right font-medium">환율</th>
-                              <th className="whitespace-nowrap py-1 text-right font-medium">총액(₩)</th>
+                              <th className="whitespace-nowrap py-1 pr-2 text-right font-medium">총액(₩)</th>
+                              <th className="whitespace-nowrap py-1 pr-2 text-right font-medium">실현손익</th>
+                              <th className="whitespace-nowrap py-1 text-right font-medium">수익률</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -851,8 +857,48 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                                     ? "—"
                                     : `₩${fmtInt(t.fxRate)}`}
                                 </td>
-                                <td className="whitespace-nowrap py-1.5 text-right tabular-nums font-medium text-foreground">
+                                <td className="whitespace-nowrap py-1.5 pr-2 text-right tabular-nums font-medium text-foreground">
                                   {fmtFull(Math.round(t.totalKrw))}
+                                </td>
+                                <td className="whitespace-nowrap py-1.5 pr-2 text-right tabular-nums font-semibold">
+                                  {t.kind === "sell" &&
+                                  t.realizedKrw != null &&
+                                  Number.isFinite(t.realizedKrw) ? (
+                                    <span
+                                      className={
+                                        t.realizedKrw > 0
+                                          ? "text-red-400"
+                                          : t.realizedKrw < 0
+                                            ? "text-blue-400"
+                                            : "text-zinc-400"
+                                      }
+                                    >
+                                      {t.realizedKrw >= 0 ? "+" : ""}
+                                      {fmtFull(Math.round(t.realizedKrw))}
+                                    </span>
+                                  ) : (
+                                    <span className="font-normal text-zinc-500">—</span>
+                                  )}
+                                </td>
+                                <td className="whitespace-nowrap py-1.5 text-right tabular-nums font-semibold">
+                                  {t.kind === "sell" &&
+                                  t.realizedPct != null &&
+                                  Number.isFinite(t.realizedPct) ? (
+                                    <span
+                                      className={
+                                        t.realizedPct > 0
+                                          ? "text-red-400"
+                                          : t.realizedPct < 0
+                                            ? "text-blue-400"
+                                            : "text-zinc-400"
+                                      }
+                                    >
+                                      {t.realizedPct >= 0 ? "+" : ""}
+                                      {t.realizedPct.toFixed(2)}%
+                                    </span>
+                                  ) : (
+                                    <span className="font-normal text-zinc-500">—</span>
+                                  )}
                                 </td>
                               </tr>
                             ))}

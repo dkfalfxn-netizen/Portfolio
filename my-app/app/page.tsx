@@ -1897,6 +1897,10 @@ export default function Home() {
         const fx = Number(e.fxRate) > 0 ? Number(e.fxRate) : 1;
         const totalKrw =
           e.currency === "KRW" ? e.qty * e.sellPrice : e.qty * e.sellPrice * fx;
+        const costBasisKrw =
+          e.currency === "KRW" ? e.avgPrice * e.qty : e.avgPrice * e.qty * fx;
+        const realizedPct =
+          costBasisKrw > 0 ? (e.realizedKrw / costBasisKrw) * 100 : null;
         acc.push({
           id: e.id,
           isoDate: e.date,
@@ -1908,6 +1912,8 @@ export default function Home() {
           unitPrice: e.sellPrice,
           totalKrw,
           currency: e.currency,
+          realizedKrw: e.realizedKrw,
+          realizedPct,
           ...(e.currency === "KRW" ? {} : { fxRate: fx }),
         });
       }
