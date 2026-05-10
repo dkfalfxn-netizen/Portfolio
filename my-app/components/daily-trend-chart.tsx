@@ -150,6 +150,33 @@ function isOverTradeUi(clientX: number, clientY: number): boolean {
   );
 }
 
+/** 같은 날짜 툴팁: 보유자 순서(설정 순)대로 묶음 */
+function groupTradesByOwner(
+  trades: DailyTradeMarker[],
+  ownerOrder: readonly string[],
+): Array<{ owner: string; items: DailyTradeMarker[] }> {
+  const byOwner = new Map<string, DailyTradeMarker[]>();
+  for (const t of trades) {
+    if (!byOwner.has(t.owner)) byOwner.set(t.owner, []);
+    byOwner.get(t.owner)!.push(t);
+  }
+  const out: Array<{ owner: string; items: DailyTradeMarker[] }> = [];
+  const seen = new Set<string>();
+  for (const o of ownerOrder) {
+    const items = byOwner.get(o);
+    if (items?.length) {
+      out.push({ owner: o, items });
+      seen.add(o);
+    }
+  }
+  for (const o of [...byOwner.keys()].sort((a, b) => a.localeCompare(b, "ko"))) {
+    if (!seen.has(o) && byOwner.get(o)?.length) {
+      out.push({ owner: o, items: byOwner.get(o)! });
+    }
+  }
+  return out;
+}
+
 function computeYDomain(
   rows: Array<Record<string, string | number>>,
   keys: string[],
@@ -299,6 +326,26 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
   );
 
   const snapshotDateSet = useMemo(() => new Set(filtered.map((s) => s.date)), [filtered]);
+
+  const tradesByIsoDate = useMemo(() => {
+    const map = new Map<string, DailyTradeMarker[]>();
+    for (const m of tradeMarkers) {
+      if (!snapshotDateSet.has(m.isoDate)) continue;
+      if (!visibleOwners.includes(m.owner)) continue;
+      if (!map.has(m.isoDate)) map.set(m.isoDate, []);
+      map.get(m.isoDate)!.push(m);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => {
+        const ko = a.owner.localeCompare(b.owner, "ko");
+        if (ko !== 0) return ko;
+        const ks = a.kind.localeCompare(b.kind);
+        if (ks !== 0) return ks;
+        return (a.symbol || "").localeCompare(b.symbol || "", "ko");
+      });
+    }
+    return map;
+  }, [tradeMarkers, snapshotDateSet, visibleOwners]);
 
   const tradeScatterData = useMemo(() => {
     const groups = new Map<string, DailyTradeMarker[]>();
@@ -501,8 +548,12 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                   const r = 4;
                   const stroke = "rgba(0,0,0,0.35)";
                   const hitR = hasBuy && hasSell ? 12 : 8;
-                  const showTip = (e: React.PointerEvent<SVGCircleElement>) =>
-                    setTradeHover({ x: e.clientX, y: e.clientY, trades });
+                  const showTip = (e: React.PointerEvent<SVGCircleElement>) => {
+                    const iso = payload?.isoDate;
+                    if (!iso) return;
+                    const allDay = tradesByIsoDate.get(iso) ?? trades;
+                    setTradeHover({ x: e.clientX, y: e.clientY, trades: allDay });
+                  };
                   return (
                     <g>
                       <circle
@@ -723,28 +774,69 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
             return { left, top };
           })()}
         >
-          {tradeHover.trades.map((t) => (
-            <div
-              key={t.id ?? `${t.kind}-${t.isoDate}-${t.owner}-${t.symbol}-${t.qty}-${t.unitPrice}`}
-              className="mb-3 last:mb-0"
-            >
-              <p className="mb-1 font-semibold text-foreground">
-                <span className={t.kind === "buy" ? "text-emerald-400" : "text-red-400"}>
-                  {t.kind === "buy" ? "매수" : "매도"}
-                </span>
-                {" · "}
-                {t.stockName}
-                {t.symbol ? ` (${t.symbol})` : ""}
-              </p>
-              <p className="text-muted-foreground">
-                보유자 {t.owner} · 수량 {fmtUsdNumber(t.qty, 0, 6)} · 단가 {fmtUnitPrice(t)}
-              </p>
-              {t.currency !== "KRW" && t.fxRate != null && t.fxRate > 0 && (
-                <p className="text-[10px] text-muted-foreground/80">적용 환율 ₩{fmtInt(t.fxRate)}</p>
-              )}
-              <p className="mt-0.5 font-medium text-foreground">거래 총액(원화 환산) {fmtFull(Math.round(t.totalKrw))}</p>
-            </div>
-          ))}
+          {(() => {
+            const isoDate = tradeHover.trades[0]?.isoDate;
+            const groups = groupTradesByOwner(tradeHover.trades, ownerNames);
+            return (
+              <>
+                {isoDate ? (
+                  <p className="mb-3 border-b border-white/10 pb-2 text-[11px] font-semibold tracking-tight text-zinc-300">
+                    거래일 {isoDate}
+                    <span className="ml-2 font-normal text-zinc-500">
+                      (보유자 {groups.length}명 · {tradeHover.trades.length}건)
+                    </span>
+                  </p>
+                ) : null}
+                <div className="max-h-[min(320px,50vh)] space-y-3 overflow-y-auto pr-0.5">
+                  {groups.map(({ owner, items }) => (
+                    <div
+                      key={owner}
+                      className="rounded-md border border-white/10 bg-zinc-950/70 px-2.5 py-2 shadow-sm"
+                    >
+                      <p
+                        className="mb-2 border-b border-white/5 pb-1.5 text-[11px] font-semibold"
+                        style={{ color: OWNER_COLORS[owner] ?? "#94a3b8" }}
+                      >
+                        보유자 · {owner}
+                        <span className="ml-1.5 font-normal text-zinc-500">({items.length}건)</span>
+                      </p>
+                      <div className="space-y-3">
+                        {items.map((t) => (
+                          <div
+                            key={t.id ?? `${t.kind}-${t.isoDate}-${t.owner}-${t.symbol}-${t.qty}-${t.unitPrice}`}
+                            className="border-l-2 pl-2"
+                            style={{
+                              borderLeftColor: t.kind === "buy" ? "#22c55e" : "#ef4444",
+                            }}
+                          >
+                            <p className="mb-1 font-semibold text-foreground">
+                              <span className={t.kind === "buy" ? "text-emerald-400" : "text-red-400"}>
+                                {t.kind === "buy" ? "매수" : "매도"}
+                              </span>
+                              {" · "}
+                              {t.stockName}
+                              {t.symbol ? ` (${t.symbol})` : ""}
+                            </p>
+                            <p className="text-muted-foreground">
+                              수량 {fmtUsdNumber(t.qty, 0, 6)} · 단가 {fmtUnitPrice(t)}
+                            </p>
+                            {t.currency !== "KRW" && t.fxRate != null && t.fxRate > 0 ? (
+                              <p className="text-[10px] text-muted-foreground/80">
+                                적용 환율 ₩{fmtInt(t.fxRate)}
+                              </p>
+                            ) : null}
+                            <p className="mt-0.5 font-medium text-foreground">
+                              거래 총액(원화 환산) {fmtFull(Math.round(t.totalKrw))}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 
