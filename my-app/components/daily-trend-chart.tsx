@@ -137,6 +137,19 @@ function buildLiveTooltipData(owner: string, live: LiveChange): DiffTooltipData 
 
 const Y_PAD_RATIO = 0.025;
 
+/** 거래 마커/툴팁 끝 좌표 판별용 (document.elementFromPoint + closest) */
+const TRADE_HIT_ATTR = "data-daily-trend-trade-hit";
+const TRADE_POPOVER_ATTR = "data-daily-trend-trade-popover";
+
+function isOverTradeUi(clientX: number, clientY: number): boolean {
+  const el = document.elementFromPoint(clientX, clientY);
+  if (!el) return false;
+  return (
+    el.closest(`[${TRADE_HIT_ATTR}]`) != null ||
+    el.closest(`[${TRADE_POPOVER_ATTR}]`) != null
+  );
+}
+
 function computeYDomain(
   rows: Array<Record<string, string | number>>,
   keys: string[],
@@ -200,6 +213,58 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
     return () => {
       window.removeEventListener("scroll", clear, true);
       document.removeEventListener("visibilitychange", clear);
+    };
+  }, [tradeHover]);
+
+  /**
+   * 거래 점·툴팁은 SVG pointerleave가 가끔 안 나가 창이 남는 경우가 있어,
+   * 전역 pointer + elementFromPoint로 마커/툴팁 밖이면 닫습니다.
+   * 마커 → 툴팁 사이 빈 구역은 100ms 지연으로 잠깐 허용합니다.
+   */
+  useEffect(() => {
+    if (tradeHover == null) return;
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastX = 0;
+    let lastY = 0;
+    const clearTimer = () => {
+      if (hideTimer != null) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+    };
+    const scheduleMaybeHide = () => {
+      clearTimer();
+      hideTimer = setTimeout(() => {
+        hideTimer = null;
+        if (!isOverTradeUi(lastX, lastY)) setTradeHover(null);
+      }, 100);
+    };
+    const onMove = (e: PointerEvent) => {
+      lastX = e.clientX;
+      lastY = e.clientY;
+      if (isOverTradeUi(e.clientX, e.clientY)) {
+        clearTimer();
+        return;
+      }
+      scheduleMaybeHide();
+    };
+    const onUp = (e: PointerEvent) => {
+      lastX = e.clientX;
+      lastY = e.clientY;
+      if (!isOverTradeUi(e.clientX, e.clientY)) setTradeHover(null);
+    };
+    const onBlur = () => {
+      clearTimer();
+      setTradeHover(null);
+    };
+    window.addEventListener("pointermove", onMove, true);
+    window.addEventListener("pointerup", onUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      clearTimer();
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("blur", onBlur);
     };
   }, [tradeHover]);
 
@@ -442,6 +507,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                   return (
                     <g>
                       <circle
+                        {...{ [TRADE_HIT_ATTR]: "" }}
                         cx={cx}
                         cy={cy}
                         r={hitR}
@@ -449,8 +515,6 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                         style={{ pointerEvents: "auto", cursor: "default", touchAction: "none" }}
                         onPointerEnter={showTip}
                         onPointerMove={showTip}
-                        onPointerLeave={() => setTradeHover(null)}
-                        onPointerCancel={() => setTradeHover(null)}
                       />
                       {hasBuy ? (
                         <circle
@@ -644,7 +708,8 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
 
       {tradeHover && displayMode === "chart" && (
         <div
-          className="pointer-events-none fixed z-[200] min-w-[240px] max-w-[min(380px,calc(100vw-24px))] rounded-xl border bg-popover p-3 text-xs shadow-lg"
+          {...{ [TRADE_POPOVER_ATTR]: "" }}
+          className="pointer-events-auto fixed z-[200] min-w-[240px] max-w-[min(380px,calc(100vw-24px))] rounded-xl border bg-popover p-3 text-xs shadow-lg"
           style={(() => {
             const pad = 12;
             const wEst = 320;
