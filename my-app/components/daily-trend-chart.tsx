@@ -44,6 +44,8 @@ export type DailyTradeMarker = {
   realizedKrw?: number;
   /** 매도만. 매수원가(₩)=평단×수량(환산) 대비 수익률(%) */
   realizedPct?: number | null;
+  /** 매도만. 당일 합산 수익률용 매수원가(₩) */
+  costBasisKrw?: number;
 };
 
 function fmt(n: number) {
@@ -170,6 +172,28 @@ function groupTradesByOwner(
     }
   }
   return out;
+}
+
+function sumSellRealizedKrw(items: DailyTradeMarker[]): { sum: number; count: number } {
+  let sum = 0;
+  let count = 0;
+  for (const t of items) {
+    if (t.kind !== "sell") continue;
+    if (t.realizedKrw == null || !Number.isFinite(t.realizedKrw)) continue;
+    sum += t.realizedKrw;
+    count += 1;
+  }
+  return { sum, count };
+}
+
+function sumSellCostBasisKrw(items: DailyTradeMarker[]): number {
+  let s = 0;
+  for (const t of items) {
+    if (t.kind !== "sell") continue;
+    if (t.costBasisKrw == null || !Number.isFinite(t.costBasisKrw) || t.costBasisKrw <= 0) continue;
+    s += t.costBasisKrw;
+  }
+  return s;
 }
 
 function computeYDomain(
@@ -793,6 +817,9 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
           {(() => {
             const isoDate = tradeHover.trades[0]?.isoDate;
             const groups = groupTradesByOwner(tradeHover.trades, ownerNames);
+            const dayRealized = sumSellRealizedKrw(tradeHover.trades);
+            const dayCost = sumSellCostBasisKrw(tradeHover.trades);
+            const dayPct = dayCost > 0 ? (dayRealized.sum / dayCost) * 100 : null;
             return (
               <>
                 {isoDate ? (
@@ -801,6 +828,38 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                     <span className="ml-2 font-normal text-zinc-500">
                       (보유자 {groups.length}명 · {tradeHover.trades.length}건)
                     </span>
+                    {dayRealized.count > 0 ? (
+                      <span className="mt-1.5 block font-normal text-[10px] leading-snug text-zinc-400">
+                        당일 실현손익 합계(전 보유자)
+                        <span
+                          className={`ml-1.5 tabular-nums font-semibold ${
+                            dayRealized.sum > 0
+                              ? "text-red-400"
+                              : dayRealized.sum < 0
+                                ? "text-blue-400"
+                                : "text-zinc-400"
+                          }`}
+                        >
+                          {dayRealized.sum >= 0 ? "+" : ""}
+                          {fmtFull(Math.round(dayRealized.sum))}
+                        </span>
+                        {dayPct != null && Number.isFinite(dayPct) ? (
+                          <span
+                            className={`ml-2 tabular-nums font-semibold ${
+                              dayPct > 0
+                                ? "text-red-400"
+                                : dayPct < 0
+                                  ? "text-blue-400"
+                                  : "text-zinc-400"
+                            }`}
+                          >
+                            ({dayPct >= 0 ? "+" : ""}
+                            {dayPct.toFixed(2)}%)
+                          </span>
+                        ) : null}
+                        <span className="ml-1.5 font-normal text-zinc-500">· 매도 {dayRealized.count}건 기준</span>
+                      </span>
+                    ) : null}
                   </p>
                 ) : null}
                 <div className="max-h-[min(360px,55vh)] space-y-3 overflow-y-auto overscroll-contain pr-1">
@@ -816,6 +875,36 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                         보유자 · {owner}
                         <span className="ml-1.5 font-normal text-zinc-500">({items.length}건)</span>
                       </p>
+                      {(() => {
+                        const { sum: ownSum, count: ownSellCount } = sumSellRealizedKrw(items);
+                        const ownCost = sumSellCostBasisKrw(items);
+                        const ownPct = ownCost > 0 ? (ownSum / ownCost) * 100 : null;
+                        if (ownSellCount === 0) return null;
+                        return (
+                          <p className="mb-2 text-[10px] font-normal leading-snug text-zinc-400">
+                            당일 실현손익 합계
+                            <span
+                              className={`ml-1.5 tabular-nums font-semibold ${
+                                ownSum > 0 ? "text-red-400" : ownSum < 0 ? "text-blue-400" : "text-zinc-400"
+                              }`}
+                            >
+                              {ownSum >= 0 ? "+" : ""}
+                              {fmtFull(Math.round(ownSum))}
+                            </span>
+                            {ownPct != null && Number.isFinite(ownPct) ? (
+                              <span
+                                className={`ml-2 tabular-nums font-semibold ${
+                                  ownPct > 0 ? "text-red-400" : ownPct < 0 ? "text-blue-400" : "text-zinc-400"
+                                }`}
+                              >
+                                ({ownPct >= 0 ? "+" : ""}
+                                {ownPct.toFixed(2)}%)
+                              </span>
+                            ) : null}
+                            <span className="ml-1.5 text-zinc-500">· 매도 {ownSellCount}건</span>
+                          </p>
+                        );
+                      })()}
                       <div className="-mx-1 overflow-x-auto">
                         <table className="w-full min-w-[640px] border-collapse text-[10px]">
                           <thead>

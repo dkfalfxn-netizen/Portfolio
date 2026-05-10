@@ -1914,6 +1914,7 @@ export default function Home() {
           currency: e.currency,
           realizedKrw: e.realizedKrw,
           realizedPct,
+          costBasisKrw,
           ...(e.currency === "KRW" ? {} : { fxRate: fx }),
         });
       }
