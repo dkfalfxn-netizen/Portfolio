@@ -16,7 +16,7 @@ import { createPortal } from "react-dom";
 import { FamilyAllocationDonut, PortfolioAllOwnersTodayProfitCard } from "@/components/family-allocation-chart";
 import { IntradaySparkline } from "@/components/intraday-sparkline";
 import { LivePriceCell } from "@/components/live-price-cell";
-import { DailyTrendChart } from "@/components/daily-trend-chart";
+import { DailyTrendChart, type DailyTradeMarker } from "@/components/daily-trend-chart";
 import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
@@ -139,6 +139,9 @@ const SNAPSHOT_PUSHED_TOTAL_KEY = "portfolio_snapshot_pushed_total_v1";
 const SNAPSHOT_PREV_PUSHED_DATE_KEY = "portfolio_snapshot_prev_pushed_date_v1";
 const SNAPSHOT_PREV_PUSHED_TOTAL_KEY = "portfolio_snapshot_prev_pushed_total_v1";
 const SELL_LOG_KEY = "portfolio_sell_log_v1";
+/** 「종목 추가」체결을 일별 차트 마커용으로만 로컬 저장(서버 동기화 없음) */
+const BUY_JOURNAL_KEY = "portfolio_buy_journal_v1";
+const BUY_JOURNAL_MAX = 500;
 const LAST_SELL_LOG_SYNC_TS_KEY = "portfolio_last_sell_log_sync_ts_v1";
 const SELL_LOG_DIRTY_KEY = "portfolio_sell_log_dirty_v1";
 const TRADING_FEE_RATE = 0.002; // 0.2%
@@ -192,6 +195,20 @@ type SellLogEntry = {
   /** 실현손익 원화 */
   realizedKrw: number;
   note?: string;
+};
+
+/** 종목 추가 시 로컬에만 남기는 매수 저널(차트 마커용) */
+type BuyJournalEntry = {
+  id: string;
+  date: string;
+  owner: OwnerName;
+  symbol: string;
+  name: string;
+  qty: number;
+  buyPrice: number;
+  currency: "USD" | "EUR" | "KRW";
+  fxRate: number;
+  totalKrw: number;
 };
 
 function calcSellRealizedKrw(entry: Pick<SellLogEntry, "qty" | "sellPrice" | "avgPrice" | "currency" | "fxRate">): number {
@@ -331,6 +348,35 @@ function loadDailySnapshots(): DailySnapshot[] {
         s !== null &&
         typeof (s as DailySnapshot).date === "string" &&
         typeof (s as DailySnapshot).ownerValues === "object",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function loadBuyJournal(): BuyJournalEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(BUY_JOURNAL_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (e): e is BuyJournalEntry =>
+        e !== null &&
+        typeof e === "object" &&
+        typeof (e as BuyJournalEntry).id === "string" &&
+        typeof (e as BuyJournalEntry).date === "string" &&
+        typeof (e as BuyJournalEntry).owner === "string" &&
+        typeof (e as BuyJournalEntry).symbol === "string" &&
+        typeof (e as BuyJournalEntry).name === "string" &&
+        typeof (e as BuyJournalEntry).qty === "number" &&
+        typeof (e as BuyJournalEntry).buyPrice === "number" &&
+        typeof (e as BuyJournalEntry).fxRate === "number" &&
+        typeof (e as BuyJournalEntry).totalKrw === "number" &&
+        ((e as BuyJournalEntry).currency === "USD" ||
+          (e as BuyJournalEntry).currency === "EUR" ||
+          (e as BuyJournalEntry).currency === "KRW"),
     );
   } catch {
     return [];
@@ -1032,6 +1078,7 @@ export default function Home() {
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
+  const [buyJournal, setBuyJournal] = useState<BuyJournalEntry[]>([]);
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
   const [showSymbolPnl, setShowSymbolPnl] = useState<Record<string, boolean>>({});
   const [sellLogErrorByOwner, setSellLogErrorByOwner] = useState<Record<string, string>>({});
@@ -1828,6 +1875,46 @@ export default function Home() {
     };
   }, [ownerGroupDailySummary, positionsByOwner, usdKrw, eurKrw]);
 
+  const dailyTrendTradeMarkers = useMemo<DailyTradeMarker[]>(() => {
+    const acc: DailyTradeMarker[] = [];
+    for (const b of buyJournal) {
+      acc.push({
+        id: b.id,
+        isoDate: b.date,
+        kind: "buy",
+        owner: b.owner,
+        stockName: b.name,
+        symbol: b.symbol,
+        qty: b.qty,
+        unitPrice: b.buyPrice,
+        totalKrw: b.totalKrw,
+        currency: b.currency,
+        ...(b.currency === "KRW" ? {} : { fxRate: b.fxRate }),
+      });
+    }
+    for (const [owner, entries] of Object.entries(sellLog)) {
+      for (const e of entries) {
+        const fx = Number(e.fxRate) > 0 ? Number(e.fxRate) : 1;
+        const totalKrw =
+          e.currency === "KRW" ? e.qty * e.sellPrice : e.qty * e.sellPrice * fx;
+        acc.push({
+          id: e.id,
+          isoDate: e.date,
+          kind: "sell",
+          owner,
+          stockName: e.name,
+          symbol: e.symbol,
+          qty: e.qty,
+          unitPrice: e.sellPrice,
+          totalKrw,
+          currency: e.currency,
+          ...(e.currency === "KRW" ? {} : { fxRate: fx }),
+        });
+      }
+    }
+    return acc;
+  }, [buyJournal, sellLog]);
+
   // 시세 로드 완료 후 오늘 스냅샷 자동 저장 (하루 1회 로컬 + 서버)
   useEffect(() => {
     if (!isHydrated) return;
@@ -2123,11 +2210,13 @@ export default function Home() {
     const pos = loadPositions();
     const cash = loadCashByOwner();
     const log = loadSellLog();
+    const buyJ = loadBuyJournal();
     skipMarkLocalChangedRef.current = 2; // 디스크→state 재적용은 "수정"이 아님
     skipSellLogLocalChangedRef.current = 1;
     skipOwnerLocalChangedRef.current = 1; // 초기 로드 시 ownerNames 효과가 로컬 변경으로 오인되는 것을 방지
     setPositions(pos);
     setCashByOwner(cash);
+    setBuyJournal(buyJ);
     setSellLog(log);
     // URL ?key=... 파라미터가 있으면 localStorage보다 우선 적용 (북마크 복원용)
     const urlKey = (() => {
@@ -2209,6 +2298,11 @@ export default function Home() {
       setSellLogDirty(true);
     }
   }, [sellLog, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    safeSetItem(BUY_JOURNAL_KEY, JSON.stringify(buyJournal));
+  }, [buyJournal, isHydrated]);
 
   // 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
   // cloudSyncKey 의존: 키가 뒤늦게 설정돼도(UI 입력·URL 파라미터 등) 서버 fetch가 즉시 재실행됨
@@ -2959,6 +3053,40 @@ export default function Home() {
       return next;
     });
 
+    const ymdCandidate = form.purchaseDateForFx.trim();
+    const tradeDate =
+      /^\d{4}-\d{2}-\d{2}$/.test(ymdCandidate) ? ymdCandidate : todayKST();
+
+    const newBuys: BuyJournalEntry[] = ownersOrdered.map((owner) => {
+      const fx =
+        form.currency === "KRW"
+          ? 1
+          : form.currency === "USD"
+            ? effectivePurchaseUsdKrw
+            : effectivePurchaseEurKrw;
+      const totalKrw =
+        form.currency === "KRW" ? quantity * avgPrice : quantity * avgPrice * fx;
+      const id =
+        typeof globalThis.crypto !== "undefined" &&
+        typeof globalThis.crypto.randomUUID === "function"
+          ? globalThis.crypto.randomUUID()
+          : `buy-${Date.now()}-${symbol}-${owner}`;
+      return {
+        id,
+        date: tradeDate,
+        owner,
+        symbol,
+        name: nameTrimmed,
+        qty: quantity,
+        buyPrice: avgPrice,
+        currency: form.currency,
+        fxRate: fx,
+        totalKrw,
+      };
+    });
+
+    setBuyJournal((prev) => [...prev, ...newBuys].slice(-BUY_JOURNAL_MAX));
+
     setForm({
       symbol: "",
       name: "",
@@ -3498,7 +3626,12 @@ export default function Home() {
               (일별 자산 추이) 앱·서버에 저장된 날만 쌓입니다(최대 180일). 동기화 키로 서버 누적도 불러옵니다.
             </p>
             <div className="mt-2 min-h-[200px] rounded-md border border-slate-700/50 bg-slate-900/30 p-1">
-            <DailyTrendChart snapshots={dailySnapshots} ownerNames={ownerNames} liveChangeByDate={dailyLiveChangeByDate} />
+            <DailyTrendChart
+              snapshots={dailySnapshots}
+              ownerNames={ownerNames}
+              liveChangeByDate={dailyLiveChangeByDate}
+              tradeMarkers={dailyTrendTradeMarkers}
+            />
             </div>
           </section>
           <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
