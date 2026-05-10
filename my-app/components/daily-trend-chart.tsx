@@ -472,6 +472,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
               <XAxis
                 dataKey="isoDate"
                 type="category"
+                allowDuplicatedCategory={false}
                 tickFormatter={(v: string) => (typeof v === "string" ? v.slice(5) : String(v))}
                 tick={{ fontSize: 10, fill: "#71717a" }}
                 interval="preserveStartEnd"
@@ -774,10 +775,10 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
         <div
           ref={tradePopoverRef}
           {...{ [TRADE_POPOVER_ATTR]: "" }}
-          className="pointer-events-auto fixed z-[200] w-[min(560px,calc(100vw-20px))] min-w-[280px] max-w-[calc(100vw-20px)] rounded-xl border bg-popover p-3 text-xs shadow-lg"
+          className="pointer-events-auto fixed z-[200] w-[min(720px,calc(100vw-16px))] min-w-[min(720px,calc(100vw-16px))] max-w-[calc(100vw-16px)] rounded-xl border bg-popover p-3 text-xs shadow-lg"
           style={(() => {
             const pad = 12;
-            const wEst = 400;
+            const wEst = Math.min(720, window.innerWidth - 16);
             const placeRight = tradeHover.x < window.innerWidth * 0.45;
             const left = placeRight
               ? Math.min(tradeHover.x + pad, window.innerWidth - wEst - pad)
@@ -816,7 +817,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                         <span className="ml-1.5 font-normal text-zinc-500">({items.length}건)</span>
                       </p>
                       <div className="-mx-1 overflow-x-auto">
-                        <table className="w-full min-w-[520px] border-collapse text-[10px]">
+                        <table className="w-full min-w-[640px] border-collapse text-[10px]">
                           <thead>
                             <tr className="border-b border-white/15 text-left text-zinc-400">
                               <th className="whitespace-nowrap py-1 pr-2 font-medium">구분</th>
