@@ -346,7 +346,8 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
           <span className="block mt-1">
             세로축은 선택한 구간의 최소·최대 평가액(또는 수익률)에 맞춰 자동으로 맞춰지며, 위아래로 약 2.5% 여백을 둡니다.{" "}
             <span className="text-muted-foreground/90">
-              금액 차트는 보유자별 선만 표시하고 총자산(전체) 선은 빼 두었습니다. 수익률 모드에서는 전체·보유자가 함께 표시됩니다.
+              금액 차트는 보유자별 선만 표시하고 총자산(전체) 선은 빼 두었습니다. 수익률 모드에서는 전체·보유자가 함께 표시됩니다.{" "}
+              라인 위에 마우스를 올렸을 때만 날짜별 전 보유자 요약이 뜨고, 빈 그리드에는 뜨지 않습니다.
             </span>
           </span>
           <span className="block mt-1 text-muted-foreground/90">
@@ -424,20 +425,18 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                 width={56}
               />
               <Tooltip
-                shared
+                shared={false}
                 isAnimationActive={false}
                 cursor={false}
                 content={({ active, payload }) => {
                   if (tradeHover) return null;
                   if (!active || !payload?.length) return null;
-                  const byKey = new Map(
-                    payload.map((p) => [String(p.dataKey ?? p.name ?? ""), p]),
-                  );
-                  const rows = chartLineKeys
-                    .map((k) => byKey.get(k))
-                    .filter((p): p is NonNullable<typeof payload[number]> => p != null);
-                  if (rows.length === 0) return null;
-                  const iso = (rows[0]!.payload as Record<string, unknown>)?.isoDate as string | undefined;
+                  const first = payload[0];
+                  if (!first) return null;
+                  const iso = (first.payload as Record<string, unknown>)?.isoDate as string | undefined;
+                  if (!iso) return null;
+                  const dataRow = chartData.find((r) => r.isoDate === iso);
+                  if (!dataRow) return null;
                   return (
                     <div
                       className="max-h-64 min-w-[200px] overflow-y-auto rounded-lg border border-white/12 px-3 py-2 text-xs shadow-lg"
@@ -445,11 +444,11 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                         background: "rgba(9,9,11,0.95)",
                       }}
                     >
-                      {iso ? <p className="mb-2 text-[11px] text-zinc-400">{iso}</p> : null}
+                      <p className="mb-2 text-[11px] text-zinc-400">{iso}</p>
                       <ul className="space-y-1.5">
-                        {rows.map((row) => {
-                          const name = String(row.name ?? row.dataKey ?? "");
-                          const v = Number(row.value ?? 0);
+                        {chartLineKeys.map((name) => {
+                          const v = dataRow[name];
+                          if (typeof v !== "number" || !Number.isFinite(v)) return null;
                           const display =
                             valueAxisMode === "return"
                               ? `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`
@@ -477,9 +476,9 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                   type="monotone"
                   dataKey={o}
                   stroke={OWNER_COLORS[o] ?? "#94a3b8"}
-                  strokeWidth={o === "전체" ? 2 : 1.5}
+                  strokeWidth={o === "전체" ? 3 : 2.5}
                   dot={false}
-                  activeDot={{ r: 4 }}
+                  activeDot={{ r: 5, strokeWidth: 1 }}
                   strokeDasharray={o === "전체" ? "6 3" : undefined}
                 />
               ))}
