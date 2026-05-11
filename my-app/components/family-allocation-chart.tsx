@@ -143,24 +143,6 @@ function isCashRebalanceTicker(ticker: string): boolean {
   return t === "현금" || t === "USD 현금" || t === "KRW 현금";
 }
 
-/** 대시보드 슬라이스에 없는 티커는 목표 맵에서 제거 (종목 삭제·재분류 후 localStorage·동기화 잔류 방지) */
-function pruneTargetMapToSliceTickers(
-  map: Record<string, number>,
-  slices: AllocationSlice[],
-): Record<string, number> {
-  if (slices.length === 0) return map;
-  const allowed = new Set(slices.map((s) => s.ticker.trim()).filter(Boolean));
-  const next = { ...map };
-  let changed = false;
-  for (const k of Object.keys(next)) {
-    if (!allowed.has(k)) {
-      delete next[k];
-      changed = true;
-    }
-  }
-  return changed ? next : map;
-}
-
 /** 현물 비중(%) 내림차순 — USD/KRW 현금 행은 제외 */
 function nonCashEntriesSortedByWeight(
   allEntries: AllocationSlice["allEntries"],
@@ -764,33 +746,10 @@ function TargetStockWeightNeu({
 }) {
   const skipSaveRef = useRef(true);
   const saveDebounceRef = useRef<number | null>(null);
-  /** SSR hydration 시 state는 {}로 붙으므로, 클라이언트에서 LS를 한 번은 반드시 읽어야 함 */
-  const hydratedFromLsRef = useRef(false);
   const [targetsByTicker, setTargetsByTicker] = useState<Record<string, number>>(() => {
     const all = loadAllTargetStockWeights();
     return { ...(all[ownerName] ?? {}) };
   });
-  /** 슬라이스에서 빠진 티커는 목표 맵·LS에 잔류하지 않도록 제거 (리밸 계산기「대시보드 불러오기」가 stale 키를 가져오는 문제 방지) */
-  const sliceTickerSetKey = useMemo(
-    () =>
-      [...new Set(slices.map((s) => s.ticker.trim()).filter(Boolean))]
-        .sort()
-        .join("|"),
-    [slices],
-  );
-  useEffect(() => {
-    if (slices.length === 0) return;
-    setTargetsByTicker((prev) => {
-      if (!hydratedFromLsRef.current) {
-        hydratedFromLsRef.current = true;
-        const all = loadAllTargetStockWeights();
-        const saved = all[ownerName] ?? {};
-        skipSaveRef.current = true;
-        return pruneTargetMapToSliceTickers({ ...saved }, slices);
-      }
-      return pruneTargetMapToSliceTickers(prev, slices);
-    });
-  }, [ownerName, sliceTickerSetKey, slices]);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
   const [savedAtText, setSavedAtText] = useState<string | null>(null);
   const [saveFailedBrief, setSaveFailedBrief] = useState(false);
@@ -876,11 +835,11 @@ function TargetStockWeightNeu({
       const all = loadAllTargetStockWeights();
       const saved = all[ownerName] ?? {};
       skipSaveRef.current = true;
-      setTargetsByTicker(pruneTargetMapToSliceTickers({ ...saved }, slices));
+      setTargetsByTicker({ ...saved });
     };
     window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
-  }, [ownerName, slices]);
+  }, [ownerName]);
 
   useEffect(() => {
     if (skipSaveRef.current) {
