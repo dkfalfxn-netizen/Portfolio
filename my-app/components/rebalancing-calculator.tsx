@@ -1,6 +1,14 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, type Dispatch, type SetStateAction } from "react";
+import {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useSyncExternalStore,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { GripVertical } from "lucide-react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -110,6 +118,15 @@ type Props = {
 };
 
 type Mode = "buy-sell" | "buy-only";
+
+/** SSR에서는 false, 클라이언트에서는 true — localStorage 병합은 클라이언트에서만 */
+function useClientReady(): boolean {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+}
 
 // ─── 헬퍼 ──────────────────────────────────────────────────────────────────────
 
@@ -1090,22 +1107,17 @@ export function RebalancingCalculator({
   usdKrw: number;
 }) {
   const [selectedOwner, setSelectedOwner] = useState(allocationByOwner[0]?.ownerName ?? "");
-  const [mergeTargetsReady, setMergeTargetsReady] = useState(false);
+  const mergeTargetsReady = useClientReady();
   /** 대시보드 불러오기 후 계산기 키 변경을 감지해 ownerData 재계산 트리거 */
   const [calcStorageBump, setCalcStorageBump] = useState(0);
-
-  useEffect(() => {
-    setMergeTargetsReady(true);
-  }, []);
 
   const handleDashboardLoaded = useCallback(() => {
     setCalcStorageBump((n) => n + 1);
   }, []);
 
-  useEffect(() => {
-    if (!allocationByOwner.find((o) => o.ownerName === selectedOwner)) {
-      setSelectedOwner(allocationByOwner[0]?.ownerName ?? "");
-    }
+  const displayOwner = useMemo(() => {
+    if (allocationByOwner.some((o) => o.ownerName === selectedOwner)) return selectedOwner;
+    return allocationByOwner[0]?.ownerName ?? "";
   }, [allocationByOwner, selectedOwner]);
 
   const ownerData = useMemo(() => {
@@ -1152,7 +1164,7 @@ export function RebalancingCalculator({
     });
   }, [allocationByOwner, enrichedPositions, usdKrw, mergeTargetsReady, calcStorageBump]);
 
-  const current = ownerData.find((o) => o.ownerName === selectedOwner);
+  const current = ownerData.find((o) => o.ownerName === displayOwner);
 
   return (
     <div className="space-y-3">
@@ -1164,7 +1176,7 @@ export function RebalancingCalculator({
             type="button"
             onClick={() => setSelectedOwner(ownerName)}
             className={`cursor-pointer rounded px-3 py-1 text-xs transition-all ${
-              selectedOwner === ownerName
+              displayOwner === ownerName
                 ? "bg-primary text-primary-foreground"
                 : "border hover:bg-muted"
             }`}

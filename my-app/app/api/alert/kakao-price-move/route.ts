@@ -497,7 +497,7 @@ export async function GET(req: NextRequest) {
     const briefingItems = toBriefingItems(itemsForMessage);
     const miniTrends = await collectMiniTrends(briefingItems);
     const holdTransitions = await collectHoldTransitions(briefingItems);
-    let text = buildTelegramBriefingHtml({
+    const text = buildTelegramBriefingHtml({
       slotLabel,
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,
@@ -802,7 +802,7 @@ export async function POST(req: NextRequest) {
     const briefingItems = toBriefingItems(itemsForMessage);
     const miniTrends = await collectMiniTrends(briefingItems);
     const holdTransitions = await collectHoldTransitions(briefingItems);
-    let text = buildTelegramBriefingHtml({
+    const text = buildTelegramBriefingHtml({
       slotLabel: BRIEFING_SLOT_LABELS.manual,
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,

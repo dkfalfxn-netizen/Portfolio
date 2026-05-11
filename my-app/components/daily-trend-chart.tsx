@@ -248,7 +248,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
   const lastFull = filtered[filtered.length - 1]?.date;
 
   useEffect(() => {
-    setTradeHover(null);
+    queueMicrotask(() => setTradeHover(null));
   }, [range, valueAxisMode, displayMode, filtered.length, snapshots.length]);
 
   /** 거래 툴팁: 페이지·다른 요소 스크롤 시에만 닫기(툴팁 안 스크롤은 무시) */

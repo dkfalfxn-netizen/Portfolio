@@ -54,7 +54,9 @@ function OwnerScratchPad({
   }, [ownerName]);
 
   useEffect(() => {
-    refreshFromStorage();
+    queueMicrotask(() => {
+      refreshFromStorage();
+    });
   }, [refreshFromStorage]);
 
   useEffect(() => {
