@@ -764,6 +764,8 @@ function TargetStockWeightNeu({
 }) {
   const skipSaveRef = useRef(true);
   const saveDebounceRef = useRef<number | null>(null);
+  /** SSR hydration 시 state는 {}로 붙으므로, 클라이언트에서 LS를 한 번은 반드시 읽어야 함 */
+  const hydratedFromLsRef = useRef(false);
   const [targetsByTicker, setTargetsByTicker] = useState<Record<string, number>>(() => {
     const all = loadAllTargetStockWeights();
     return { ...(all[ownerName] ?? {}) };
@@ -778,8 +780,17 @@ function TargetStockWeightNeu({
   );
   useEffect(() => {
     if (slices.length === 0) return;
-    setTargetsByTicker((prev) => pruneTargetMapToSliceTickers(prev, slices));
-  }, [sliceTickerSetKey, slices]);
+    setTargetsByTicker((prev) => {
+      if (!hydratedFromLsRef.current) {
+        hydratedFromLsRef.current = true;
+        const all = loadAllTargetStockWeights();
+        const saved = all[ownerName] ?? {};
+        skipSaveRef.current = true;
+        return pruneTargetMapToSliceTickers({ ...saved }, slices);
+      }
+      return pruneTargetMapToSliceTickers(prev, slices);
+    });
+  }, [ownerName, sliceTickerSetKey, slices]);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
   const [savedAtText, setSavedAtText] = useState<string | null>(null);
   const [saveFailedBrief, setSaveFailedBrief] = useState(false);
@@ -1319,7 +1330,13 @@ export function FamilyAllocationDonut({
       </div>
 
       {/* ── 리밸런싱 바 차트 ── */}
-      <TargetStockWeightNeu ownerName={ownerName} slices={stockSlicesForTargets} cloudSyncKey={cloudSyncKey} total={total} />
+      <TargetStockWeightNeu
+        key={ownerName}
+        ownerName={ownerName}
+        slices={stockSlicesForTargets}
+        cloudSyncKey={cloudSyncKey}
+        total={total}
+      />
 
       {/* ── 트리맵 (아코디언) ── */}
       <details className="mt-3 group/treemap">
