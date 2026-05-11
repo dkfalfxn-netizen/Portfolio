@@ -17,9 +17,9 @@ import {
   REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
 } from "@/lib/rebalance-visual-order";
 
-/** 대시보드에 목표만 있고 현재 평가 0원인 그룹을 계산기 행에 포함 */
+/** 대시보드 목표만 있고 현재 평가 0원인 그룹을 계산기 행에 포함 (대시보드 LS 기준 — 계산기에만 남은 stale 티커는 제외) */
 function mergeSavedTargetGroupsWithoutHoldings(ownerName: string, baseGroups: GroupAllocation[]): GroupAllocation[] {
-  const saved = loadAllCalculatorTargetWeights()[ownerName] ?? {};
+  const saved = loadAllTargetStockWeights()[ownerName] ?? {};
   const seen = new Set(baseGroups.map((g) => g.groupKey.trim()));
   const extra: GroupAllocation[] = [];
   for (const [key, target] of Object.entries(saved)) {
@@ -351,19 +351,26 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
     return init;
   });
 
-  // 새 그룹이 추가됐을 때 targets 보강 — 계산기 저장값 또는 0%
+  // 새 그룹이 추가·삭제될 때 targets를 그룹 키에 맞춤 (빠진 행 키는 제거 → LS 자동저장으로 stale 복구 차단)
   useEffect(() => {
     setTargets((prev) => {
       const saved = loadAllCalculatorTargetWeights()[ownerName] ?? {};
-      const next = { ...prev };
-      let changed = false;
+      const next: Record<string, string> = {};
       for (const g of groups) {
-        if (!(g.groupKey in next)) {
-          next[g.groupKey] = dashboardTargetInputString(saved, g.groupKey);
-          changed = true;
-        }
+        const k = g.groupKey;
+        next[k] = k in prev ? prev[k]! : dashboardTargetInputString(saved, k);
       }
-      return changed ? next : prev;
+      if (Object.keys(next).length === Object.keys(prev).length) {
+        let same = true;
+        for (const k of Object.keys(next)) {
+          if (next[k] !== prev[k]) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return prev;
+      }
+      return next;
     });
   }, [groups, ownerName]);
 
