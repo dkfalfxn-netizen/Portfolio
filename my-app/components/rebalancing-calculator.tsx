@@ -485,7 +485,7 @@ function RebalancingBarSortableRow({
 
         <div className="flex w-36 shrink-0 items-center gap-0.5 sm:w-44">
           <span
-            className="min-w-0 flex-1 truncate text-[11px] font-medium sm:text-xs"
+            className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-100 sm:text-sm"
             title={row.displayName || row.groupKey}
           >
             {row.displayName || row.groupKey}
@@ -496,7 +496,7 @@ function RebalancingBarSortableRow({
               min={0}
               max={100}
               step={0.1}
-              className="w-12 rounded border bg-background px-1 py-0.5 text-right text-[11px] tabular-nums"
+              className="w-12 rounded border border-slate-600/80 bg-background px-1 py-0.5 text-right text-xs font-medium tabular-nums text-slate-100"
               value={targets[row.groupKey] ?? ""}
               onChange={(e) => setTargets((prev) => ({ ...prev, [row.groupKey]: e.target.value }))}
               title="목표 비중 입력 — 계산기 전용 저장소에 자동 저장됩니다."
@@ -529,7 +529,7 @@ function RebalancingBarSortableRow({
           : null}
         </div>
 
-        <div className="w-24 shrink-0 text-right text-[11px] sm:w-28">
+        <div className="w-24 shrink-0 text-right text-xs font-medium tabular-nums sm:w-28">
           {isCash ?
             <CashAllocationDeviationLabel targetPct={row.targetPct} actualPct={row.currentPct} />
           : rowIsOver ?
@@ -543,17 +543,17 @@ function RebalancingBarSortableRow({
       </div>
 
       {!pinned && row.members.length > 0 ?
-        <div className="border-t border-dashed border-slate-800/55 pb-1.5 pt-1">
+        <div className="border-t border-dashed border-slate-600/50 pb-2 pt-2">
           <div className="flex flex-wrap items-center gap-2 pl-7 sm:pl-8">
-            <span className="text-[9px] font-medium text-muted-foreground shrink-0">그룹 내 분배</span>
-            <div className="flex flex-wrap gap-1">
+            <span className="text-xs font-semibold text-slate-200 shrink-0">그룹 내 분배</span>
+            <div className="flex flex-wrap gap-1.5">
               <button
                 type="button"
                 title="매매 차액을 상대 비율로 나눕니다."
-                className={`rounded border px-1.5 py-0.5 text-[9px] transition-colors ${
+                className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
                   memberSplitMode === "weight"
-                    ? "border-primary bg-primary/15 text-foreground"
-                    : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/70"
+                    ? "border-primary bg-primary/15 text-slate-50"
+                    : "border-slate-600/80 bg-slate-800/60 text-slate-300 hover:bg-slate-800"
                 }`}
                 onClick={() => onMemberSplitModeChange(row.groupKey, "weight")}
               >
@@ -567,12 +567,12 @@ function RebalancingBarSortableRow({
                     ? "신규 투자금 모드에서는 종목별 목표%를 쓸 수 없습니다."
                     : "각 종목의 포트폴리오 목표 %(합은 그룹 슬라이더 %에 맞게 자동 스케일)."
                 }
-                className={`rounded border px-1.5 py-0.5 text-[9px] transition-colors ${
+                className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
                   rebalanceMode === "buy-only"
-                    ? "cursor-not-allowed opacity-45"
+                    ? "cursor-not-allowed border-slate-700/60 opacity-45"
                     : memberSplitMode === "targetPct"
-                      ? "border-primary bg-primary/15 text-foreground"
-                      : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/70"
+                      ? "border-primary bg-primary/15 text-slate-50"
+                      : "border-slate-600/80 bg-slate-800/60 text-slate-300 hover:bg-slate-800"
                 }`}
                 onClick={() => rebalanceMode !== "buy-only" && onMemberSplitModeChange(row.groupKey, "targetPct")}
               >
@@ -580,80 +580,56 @@ function RebalancingBarSortableRow({
               </button>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-7 sm:pl-8 mt-1">
-            <span className="w-full text-[9px] font-medium leading-snug text-muted-foreground/95">
-              {memberSplitMode === "weight" ?
-                <>
-                  그룹 <span className="text-foreground/90">매매 차액</span>을 종목끼리 나눌{" "}
-                  <span className="text-foreground/90">상대 가중치</span>입니다(포트 % 아님).
-                  예: 반반 → <span className="tabular-nums">1</span>과 <span className="tabular-nums">1</span>.
-                  같은 그룹 종목 줄을 <span className="font-medium text-foreground/90">모두</span> 양수로 채워야 적용되고,
-                  하나라도 비우면 평가금 비율로 자동 분배합니다.
-                </>
-              : (
-                <>
-                  각 종목의 <span className="text-foreground/90">포트폴리오 목표 비중(%)</span>을 넣습니다.
-                  예: 그룹 목표가 <span className="tabular-nums">{groupTargetPct.toFixed(1)}</span>%일 때{" "}
-                  <span className="tabular-nums">5</span>·<span className="tabular-nums">5</span>·
-                  <span className="tabular-nums">4</span>·<span className="tabular-nums">6</span>처럼 합이{" "}
-                  <span className="tabular-nums">20</span>이 되게 맞추거나,                   합이 달라도{" "}
-                  <span className="text-foreground/90">비율 유지한 채 그룹 목표%</span>에 맞게 자동 스케일합니다.
-                  모든 종목 줄을 채워야 적용됩니다. 비우면 가중치 모드와 같이 평가금 비율로 나눕니다.
-                  아래 칸에서 입력 합과 그룹 목표를 확인할 수 있습니다.
-                </>
-              )}
-            </span>
-          </div>
           {memberSplitMode === "targetPct" && rebalanceMode !== "buy-only" ?
             <div
-              className="mt-1.5 ml-7 sm:ml-8 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-slate-600/45 bg-slate-900/55 px-2 py-1.5"
+              className="mt-2 ml-7 sm:ml-8 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-slate-600/55 bg-slate-900/70 px-2.5 py-2"
               role="status"
               aria-label="종목 목표 퍼센트 검증"
             >
-              <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 shrink-0">
                 검증
               </span>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] tabular-nums">
-                <span className="text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] leading-snug tabular-nums text-slate-300">
+                <span>
                   그룹 목표{" "}
-                  <span className="font-medium text-foreground">{groupTargetPct.toFixed(1)}%</span>
+                  <span className="font-semibold text-slate-100">{groupTargetPct.toFixed(1)}%</span>
                 </span>
                 {tgtPctInvalid ?
                   <span className="font-medium text-amber-400">목표% 칸에 0~100 숫자만 입력해 주세요.</span>
                 : tgtPctFilledValidCount === 0 && tgtPctEmptyCount === row.members.length ?
-                  <span className="text-muted-foreground">종목 목표% 입력 시 여기에 합계가 표시됩니다.</span>
+                  <span className="text-slate-400">종목 목표% 입력 시 여기에 합계가 표시됩니다.</span>
                 : !tgtPctAllFilled ?
                   <>
-                    <span className="text-muted-foreground">
+                    <span>
                       입력된 줄만 합{" "}
-                      <span className="font-medium text-foreground">{tgtPctPartialSum.toFixed(2)}%</span>
+                      <span className="font-semibold text-slate-100">{tgtPctPartialSum.toFixed(2)}%</span>
                     </span>
-                    <span className="text-muted-foreground">
-                      (<span className="text-foreground">{tgtPctFilledValidCount}</span>/
-                      <span className="text-foreground">{row.members.length}</span>줄)
+                    <span className="text-slate-400">
+                      (<span className="text-slate-200">{tgtPctFilledValidCount}</span>/
+                      <span className="text-slate-200">{row.members.length}</span>줄)
                     </span>
-                    <span className="text-muted-foreground/90">모든 줄을 채우면 그룹 목표와 비교합니다.</span>
+                    <span className="text-slate-400">모든 줄을 채우면 그룹 목표와 비교합니다.</span>
                   </>
                 : groupTargetPct <= 0 ?
-                  <span className="text-muted-foreground">
-                    종목 입력 합 <span className="font-medium text-foreground">{tgtPctPartialSum.toFixed(2)}%</span>
+                  <span className="text-slate-400">
+                    종목 입력 합 <span className="font-semibold text-slate-100">{tgtPctPartialSum.toFixed(2)}%</span>
                     {" · "}
                     그룹 목표가 0%라 스케일은 적용되지 않습니다.
                   </span>
                 : (
                   <>
-                    <span className="text-muted-foreground">
+                    <span>
                       종목 입력 합{" "}
-                      <span className="font-medium text-foreground">{tgtPctPartialSum.toFixed(2)}%</span>
+                      <span className="font-semibold text-slate-100">{tgtPctPartialSum.toFixed(2)}%</span>
                     </span>
                     {tgtPctMatchesGroup ?
-                      <span className="font-medium text-emerald-400">그룹 목표와 일치 ✓</span>
+                      <span className="font-semibold text-emerald-400">그룹 목표와 일치 ✓</span>
                     : (
-                      <span className="text-muted-foreground">
+                      <span className="text-slate-400">
                         차이{" "}
                         <span
                           className={
-                            (tgtPctDiffVsGroup ?? 0) > 0 ? "font-medium text-amber-400" : "font-medium text-sky-400"
+                            (tgtPctDiffVsGroup ?? 0) > 0 ? "font-semibold text-amber-400" : "font-semibold text-sky-400"
                           }
                         >
                           {(tgtPctDiffVsGroup ?? 0) > 0 ? "+" : ""}
@@ -667,23 +643,26 @@ function RebalancingBarSortableRow({
               </div>
             </div>
           : null}
-          <div className="mt-1 space-y-1 pl-7 sm:pl-8">
+          <div className="mt-2 space-y-2 pl-7 sm:pl-8">
             {row.members.map((m) => {
               const portPct = totalKrw > 0 ? (m.valueKrw / totalKrw) * 100 : 0;
               return (
-                <div key={`${row.groupKey}:${m.symbol}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                <div
+                  key={`${row.groupKey}:${m.symbol}`}
+                  className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-200"
+                >
                   <span
-                    className={`min-w-[8rem] max-w-[14rem] truncate font-medium text-muted-foreground ${
-                      isUndecidedSlotMemberSymbol(m.symbol) ? "italic" : ""
+                    className={`min-w-[9rem] max-w-[16rem] truncate font-medium text-slate-100 ${
+                      isUndecidedSlotMemberSymbol(m.symbol) ? "italic text-slate-300" : ""
                     }`}
                   >
                     {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
                   </span>
-                  <span className="tabular-nums text-muted-foreground/90">
+                  <span className="tabular-nums text-slate-400">
                     현재 {portPct.toFixed(2)}% · {fmtKrw(m.valueKrw)}
                   </span>
-                  <label className="ml-auto flex items-center gap-1 sm:ml-0">
-                    <span className="shrink-0 text-[9px] text-muted-foreground">
+                  <label className="ml-auto flex items-center gap-1.5 sm:ml-0">
+                    <span className="shrink-0 text-[11px] font-medium text-slate-400">
                       {memberSplitMode === "weight" ? "가중치" : "목표%"}
                     </span>
                     <span className="sr-only">
@@ -696,7 +675,7 @@ function RebalancingBarSortableRow({
                       max={memberSplitMode === "targetPct" ? 100 : undefined}
                       step={0.1}
                       placeholder={memberSplitMode === "weight" ? "비움" : "예: 5"}
-                      className="w-16 rounded border bg-background px-1 py-0.5 text-right tabular-nums"
+                      className="w-[4.25rem] rounded-md border border-slate-600/80 bg-background px-1.5 py-1 text-right text-xs font-medium tabular-nums text-slate-100"
                       value={memberSplitsForGroup[m.symbol] ?? ""}
                       onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
                       aria-label={
@@ -1301,7 +1280,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
       {/* ── 바 차트 ─────────────────────────────────────────────────────────── */}
       <div>
         {/* 범례 */}
-        <div className="mb-2 flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+        <div className="mb-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
           <span className="flex items-center gap-1">
             <span className="inline-block h-2 w-3 rounded-sm bg-rose-500/80" />
             부족
@@ -1315,18 +1294,6 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
             목표
           </span>
         </div>
-        <p className="mb-3 max-w-2xl text-[10px] leading-snug text-muted-foreground">
-          왼쪽 %는 목표 비중입니다. 계산기 목표는 대시보드와 독립적으로 저장되며, 변경 후 약 0.4초 뒤 자동 저장됩니다.
-          대시보드 목표를 가져오려면「대시보드 불러오기」를 누르세요. 미설정 그룹은 0%로 표시됩니다.
-          보유·평가가 없는 줄(S&P500 등)은 현재 비중이 0%이고 바가 비어 있는 것이 정상입니다(데이터 누락이 아닙니다).
-          목표 합은 보통 100%입니다. 우측 숫자가 빨간 ▲면 합이 100%를 넘어 한 번에 만족할 수 없는 조합입니다 — 일부 목표를 줄이거나 초과 분야에서 줄여 주세요.
-          목표 줄은 보유 그룹·관심종목에 해당하는 티커만 나타나며, 예전에 저장만 되어 있던 다른 이름(AI·원자력 등)은 더 이상 자동으로 붙지 않습니다.
-          같은 그룹에 종목이 여러 개면, 그룹 옆의 %는 전체 포트 목표 비중입니다. 펼친 블록에서 「가중치」는 매매 차액을 나눌 상대 비율이고,
-          「종목 목표%」를 쓰면 각 줄에 포트폴리오 목표 %(예: 5·5·4·6)를 넣을 수 있으며 입력 합이 그룹 목표와 다르면 비율 유지한 채 자동 스케일합니다(매수+매도 모드만).
-          분배 입력이 비어 있거나 덜 채워지면 평가금 비율로 나눕니다.
-          관심종목에 넣어 둔 티커·그룹명은 대시보드 바와 같이 해당 그룹 아래 종목 줄로 붙습니다.
-          현금 그룹을 제외한 각 그룹 맨 아래 「미정 슬롯」은 매수할 종목을 정하지 않았을 때 비중만 적어 두는 줄입니다(주수 없음·금액만).
-        </p>
 
         {/* 스케일 헤더 — 바 행과 동일한 레이아웃으로 정렬 */}
         <div className="mb-0.5 flex items-center">
@@ -1335,7 +1302,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
             <div className="w-36 shrink-0 sm:w-44" />
           </div>
           <div className="mx-1.5 flex-1">
-            <div className="flex justify-between text-[9px] text-muted-foreground/50">
+            <div className="flex justify-between text-[10px] tabular-nums text-slate-400">
               {[0, 0.25, 0.5, 0.75, 1].map((f) => (
                 <span key={f}>{(maxScale * f).toFixed(0)}%</span>
               ))}
