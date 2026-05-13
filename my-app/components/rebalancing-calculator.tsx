@@ -801,6 +801,8 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
         <p className="mb-3 max-w-2xl text-[10px] leading-snug text-muted-foreground">
           왼쪽 %는 목표 비중입니다. 계산기 목표는 대시보드와 독립적으로 저장되며, 변경 후 약 0.4초 뒤 자동 저장됩니다.
           대시보드 목표를 가져오려면「대시보드 불러오기」를 누르세요. 미설정 그룹은 0%로 표시됩니다.
+          보유·평가가 없는 줄(S&P500 등)은 현재 비중이 0%이고 바가 비어 있는 것이 정상입니다(데이터 누락이 아닙니다).
+          목표 합은 보통 100%입니다. 우측 숫자가 빨간 ▲면 합이 100%를 넘어 한 번에 만족할 수 없는 조합입니다 — 일부 목표를 줄이거나 초과 분야에서 줄여 주세요.
         </p>
 
         {/* 스케일 헤더 — 바 행과 동일한 레이아웃으로 정렬 */}
