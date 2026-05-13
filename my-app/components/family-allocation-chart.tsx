@@ -917,6 +917,7 @@ function TargetStockWeightNeu({
   const [saveFailedBrief, setSaveFailedBrief] = useState(false);
   const [splitCount, setSplitCount] = useState<string>("1");
   const [splitAmountMode, setSplitAmountMode] = useState<SplitAmountMode>("remainder");
+  const [milestoneStepInput, setMilestoneStepInput] = useState("1");
   const [barTickerOrder, setBarTickerOrder] = useState<string[] | null>(null);
   /** 계산기 종목별 분배 LS 변경 시 종목별 목표 표시 즉시 재계산 */
   const [calcSplitBump, setCalcSplitBump] = useState(0);
@@ -1122,6 +1123,22 @@ function TargetStockWeightNeu({
   const targetSumOk = Math.abs(targetSum - 100) <= TARGET_SUM_TOLERANCE;
   const showTargetSumError = hasAnyTarget && !targetSumOk;
 
+  const splitCountN = useMemo(() => Math.max(1, Math.floor(Number(splitCount) || 1)), [splitCount]);
+
+  const milestoneStepK = useMemo(() => {
+    const raw = Math.floor(Number(String(milestoneStepInput).trim()));
+    if (!Number.isFinite(raw) || raw < 1) return 1;
+    return Math.min(splitCountN, raw);
+  }, [splitCountN, milestoneStepInput]);
+
+  useEffect(() => {
+    setMilestoneStepInput((prev) => {
+      const raw = Math.floor(Number(String(prev).trim())) || 1;
+      if (raw <= splitCountN) return prev;
+      return String(splitCountN);
+    });
+  }, [splitCountN]);
+
   /** 리밸런싱 필요 금액 (목표비중이 100%에 맞을 때만 계산) */
   const rebalanceItems = useMemo(() => {
     if (!targetSumOk || !hasAnyTarget || !(total > 0)) return [];
@@ -1281,10 +1298,10 @@ function TargetStockWeightNeu({
                     onChange={(e) => setSplitAmountMode(e.target.value as SplitAmountMode)}
                     className="max-w-[9.5rem] rounded border border-white/10 bg-zinc-900/80 px-1 py-0.5 text-[8px] text-zinc-200 outline-none ring-sky-500/40 focus:ring-1"
                     aria-label="분할 금액 계산"
-                    title="매도·차액 부호가 음수면 두 방식 모두 ÷ n으로 같습니다. 매수이고 평가가 있고 n≥2일 때만 1차 금액이 달라집니다."
+                    title="목표 단계별은 매수만 목표평가의 k/n까지 이번 회에 맞춤. 매도는 ÷n. 분할 1회면 동일."
                   >
-                    <option value="remainder">남은액 ÷ n</option>
-                    <option value="milestone">목표÷n까지(1차)</option>
+                    <option value="remainder">남은 금액 ÷ n</option>
+                    <option value="milestone">목표÷n 단계별</option>
                   </select>
                 </label>
                 <label className="flex items-center gap-1 text-[9px] text-zinc-500">
@@ -1302,44 +1319,57 @@ function TargetStockWeightNeu({
                   />
                   회
                 </label>
+                {splitAmountMode === "milestone" && splitCountN > 1 ?
+                  <label className="flex items-center gap-1 text-[9px] text-zinc-500">
+                    목표까지
+                    <select
+                      value={String(milestoneStepK)}
+                      onChange={(e) => setMilestoneStepInput(e.target.value)}
+                      className="rounded border border-white/10 bg-zinc-900/80 px-1 py-0.5 text-[8px] text-zinc-200 outline-none ring-sky-500/40 focus:ring-1"
+                      aria-label="목표 진행 단계 k/n"
+                    >
+                      {Array.from({ length: splitCountN }, (_, i) => i + 1).map((kk) => (
+                        <option key={kk} value={String(kk)}>
+                          {kk}/{splitCountN}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                : null}
               </div>
             </div>
-            {(() => {
-              const n = Math.max(1, Math.floor(Number(splitCount) || 1));
-              return (
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                  {rebalanceItems.map((item) => {
-                    const perSigned = perSplitKrwCore(
-                      splitAmountMode,
-                      n,
-                      { diffKrw: item.diffKrw, targetPct: item.targetPct, valueKrw: item.currentKrw },
-                      total,
-                    );
-                    const perAbs = Math.abs(perSigned);
-                    const pctAfter = approxPortfolioPctAfterDelta(item.currentKrw, perSigned, total);
-                    return (
-                      <div key={item.ticker} className="flex items-center justify-between gap-1 text-[10px]">
-                        <span className="truncate font-semibold text-zinc-300">{item.ticker}</span>
-                        <span className={`tabular-nums font-bold shrink-0 text-right ${item.diffKrw > 0 ? "text-red-400" : "text-blue-400"}`}>
-                          <span className="whitespace-nowrap">
-                            {item.diffKrw > 0 ? "▲" : "▼"} {formatKrwCompact(perAbs)}
-                            {n > 1 && splitAmountMode === "remainder" && (
-                              <span className="ml-0.5 font-normal text-zinc-600">×{n}</span>
-                            )}
-                            {n > 1 && splitAmountMode === "milestone" && (
-                              <span className="ml-0.5 font-normal text-zinc-600">·1차</span>
-                            )}
-                            {pctAfter != null ?
-                              <span className="ml-0.5 font-normal text-zinc-500">{` (→ ${pctAfter.toFixed(2)}%)`}</span>
-                            : null}
-                          </span>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              {rebalanceItems.map((item) => {
+                const perSigned = perSplitKrwCore(
+                  splitAmountMode,
+                  splitCountN,
+                  { diffKrw: item.diffKrw, targetPct: item.targetPct, valueKrw: item.currentKrw },
+                  total,
+                  { milestoneStep: milestoneStepK },
+                );
+                const perAbs = Math.abs(perSigned);
+                const pctAfter = approxPortfolioPctAfterDelta(item.currentKrw, perSigned, total);
+                return (
+                  <div key={item.ticker} className="flex items-center justify-between gap-1 text-[10px]">
+                    <span className="truncate font-semibold text-zinc-300">{item.ticker}</span>
+                    <span className={`tabular-nums font-bold shrink-0 text-right ${item.diffKrw > 0 ? "text-red-400" : "text-blue-400"}`}>
+                      <span className="whitespace-nowrap">
+                        {item.diffKrw > 0 ? "▲" : "▼"} {formatKrwCompact(perAbs)}
+                        {splitCountN > 1 && splitAmountMode === "remainder" && (
+                          <span className="ml-0.5 font-normal text-zinc-600">×{splitCountN}</span>
+                        )}
+                        {splitCountN > 1 && splitAmountMode === "milestone" && (
+                          <span className="ml-0.5 font-normal text-zinc-600">{`·${milestoneStepK}/${splitCountN}`}</span>
+                        )}
+                        {pctAfter != null ?
+                          <span className="ml-0.5 font-normal text-zinc-500">{` (→ ${pctAfter.toFixed(2)}%)`}</span>
+                        : null}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </details>
       )}

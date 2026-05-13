@@ -943,6 +943,7 @@ function RebalancingOwner({
   const [newMoneyInput, setNewMoneyInput] = useState("");
   const [splitCountInput, setSplitCountInput] = useState("1");
   const [splitAmountMode, setSplitAmountMode] = useState<SplitAmountMode>("remainder");
+  const [milestoneStepInput, setMilestoneStepInput] = useState("1");
   const [hideSmall, setHideSmall] = useState(false);
   const [saveToast, setSaveToast] = useState(false);
   /** 상세 표 하단: 개별 종목 포트폴리오 목표 % → 필요 주수 참고 계산 */
@@ -955,6 +956,20 @@ function RebalancingOwner({
     if (!Number.isFinite(n) || n < 1) return 1;
     return Math.min(20, n);
   }, [splitCountInput]);
+
+  const milestoneStepK = useMemo(() => {
+    const raw = Math.floor(Number(String(milestoneStepInput).trim()));
+    if (!Number.isFinite(raw) || raw < 1) return 1;
+    return Math.min(splitCount, raw);
+  }, [splitCount, milestoneStepInput]);
+
+  useEffect(() => {
+    setMilestoneStepInput((prev) => {
+      const raw = Math.floor(Number(String(prev).trim())) || 1;
+      if (raw <= splitCount) return prev;
+      return String(splitCount);
+    });
+  }, [splitCount]);
 
   // ── 목표 합계 ────────────────────────────────────────────────────────────
   const targetSum = useMemo(
@@ -1450,10 +1465,10 @@ function RebalancingOwner({
               onChange={(e) => setSplitAmountMode(e.target.value as SplitAmountMode)}
               className="max-w-[10rem] rounded border border-border bg-background px-1.5 py-1 text-[11px] text-foreground outline-none ring-primary/35 focus:ring-1"
               aria-label="회당 분할 금액 계산 방식"
-              title="매도(차액 음수)·분할 1회면 두 방식 동일. 매수이고 보유 평가가 있고 분할 n≥2일 때만 1차 금액이 달라집니다."
+              title="남은액÷n·매도는 균등 분할. 목표 단계별은 매수만 목표평가의 k/n까지 이번 회에 맞춤(k 선택). 분할 1회면 동일."
             >
-              <option value="remainder">남은액 ÷ n</option>
-              <option value="milestone">목표÷n까지(1차)</option>
+              <option value="remainder">남은 금액 ÷ n</option>
+              <option value="milestone">목표÷n 단계별</option>
             </select>
           </label>
           <div className="flex items-center gap-1.5 text-xs">
@@ -1470,7 +1485,34 @@ function RebalancingOwner({
             />
             <span className="text-muted-foreground shrink-0">회</span>
           </div>
+          {splitAmountMode === "milestone" && splitCount > 1 ?
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              목표까지
+              <select
+                value={String(milestoneStepK)}
+                onChange={(e) => setMilestoneStepInput(e.target.value)}
+                className="rounded border border-border bg-background px-1.5 py-1 text-[11px] text-foreground outline-none ring-primary/35 focus:ring-1"
+                aria-label="목표 진행 단계 k/n"
+              >
+                {Array.from({ length: splitCount }, (_, i) => i + 1).map((kk) => (
+                  <option key={kk} value={String(kk)}>
+                    {kk}/{splitCount}
+                  </option>
+                ))}
+              </select>
+            </label>
+          : null}
         </div>
+        <p className="-mt-1 text-[10px] leading-snug text-muted-foreground">
+          같은 값이 계속 나올 때: <strong className="text-foreground/80">분할이 2회 미만이면 두 기준이 항상 같습니다.</strong>{" "}
+          그 밖에는 <strong className="text-foreground/80">매도 줄(▼)</strong>은 스펙상 둘 다 “남은액÷n”.
+          그리고 <strong className="text-foreground/80">평가 0원(미보유·워치 같은 슬라이스)</strong>에서는 매수(▲)라도 두 기준이 수식상 동일하게 나옵니다.
+          회당 차이가 보이려면 <strong className="text-foreground/80">매수 + 분할 n≥2 + 해당 줄 평가 있음</strong>.
+          차액이 1만원 미만이면 회당은 “—”로 비교가 안 됩니다.
+          <strong className="text-foreground/80"> 목표÷n 단계별</strong>은 이번 회에 목표평가의{" "}
+          <span className="tabular-nums">k/n</span>까지 맞추는 금액으로, 아래에서{" "}
+          <span className="tabular-nums">k</span>를 고릅니다.
+        </p>
 
         <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm">
@@ -1511,6 +1553,7 @@ function RebalancingOwner({
                         valueKrw: r.valueKrw,
                       },
                       effectiveTotalKrw,
+                      { milestoneStep: milestoneStepK },
                     )
                   : 0;
 
@@ -1572,7 +1615,7 @@ function RebalancingOwner({
                             <span className="font-normal text-muted-foreground">×{splitCount}</span>
                           )}
                           {splitAmountMode === "milestone" && (
-                            <span className="font-normal text-muted-foreground">·1차</span>
+                            <span className="font-normal text-muted-foreground">{`·${milestoneStepK}/${splitCount}`}</span>
                           )}
                           {rowPctAfterSplit != null ?
                             <span className="font-normal text-muted-foreground">{` (→ ${rowPctAfterSplit.toFixed(2)}%)`}</span>
