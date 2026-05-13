@@ -706,21 +706,6 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     [rows, mode],
   );
 
-  // ── 매매 실행 순서 (실행 가능한 종목 위주 — 현금 행은 매매 단계가 아니므로 제외) ──
-  const actionItems = useMemo(() => {
-    const significant = rows.filter((r) => {
-      if (Math.abs(r.diffKrw) < 10000) return false;
-      const isCash = r.groupKey === "현금" || r.groupKey.toLowerCase().includes("cash");
-      return !isCash;
-    });
-    if (mode === "buy-only") {
-      return significant.filter((r) => r.diffKrw > 0).sort((a, b) => b.diffKrw - a.diffKrw);
-    }
-    const sells = significant.filter((r) => r.diffKrw < 0).sort((a, b) => a.diffKrw - b.diffKrw);
-    const buys = significant.filter((r) => r.diffKrw > 0).sort((a, b) => b.diffKrw - a.diffKrw);
-    return [...sells, ...buys];
-  }, [rows, mode]);
-
   // ── 표시 행 (임계값 필터 적용) ───────────────────────────────────────────
   const visibleRows = useMemo(
     () =>
@@ -1065,99 +1050,6 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
           </SortableContext>
         </DndContext>
       </div>
-
-      {/* ── 매매 실행 순서 ──────────────────────────────────────────────────── */}
-      {actionItems.length > 0 && (
-        <div className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-3 space-y-2">
-          <p className="text-[11px] font-semibold text-muted-foreground">
-            {mode === "buy-only" ? "매수 실행 순서" : "매매 실행 순서"}
-            <span className="ml-1 font-normal text-[10px]">
-              {mode === "buy-only" ? "(투자금 배분 · 크기순)" : "(매도 먼저 · 이탈 크기순)"}
-            </span>
-            <span className="ml-1 font-normal text-[10px] text-muted-foreground/80">
-              · {splitCount}분할
-            </span>
-          </p>
-          <div className="space-y-1.5 text-xs">
-            {actionItems.map((r) => {
-              const isBuy = r.diffKrw > 0;
-              const actionColor = isBuy ? "text-rose-400" : "text-blue-400";
-              const actionBg = isBuy
-                ? "border-rose-500/25 bg-rose-500/5"
-                : "border-blue-500/25 bg-blue-500/5";
-              const isCash =
-                r.groupKey === "현금" || r.groupKey.toLowerCase().includes("cash");
-
-              // 주수 표시 계산
-              let sharesDisplay = "";
-              let perSplitSharesDisplay = "";
-              if (!isCash) {
-                if (r.members.length <= 1 && r.repPrice > 0) {
-                  const sh = floorShares(r.diffKrw, r.repPrice);
-                  sharesDisplay = `${formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)} ${isBuy ? "+" : "-"}${sh}주`;
-                  if (splitCount > 1) {
-                    const perSh = floorShares(r.diffKrw / splitCount, r.repPrice);
-                    perSplitSharesDisplay = `회당 ${formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)} ${isBuy ? "+" : "-"}${perSh}주`;
-                  }
-                } else if (r.memberAdjustments.length > 0) {
-                  const parts = r.memberAdjustments
-                    .filter((m) => Math.abs(m.diffKrw) >= 10000)
-                    .map(
-                      (m) =>
-                        `${formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)} ${formatMemberSharesOrAmount(m.diffKrw, m.priceKrw)}`,
-                    );
-                  sharesDisplay = parts.join(" / ");
-                  if (splitCount > 1) {
-                    const perParts = r.memberAdjustments
-                      .filter((m) => Math.abs(m.diffKrw) >= 10000)
-                      .map(
-                        (m) =>
-                          `${formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)} ${formatMemberSharesOrAmount(m.diffKrw / splitCount, m.priceKrw)}`,
-                      );
-                    perSplitSharesDisplay = `회당 ${perParts.join(" / ")}`;
-                  }
-                }
-              }
-
-              return (
-                <div
-                  key={r.groupKey}
-                  className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border px-2.5 py-1.5 ${actionBg}`}
-                >
-                  <span className={`shrink-0 font-bold ${actionColor}`}>
-                    [{isBuy ? "매수" : "매도"}]
-                  </span>
-                  <span className="shrink-0 font-medium">{r.displayName || r.groupKey}</span>
-                  <span className={`shrink-0 tabular-nums ${actionColor}`}>
-                    {fmtKrw(r.diffKrw)}
-                  </span>
-                  {splitCount > 1 && (
-                    <span className="text-muted-foreground tabular-nums">
-                      (회당 {fmtKrw(r.diffKrw / splitCount)} ×{splitCount})
-                    </span>
-                  )}
-                  {sharesDisplay && (
-                    <span className="text-muted-foreground tabular-nums">{sharesDisplay}</span>
-                  )}
-                  {perSplitSharesDisplay && (
-                    <span className="text-muted-foreground/80 tabular-nums">[{perSplitSharesDisplay}]</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          {mode === "buy-only" && newMoneyKrw > 0 && (
-            <p className="text-[10px] text-muted-foreground pt-1 border-t border-slate-700/40">
-              배분 합계{" "}
-              <span className="tabular-nums font-medium text-foreground">{fmtKrw(allocatedKrw)}</span>
-              {" · "}잔여{" "}
-              <span className="tabular-nums font-medium text-foreground">
-                {fmtKrw(Math.max(0, newMoneyKrw - allocatedKrw))}
-              </span>
-            </p>
-          )}
-        </div>
-      )}
 
       {mode === "buy-only" && newMoneyKrw === 0 && (
         <p className="rounded-lg border border-slate-700/40 bg-slate-900/20 px-3 py-2 text-[11px] text-muted-foreground">
