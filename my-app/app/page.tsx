@@ -25,7 +25,9 @@ import { inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
 import { fmtInt, fmtUsdNumber, MONEY_INT_LOCALE, parseKoreanIntDigits } from "@/lib/format-money";
 import {
   HAS_LOCAL_CHANGES_KEY,
+  buildRebalanceCalculatorByOwnerFromLocal,
   loadAllTargetStockWeights,
+  mergeAndPersistRebalanceCalculatorFromServer,
   mergeAndPersistTargetStockWeightsFromServer,
   PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT,
 } from "@/lib/portfolio-target-weights";
@@ -2127,6 +2129,7 @@ export default function Home() {
         owner_names?: unknown;
         target_stock_weight_by_owner?: unknown;
         owner_scratchpad_by_owner?: unknown;
+        rebalance_calculator_by_owner?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -2172,6 +2175,7 @@ export default function Home() {
           setSellLogDirty(false);
           mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
           mergeAndPersistOwnerScratchpadsFromServer(j.owner_scratchpad_by_owner);
+          mergeAndPersistRebalanceCalculatorFromServer(j.rebalance_calculator_by_owner);
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
           // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
@@ -2188,6 +2192,7 @@ export default function Home() {
               ownerNames: owners,
               targetStockWeightByOwner: loadAllTargetStockWeights(),
               ownerScratchpadByOwner: loadAllOwnerScratchpads(),
+              rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
             }),
           });
           const jPush = (await rPush.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -2233,6 +2238,7 @@ export default function Home() {
             ownerNames: owners,
             targetStockWeightByOwner: loadAllTargetStockWeights(),
             ownerScratchpadByOwner: loadAllOwnerScratchpads(),
+            rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
           }),
         });
         const j2 = (await r2.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -2479,6 +2485,7 @@ export default function Home() {
           ownerNames,
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
+          rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
         }),
       }).then(async (r) => {
         if (r.ok) {
@@ -2526,6 +2533,7 @@ export default function Home() {
         owner_names?: unknown;
         target_stock_weight_by_owner?: unknown;
         owner_scratchpad_by_owner?: unknown;
+        rebalance_calculator_by_owner?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -2559,6 +2567,7 @@ export default function Home() {
         setSellLogDirty(false);
         mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
         mergeAndPersistOwnerScratchpadsFromServer(j.owner_scratchpad_by_owner);
+        mergeAndPersistRebalanceCalculatorFromServer(j.rebalance_calculator_by_owner);
       } else {
         setSyncMessage("서버에 아직 데이터가 없습니다. 먼저 이 기기에서 올리기를 해 보세요.");
       }
@@ -2590,6 +2599,7 @@ export default function Home() {
           ownerNames,
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
+          rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
         }),
       });
       const j = (await r.json()) as { error?: string };
@@ -3819,6 +3829,7 @@ export default function Home() {
               dashboardTargetsDraftByOwner={dashboardTargetsDraftByOwner}
               watchlistRows={watchlistRows}
               watchlistOwnerAllToken={WATCHLIST_OWNER_ALL}
+              cloudSyncKey={cloudSyncKey}
             />
           </section>
 
@@ -6003,6 +6014,7 @@ export default function Home() {
               dashboardTargetsDraftByOwner={dashboardTargetsDraftByOwner}
               watchlistRows={watchlistRows}
               watchlistOwnerAllToken={WATCHLIST_OWNER_ALL}
+              cloudSyncKey={cloudSyncKey}
             />
           </section>
           </div>

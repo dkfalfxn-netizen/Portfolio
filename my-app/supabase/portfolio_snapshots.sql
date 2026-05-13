@@ -24,6 +24,9 @@ alter table public.portfolio_snapshots
 alter table public.portfolio_snapshots
   add column if not exists owner_scratchpad_by_owner jsonb not null default '{}'::jsonb;
 
+alter table public.portfolio_snapshots
+  add column if not exists rebalance_calculator_by_owner jsonb not null default '{}'::jsonb;
+
 alter table public.portfolio_snapshots enable row level security;
 
 -- 서비스 롤(API Route)은 RLS를 우회합니다. anon 직접 접근은 막습니다.

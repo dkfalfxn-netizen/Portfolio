@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  sanitizeRebalanceCalculatorForOwners,
+  type RebalanceCalculatorByOwnerWire,
+} from "@/lib/portfolio-target-weights";
 
 const MIN_KEY_LEN = 8;
 
@@ -76,6 +80,7 @@ type PushBody = {
   sellLogByOwner?: unknown;
   targetStockWeightByOwner?: unknown;
   ownerScratchpadByOwner?: unknown;
+  rebalanceCalculatorByOwner?: unknown;
 };
 
 type SellLogCurrency = "USD" | "EUR" | "KRW";
@@ -315,7 +320,7 @@ export async function POST(req: NextRequest) {
     const withSellLog = await admin
       .from("portfolio_snapshots")
       .select(
-        "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, updated_at",
+        "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, rebalance_calculator_by_owner, updated_at",
       )
       .eq("sync_key", key)
       .maybeSingle();
@@ -348,6 +353,7 @@ export async function POST(req: NextRequest) {
           sell_log_by_owner?: unknown;
           target_stock_weight_by_owner?: unknown;
           owner_scratchpad_by_owner?: unknown;
+          rebalance_calculator_by_owner?: unknown;
           updated_at?: string | null;
         }
       | null;
@@ -366,12 +372,33 @@ export async function POST(req: NextRequest) {
         owner_names: [],
         target_stock_weight_by_owner: {},
         owner_scratchpad_by_owner: {},
+        rebalance_calculator_by_owner: {},
         updated_at: null,
       });
     }
     const ownerList = inferOwnerNamesFromSnapshot(data);
     const allowed = new Set(ownerList);
     const sortParsed = parseHoldingsSortFromJson(data.holdings_sort_by_owner ?? {});
+    const sanitizedTargetsSparse = sanitizeTargetStockWeightsForOwners(
+      data.target_stock_weight_by_owner,
+      allowed,
+    );
+    const sanitizedCalcSparse = sanitizeRebalanceCalculatorForOwners(
+      (data as { rebalance_calculator_by_owner?: unknown }).rebalance_calculator_by_owner ?? {},
+      allowed,
+    );
+    const target_stock_weight_by_owner: TargetMap = {};
+    const rebalance_calculator_by_owner: RebalanceCalculatorByOwnerWire = {};
+    for (const name of ownerList) {
+      if (typeof name !== "string" || !name.trim()) continue;
+      const n = name.trim();
+      target_stock_weight_by_owner[n] = sanitizedTargetsSparse[n] ?? {};
+      rebalance_calculator_by_owner[n] = sanitizedCalcSparse[n] ?? {
+        groupTargets: {},
+        memberSplits: {},
+        memberSplitModes: {},
+      };
+    }
     return NextResponse.json({
       found: true,
       positions: sanitizePositionsForOwners(data.positions, allowed),
@@ -379,14 +406,12 @@ export async function POST(req: NextRequest) {
       holdings_sort_by_owner: sanitizeHoldingsSortForOwners(sortParsed, allowed),
       sell_log_by_owner: sanitizeSellLogForOwners(data.sell_log_by_owner, allowed),
       owner_names: ownerList,
-      target_stock_weight_by_owner: sanitizeTargetStockWeightsForOwners(
-        data.target_stock_weight_by_owner,
-        allowed,
-      ),
+      target_stock_weight_by_owner,
       owner_scratchpad_by_owner: sanitizeOwnerScratchpadsForOwners(
         data.owner_scratchpad_by_owner,
         allowed,
       ),
+      rebalance_calculator_by_owner,
       updated_at: data.updated_at,
     });
   }
@@ -507,6 +532,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let rebalanceCalculatorOut: RebalanceCalculatorByOwnerWire;
+    {
+      const incomingRaw =
+        "rebalanceCalculatorByOwner" in b && b.rebalanceCalculatorByOwner != null
+          ? b.rebalanceCalculatorByOwner
+          : null;
+      const incomingSanitized =
+        incomingRaw != null
+          ? sanitizeRebalanceCalculatorForOwners(incomingRaw, allowed)
+          : null;
+      const incomingIsEmpty =
+        incomingSanitized == null || Object.keys(incomingSanitized).length === 0;
+      if (!incomingIsEmpty) {
+        rebalanceCalculatorOut = incomingSanitized!;
+      } else {
+        const { data: existing } = await admin
+          .from("portfolio_snapshots")
+          .select("rebalance_calculator_by_owner")
+          .eq("sync_key", key)
+          .maybeSingle();
+        rebalanceCalculatorOut = sanitizeRebalanceCalculatorForOwners(
+          (existing as { rebalance_calculator_by_owner?: unknown } | null)?.rebalance_calculator_by_owner ?? {},
+          allowed,
+        );
+      }
+    }
+
     const updatedAt = new Date().toISOString();
     const payload = {
       sync_key: key,
@@ -517,6 +569,7 @@ export async function POST(req: NextRequest) {
       sell_log_by_owner: sellLogOut,
       target_stock_weight_by_owner: targetWeightsOut,
       owner_scratchpad_by_owner: scratchPadsOut,
+      rebalance_calculator_by_owner: rebalanceCalculatorOut,
       updated_at: updatedAt,
     };
     const withOwnerNames = await admin
@@ -534,6 +587,7 @@ export async function POST(req: NextRequest) {
                 holdings_sort_by_owner: holdingsSortOut,
                 target_stock_weight_by_owner: targetWeightsOut,
                 owner_scratchpad_by_owner: scratchPadsOut,
+                rebalance_calculator_by_owner: rebalanceCalculatorOut,
                 updated_at: updatedAt,
               },
               { onConflict: "sync_key" },
@@ -566,9 +620,20 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    const calcBody = body as { rebalanceCalculatorByOwner?: unknown };
+    if (
+      "rebalanceCalculatorByOwner" in calcBody &&
+      calcBody.rebalanceCalculatorByOwner != null &&
+      (typeof calcBody.rebalanceCalculatorByOwner !== "object" || Array.isArray(calcBody.rebalanceCalculatorByOwner))
+    ) {
+      return NextResponse.json(
+        { error: "rebalanceCalculatorByOwner 형식이 올바르지 않습니다." },
+        { status: 400 },
+      );
+    }
     const { data: row, error: loadErr } = await admin
       .from("portfolio_snapshots")
-      .select("owner_names, target_stock_weight_by_owner, owner_scratchpad_by_owner")
+      .select("owner_names, target_stock_weight_by_owner, owner_scratchpad_by_owner, rebalance_calculator_by_owner")
       .eq("sync_key", key)
       .maybeSingle();
     if (loadErr) {
@@ -610,12 +675,28 @@ export async function POST(req: NextRequest) {
       );
       mergedScratch = { ...prevScratch, ...nextPad };
     }
+    const prevCalc = sanitizeRebalanceCalculatorForOwners(
+      (row as { rebalance_calculator_by_owner?: unknown }).rebalance_calculator_by_owner ?? {},
+      new Set(allowed),
+    );
+    let mergedCalc: RebalanceCalculatorByOwnerWire;
+    if (!Object.prototype.hasOwnProperty.call(calcBody, "rebalanceCalculatorByOwner")) {
+      mergedCalc = prevCalc;
+    } else {
+      const incoming = calcBody.rebalanceCalculatorByOwner;
+      const nextCalc = sanitizeRebalanceCalculatorForOwners(
+        incoming === undefined || incoming === null ? {} : incoming,
+        allowed,
+      );
+      mergedCalc = { ...prevCalc, ...nextCalc };
+    }
     const updatedAt = new Date().toISOString();
     const { error: upErr } = await admin
       .from("portfolio_snapshots")
       .update({
         target_stock_weight_by_owner: merged,
         owner_scratchpad_by_owner: mergedScratch,
+        rebalance_calculator_by_owner: mergedCalc,
         updated_at: updatedAt,
       })
       .eq("sync_key", key);

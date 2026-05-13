@@ -24,6 +24,7 @@ import {
   loadAllTargetStockWeights,
   persistCalculatorMemberSplitModesForOwner,
   persistCalculatorMemberSplitsForOwner,
+  REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT,
 } from "@/lib/portfolio-target-weights";
 import {
   loadVisualOrderKeysForOwner,
@@ -36,6 +37,7 @@ import {
   mergeWatchlistSymbolsIntoCalculatorGroups,
   type WatchlistRowForRebalance,
 } from "@/lib/rebalance-watchlist-groups";
+import { pushTargetWeightsAndScratchpadsToServer } from "@/lib/portfolio-owner-scratchpad";
 
 /** 미보유 스텁 행 복원 시 허용 티커만 사용 — 보유 슬라이스·워치 슬라이스 외 LS 잔재(AI 등)로 목표 합이 100% 넘는 현상 차단 */
 function mergeSavedTargetGroupsWithoutHoldings(
@@ -149,6 +151,8 @@ type Props = {
   dashboardTargets?: Record<string, number> | null;
   /** 대시보드 바에서 디바운스된 편집 중 목표(localStorage 플러시보다 신선함) */
   draftTargets?: Record<string, number> | null;
+  /** 8자 이상이면 목표·메모·계산기 LS 변경을 서버에도 디바운스 반영 */
+  cloudSyncKey?: string;
 };
 
 type Mode = "buy-sell" | "buy-only";
@@ -715,7 +719,15 @@ function formatMemberSharesOrAmount(diffKrw: number, priceKrw: number): string {
   return amtPart;
 }
 
-function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dashboardTargets, draftTargets }: Props) {
+function RebalancingOwner({
+  ownerName,
+  groups,
+  totalKrw,
+  onDashboardLoaded,
+  dashboardTargets,
+  draftTargets,
+  cloudSyncKey,
+}: Props) {
   const [resolvedNameBySymbol, setResolvedNameBySymbol] = useState<Record<string, string>>({});
 
   // ── 목표 비중 state: 계산기 전용 키에서 초깃값 읽기 (대시보드와 독립) ──
@@ -1048,6 +1060,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
   /** handleLoad가 localStorage를 덮어쓰기 전에 취소할 수 있도록 ref로 타이머 ID 관리 */
   const autosaveTimerRef = useRef<number | null>(null);
   const memberSplitAutosaveTimerRef = useRef<number | null>(null);
+  const serverCalculatorSyncTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1083,6 +1096,25 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
       }
     };
   }, [memberSplits, memberSplitModes, ownerName]);
+
+  /** 동기화 키가 있으면 LS 자동 저장 직후 서버에도 목표·메모·계산기 번들 반영(pushTargetWeights) */
+  useEffect(() => {
+    const k = cloudSyncKey?.trim() ?? "";
+    if (typeof window === "undefined" || k.length < 8) return;
+    if (serverCalculatorSyncTimerRef.current != null) {
+      window.clearTimeout(serverCalculatorSyncTimerRef.current);
+    }
+    serverCalculatorSyncTimerRef.current = window.setTimeout(() => {
+      serverCalculatorSyncTimerRef.current = null;
+      void pushTargetWeightsAndScratchpadsToServer(k);
+    }, 900) as unknown as number;
+    return () => {
+      if (serverCalculatorSyncTimerRef.current != null) {
+        window.clearTimeout(serverCalculatorSyncTimerRef.current);
+        serverCalculatorSyncTimerRef.current = null;
+      }
+    };
+  }, [targets, memberSplits, memberSplitModes, ownerName, cloudSyncKey]);
 
   /** 대시보드 목표 비중 불러오기 — localStorage 목표와 페이지 요약본을 합산해 현재 행(groups)에 맞춘다 */
   const handleLoad = useCallback(() => {
@@ -1534,6 +1566,7 @@ export function RebalancingCalculator({
   dashboardTargetsDraftByOwner = {},
   watchlistRows = [],
   watchlistOwnerAllToken = "__ALL__",
+  cloudSyncKey = "",
 }: {
   allocationByOwner: {
     ownerName: string;
@@ -1559,6 +1592,8 @@ export function RebalancingCalculator({
   /** 대시보드 도넛과 동일하게 그룹 후보에 워치 종목을 붙입니다 */
   watchlistRows?: WatchlistRowForRebalance[];
   watchlistOwnerAllToken?: string;
+  /** 설정 시 계산기 편집을 서버 스냅샷(pushTargetWeights)에 함께 반영합니다. */
+  cloudSyncKey?: string;
 }) {
   const [selectedOwner, setSelectedOwner] = useState(allocationByOwner[0]?.ownerName ?? "");
   const mergeTargetsReady = useClientReady();
@@ -1567,6 +1602,13 @@ export function RebalancingCalculator({
 
   const handleDashboardLoaded = useCallback(() => {
     setCalcStorageBump((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const bump = () => setCalcStorageBump((n) => n + 1);
+    window.addEventListener(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT, bump);
+    return () => window.removeEventListener(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT, bump);
   }, []);
 
   const displayOwner = useMemo(() => {
@@ -1670,13 +1712,14 @@ export function RebalancingCalculator({
 
       {current && current.groups.length > 0 ? (
         <RebalancingOwner
-          key={current.ownerName}
+          key={`${current.ownerName}-${calcStorageBump}`}
           ownerName={current.ownerName}
           groups={current.groups}
           totalKrw={current.totalKrw}
           onDashboardLoaded={handleDashboardLoaded}
           dashboardTargets={dashboardTargetsByOwner[current.ownerName] ?? null}
           draftTargets={dashboardTargetsDraftByOwner[current.ownerName] ?? null}
+          cloudSyncKey={cloudSyncKey}
         />
       ) : (
         <p className="text-sm text-muted-foreground">보유 종목이 없습니다.</p>

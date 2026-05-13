@@ -1,6 +1,6 @@
 /** 보유자별 메모(트리맵 왼쪽) — 로컬 + 서버 동기화 공통 */
 
-import { loadAllTargetStockWeights } from "@/lib/portfolio-target-weights";
+import { buildRebalanceCalculatorByOwnerFromLocal, loadAllTargetStockWeights } from "@/lib/portfolio-target-weights";
 
 export const OWNER_SCRATCHPAD_STORAGE_KEY = "portfolio-owner-scratchpad-v1";
 
@@ -81,6 +81,7 @@ export async function pushTargetWeightsAndScratchpadsToServer(cloudSyncKey: stri
         key,
         targetStockWeightByOwner: loadAllTargetStockWeights(),
         ownerScratchpadByOwner: loadAllOwnerScratchpads(),
+        rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
       }),
     });
     return res.ok;
