@@ -472,6 +472,13 @@ function floorShares(diffKrw: number, priceKrw: number): number {
   return Math.floor(Math.abs(diffKrw) / priceKrw);
 }
 
+/** 시세 있으면 ±N주, 없으면 ±원화 차액 (미보유·워치만 붙은 종목 등 priceKrw=0) */
+function formatMemberSharesOrAmount(diffKrw: number, priceKrw: number): string {
+  const sign = diffKrw >= 0 ? "+" : "-";
+  if (priceKrw > 0) return `${sign}${floorShares(diffKrw, priceKrw)}주`;
+  return `${sign}${fmtKrw(diffKrw)}`;
+}
+
 function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dashboardTargets, draftTargets }: Props) {
   const [resolvedNameBySymbol, setResolvedNameBySymbol] = useState<Record<string, string>>({});
 
@@ -1090,19 +1097,19 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                   }
                 } else if (r.memberAdjustments.length > 0) {
                   const parts = r.memberAdjustments
-                    .filter((m) => Math.abs(m.diffKrw) >= 10000 && m.priceKrw > 0)
-                    .map((m) => {
-                      const sh = floorShares(m.diffKrw, m.priceKrw);
-                      return `${formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)} ${m.diffKrw >= 0 ? "+" : "-"}${sh}주`;
-                    });
+                    .filter((m) => Math.abs(m.diffKrw) >= 10000)
+                    .map(
+                      (m) =>
+                        `${formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)} ${formatMemberSharesOrAmount(m.diffKrw, m.priceKrw)}`,
+                    );
                   sharesDisplay = parts.join(" / ");
                   if (splitCount > 1) {
                     const perParts = r.memberAdjustments
-                      .filter((m) => Math.abs(m.diffKrw) >= 10000 && m.priceKrw > 0)
-                      .map((m) => {
-                        const perSh = floorShares(m.diffKrw / splitCount, m.priceKrw);
-                        return `${formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)} ${m.diffKrw >= 0 ? "+" : "-"}${perSh}주`;
-                      });
+                      .filter((m) => Math.abs(m.diffKrw) >= 10000)
+                      .map(
+                        (m) =>
+                          `${formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)} ${formatMemberSharesOrAmount(m.diffKrw / splitCount, m.priceKrw)}`,
+                      );
                     perSplitSharesDisplay = `회당 ${perParts.join(" / ")}`;
                   }
                 }
@@ -1170,8 +1177,12 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                 <th className="py-1.5 px-2 text-right font-medium">목표액</th>
                 <th className="py-1.5 px-2 text-right font-medium">매수/매도</th>
                 <th className="py-1.5 px-2 text-right font-medium">회당</th>
-                <th className="py-1.5 px-2 text-right font-medium">종목(주수)</th>
-                <th className="py-1.5 px-2 text-right font-medium">회당 주수</th>
+                <th className="py-1.5 px-2 text-right font-medium" title="시세 없으면 원화 차액만 표시">
+                  종목(주수·금액)
+                </th>
+                <th className="py-1.5 px-2 text-right font-medium" title="시세 없으면 원화 차액만 표시">
+                  회당 주수·금액
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -1252,13 +1263,12 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                               <p key={m.symbol} className="tabular-nums">
                                 <span className="text-muted-foreground">{formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
                                 <span
+                                  title={m.priceKrw <= 0 ? "종목 시세 없음 · 매매 차액만 표시" : undefined}
                                   className={
                                     m.diffKrw >= 0 ? "text-rose-400" : "text-blue-400"
                                   }
                                 >
-                                  {m.priceKrw > 0
-                                    ? `${m.diffKrw >= 0 ? "+" : "-"}${floorShares(m.diffKrw, m.priceKrw)}주`
-                                    : "—"}
+                                  {formatMemberSharesOrAmount(m.diffKrw, m.priceKrw)}
                                 </span>
                               </p>
                             ))}
@@ -1284,13 +1294,12 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                               <p key={`${m.symbol}-per-split`} className="tabular-nums">
                                 <span className="text-muted-foreground">{formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
                                 <span
+                                  title={m.priceKrw <= 0 ? "종목 시세 없음 · 매매 차액만 표시" : undefined}
                                   className={
                                     m.diffKrw >= 0 ? "text-rose-400" : "text-blue-400"
                                   }
                                 >
-                                  {m.priceKrw > 0
-                                    ? `${m.diffKrw >= 0 ? "+" : "-"}${floorShares(m.diffKrw / splitCount, m.priceKrw)}주`
-                                    : "—"}
+                                  {formatMemberSharesOrAmount(m.diffKrw / splitCount, m.priceKrw)}
                                 </span>
                               </p>
                             ))}
