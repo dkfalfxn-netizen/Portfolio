@@ -736,6 +736,7 @@ function TargetStockWeightNeu({
   slices,
   cloudSyncKey,
   total,
+  onDraftTargets,
 }: {
   ownerName: string;
   slices: AllocationSlice[];
@@ -743,6 +744,8 @@ function TargetStockWeightNeu({
   cloudSyncKey: string;
   /** 보유자 총 평가금액 (KRW) — 리밸런싱 금액 계산에 사용 */
   total: number;
+  /** 디바운스된 현재 목표 맵 — LS 저장 전이라도 계산기「대시보드 불러오기」에 반영 */
+  onDraftTargets?: (owner: string, map: Record<string, number>) => void;
 }) {
   const skipSaveRef = useRef(true);
   const saveDebounceRef = useRef<number | null>(null);
@@ -765,6 +768,14 @@ function TargetStockWeightNeu({
     window.addEventListener(REBALANCE_VISUAL_ORDER_REFRESH_EVENT, h);
     return () => window.removeEventListener(REBALANCE_VISUAL_ORDER_REFRESH_EVENT, h);
   }, [ownerName]);
+
+  useEffect(() => {
+    if (!onDraftTargets) return;
+    const tid = window.setTimeout(() => {
+      onDraftTargets(ownerName, { ...targetsByTicker });
+    }, 140);
+    return () => window.clearTimeout(tid);
+  }, [ownerName, targetsByTicker, onDraftTargets]);
 
   const sortNonCashByTarget = useCallback(
     (a: AllocationSlice, b: AllocationSlice) => {
@@ -1134,6 +1145,7 @@ export function FamilyAllocationDonut({
   total,
   watchlistEntries,
   cloudSyncKey = "",
+  onDraftTargets,
 }: {
   ownerName: string;
   data: AllocationSlice[];
@@ -1141,6 +1153,7 @@ export function FamilyAllocationDonut({
   watchlistEntries?: Array<{ symbol: string; name: string; group?: string }>;
   /** 동기화 키(8자 이상) — 목표 비중을 서버에도 남길 때 사용 */
   cloudSyncKey?: string;
+  onDraftTargets?: (owner: string, map: Record<string, number>) => void;
 }) {
   const chartData = useMemo(
     () => [...data].sort((a, b) => b.weight - a.weight || b.value - a.value),
@@ -1295,6 +1308,7 @@ export function FamilyAllocationDonut({
         slices={stockSlicesForTargets}
         cloudSyncKey={cloudSyncKey}
         total={total}
+        onDraftTargets={onDraftTargets}
       />
 
       {/* ── 트리맵 (아코디언) ── */}
