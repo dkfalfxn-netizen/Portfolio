@@ -319,6 +319,45 @@ function isPinnedCashPortfolioGroup(groupKey: string): boolean {
   return t.toLowerCase().includes("cash");
 }
 
+/** 티커를 아직 고르지 않았을 때 그룹 안 비중만 잡아 두는 계산기 전용 줄 */
+const GROUP_UNDECIDED_MEMBER_SYMBOL = "__CALC_UNDECIDED__";
+const GROUP_UNDECIDED_MEMBER_DISPLAY = "미정 슬롯 (종목 미선정)";
+
+function isUndecidedSlotMemberSymbol(symbol: string): boolean {
+  return normalizeTickerKey(symbol) === normalizeTickerKey(GROUP_UNDECIDED_MEMBER_SYMBOL);
+}
+
+function appendUndecidedSlotMember(g: GroupAllocation): GroupAllocation {
+  if (isPinnedCashPortfolioGroup(g.groupKey)) return g;
+  if (g.members.some((m) => isUndecidedSlotMemberSymbol(m.symbol))) return g;
+  return {
+    ...g,
+    members: [
+      ...g.members,
+      {
+        symbol: GROUP_UNDECIDED_MEMBER_SYMBOL,
+        name: GROUP_UNDECIDED_MEMBER_DISPLAY,
+        valueKrw: 0,
+        priceKrw: 0,
+      },
+    ],
+  };
+}
+
+function expandGroupsWithUndecidedSlot(groupsIn: GroupAllocation[]): GroupAllocation[] {
+  return groupsIn.map(appendUndecidedSlotMember);
+}
+
+/** 종목 줄 표시 — 미정 슬롯은 티커 코드 숨김 */
+function allocationMemberDisplayLabel(
+  symbol: string,
+  name: string,
+  resolvedNameBySymbol?: Record<string, string>,
+): string {
+  if (isUndecidedSlotMemberSymbol(symbol)) return GROUP_UNDECIDED_MEMBER_DISPLAY;
+  return formatTickerLabel(symbol, name, resolvedNameBySymbol);
+}
+
 function orderPortfolioGroupsVisual(
   groupsIn: GroupAllocation[],
   visualKeys: string[] | null,
@@ -562,8 +601,12 @@ function RebalancingBarSortableRow({
               const portPct = totalKrw > 0 ? (m.valueKrw / totalKrw) * 100 : 0;
               return (
                 <div key={`${row.groupKey}:${m.symbol}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
-                  <span className="min-w-[8rem] max-w-[14rem] truncate font-medium text-muted-foreground">
-                    {formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)}
+                  <span
+                    className={`min-w-[8rem] max-w-[14rem] truncate font-medium text-muted-foreground ${
+                      isUndecidedSlotMemberSymbol(m.symbol) ? "italic" : ""
+                    }`}
+                  >
+                    {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
                   </span>
                   <span className="tabular-nums text-muted-foreground/90">
                     현재 {portPct.toFixed(2)}% · {fmtKrw(m.valueKrw)}
@@ -667,7 +710,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
           const out: Record<string, Record<string, string>> = {};
           for (const g of groups) {
             const row: Record<string, string> = {};
-            for (const m of g.members) {
+            for (const m of appendUndecidedSlotMember(g).members) {
               const n = raw[g.groupKey]?.[m.symbol];
               row[m.symbol] = n != null && Number.isFinite(n) ? String(n) : "";
             }
@@ -685,7 +728,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
       for (const g of groups) {
         const gk = g.groupKey;
         const row: Record<string, string> = {};
-        for (const m of g.members) {
+        for (const m of appendUndecidedSlotMember(g).members) {
           const prevV = prev[gk]?.[m.symbol];
           const n = saved[gk]?.[m.symbol];
           row[m.symbol] =
@@ -765,9 +808,14 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     [targets],
   );
 
+  const groupsWithUndecidedSlot = useMemo(
+    () => expandGroupsWithUndecidedSlot(groups),
+    [groups],
+  );
+
   const orderedGroups = useMemo(
-    () => orderPortfolioGroupsVisual(groups, visualOrderKeys, sortGroupsByTarget),
-    [groups, visualOrderKeys, sortGroupsByTarget],
+    () => orderPortfolioGroupsVisual(groupsWithUndecidedSlot, visualOrderKeys, sortGroupsByTarget),
+    [groupsWithUndecidedSlot, visualOrderKeys, sortGroupsByTarget],
   );
 
   const handleCalculatorBarDragEnd = useCallback(
@@ -916,6 +964,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
         unresolved.add(g.repSymbol);
       }
       for (const m of g.members) {
+        if (isUndecidedSlotMemberSymbol(m.symbol)) continue;
         if (
           isLikelyKoreanTicker(m.symbol) &&
           (!m.name || m.name.trim() === "" || m.name.trim().toUpperCase() === m.symbol.trim().toUpperCase()) &&
@@ -1044,7 +1093,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     const msNext: Record<string, Record<string, string>> = {};
     for (const g of groups) {
       const row: Record<string, string> = {};
-      for (const m of g.members) {
+      for (const m of appendUndecidedSlotMember(g).members) {
         const n = msaved[g.groupKey]?.[m.symbol];
         row[m.symbol] = n != null && Number.isFinite(n) ? String(n) : "";
       }
@@ -1205,6 +1254,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
           「종목 목표%」를 쓰면 각 줄에 포트폴리오 목표 %(예: 5·5·4·6)를 넣을 수 있으며 입력 합이 그룹 목표와 다르면 비율 유지한 채 자동 스케일합니다(매수+매도 모드만).
           분배 입력이 비어 있거나 덜 채워지면 평가금 비율로 나눕니다.
           관심종목에 넣어 둔 티커·그룹명은 대시보드 바와 같이 해당 그룹 아래 종목 줄로 붙습니다.
+          현금 그룹을 제외한 각 그룹 맨 아래 「미정 슬롯」은 매수할 종목을 정하지 않았을 때 비중만 적어 두는 줄입니다(주수 없음·금액만).
         </p>
 
         {/* 스케일 헤더 — 바 행과 동일한 레이아웃으로 정렬 */}
@@ -1357,7 +1407,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                             .filter((m) => Math.abs(m.diffKrw) >= 10000)
                             .map((m) => (
                               <p key={m.symbol} className="tabular-nums">
-                                <span className="text-muted-foreground">{formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
+                                <span className="text-muted-foreground">{allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
                                 <span
                                   title={m.priceKrw <= 0 ? "종목 시세 없음 · 매매 차액만 표시" : undefined}
                                   className={
@@ -1387,7 +1437,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                             .filter((m) => Math.abs(m.diffKrw) >= 10000)
                             .map((m) => (
                               <p key={`${m.symbol}-per-split`} className="tabular-nums">
-                                <span className="text-muted-foreground">{formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
+                                <span className="text-muted-foreground">{allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
                                 <span
                                   title={m.priceKrw <= 0 ? "종목 시세 없음 · 매매 차액만 표시" : undefined}
                                   className={
