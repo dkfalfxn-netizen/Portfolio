@@ -1412,10 +1412,11 @@ export default function Home() {
     setOwnerNames(merged);
   }, [ownerNames, positions]);
 
-  const marketSymbols = useMemo(
-    () => [...new Set(positions.map((position) => position.symbol))].join(","),
-    [positions],
-  );
+  const marketSymbols = useMemo(() => {
+    const fromPos = positions.map((p) => p.symbol.trim()).filter(Boolean);
+    const fromWl = watchlistRows.map((r) => r.symbol.trim()).filter(Boolean);
+    return [...new Set([...fromPos, ...fromWl])].join(",");
+  }, [positions, watchlistRows]);
 
   const marketQuery = useQuery<MarketResponse>({
     queryKey: ["market", marketSymbols],
@@ -3812,6 +3813,8 @@ export default function Home() {
               allocationByOwner={allocationByOwner}
               enrichedPositions={enrichedPositions}
               usdKrw={usdKrw}
+              eurKrw={eurKrw}
+              marketQuotes={marketQuery.data?.quotes}
               dashboardTargetsByOwner={dashboardTargetsByOwner}
               dashboardTargetsDraftByOwner={dashboardTargetsDraftByOwner}
               watchlistRows={watchlistRows}
@@ -5994,6 +5997,8 @@ export default function Home() {
               allocationByOwner={allocationByOwner}
               enrichedPositions={enrichedPositions}
               usdKrw={usdKrw}
+              eurKrw={eurKrw}
+              marketQuotes={marketQuery.data?.quotes}
               dashboardTargetsByOwner={dashboardTargetsByOwner}
               dashboardTargetsDraftByOwner={dashboardTargetsDraftByOwner}
               watchlistRows={watchlistRows}

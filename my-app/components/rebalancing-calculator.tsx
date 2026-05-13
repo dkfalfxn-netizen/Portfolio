@@ -1345,6 +1345,8 @@ export function RebalancingCalculator({
   allocationByOwner,
   enrichedPositions,
   usdKrw,
+  eurKrw = 1450,
+  marketQuotes,
   dashboardTargetsByOwner = {},
   dashboardTargetsDraftByOwner = {},
   watchlistRows = [],
@@ -1365,6 +1367,10 @@ export function RebalancingCalculator({
     currency: string;
   }[];
   usdKrw: number;
+  /** EUR 종목 시세 환산 (관심종목·미보유 종목 주수 계산) */
+  eurKrw?: number;
+  /** 보유 외 심볼도 시세 맵(`/api/market` quotes) — 관심종목과 결합 시 미보유 종목 주수 표시 */
+  marketQuotes?: Record<string, { price: number | null; currency: string | null }>;
   dashboardTargetsByOwner?: Record<string, Record<string, number>>;
   dashboardTargetsDraftByOwner?: Record<string, Record<string, number>>;
   /** 대시보드 도넛과 동일하게 그룹 후보에 워치 종목을 붙입니다 */
@@ -1440,6 +1446,7 @@ export function RebalancingCalculator({
         watchlistOwnerAllToken,
         enrichedPositions,
         usdKrw,
+        { quotes: marketQuotes, eurKrw },
       );
 
       return { ownerName, groups, totalKrw: total };
@@ -1448,6 +1455,8 @@ export function RebalancingCalculator({
     allocationByOwner,
     enrichedPositions,
     usdKrw,
+    eurKrw,
+    marketQuotes,
     mergeTargetsReady,
     calcStorageBump,
     watchlistRows,

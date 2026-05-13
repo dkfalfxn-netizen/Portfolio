@@ -82,6 +82,64 @@ export type CalcGroupLite = {
   members: CalcMemberLite[];
 };
 
+/** `/api/market` quotes 와 동형 — 미보유 종목도 주수 계산 가능하도록 시세 조회 결과 주입 */
+export type ExternalMarketQuotes = Record<
+  string,
+  { price: number | null; currency: string | null }
+>;
+
+export type MergeWatchlistQuoteContext = {
+  quotes?: ExternalMarketQuotes;
+  /** EUR 표시 통화 종목용 */
+  eurKrw?: number;
+};
+
+function quoteToPriceKrw(
+  symbol: string,
+  quotes: ExternalMarketQuotes | undefined,
+  usdKrw: number,
+  eurKrw: number,
+): number {
+  if (!quotes) return 0;
+  const sym = symbol.trim();
+  if (!sym) return 0;
+  const upper = sym.toUpperCase();
+  let row: { price: number | null; currency: string | null } | undefined =
+    quotes[sym] ?? quotes[upper];
+  if (!row?.price || !(row.price > 0)) {
+    row = undefined;
+    for (const [k, q] of Object.entries(quotes)) {
+      if (k.trim().toUpperCase() === upper && q.price != null && q.price > 0) {
+        row = q;
+        break;
+      }
+    }
+  }
+  if (!row?.price || !(row.price > 0)) return 0;
+  const c = (row.currency ?? "").toUpperCase();
+  if (c === "USD") return row.price * usdKrw;
+  if (c === "EUR") return row.price * eurKrw;
+  return row.price;
+}
+
+function enrichMembersFromMarketQuotes<G extends CalcGroupLite>(
+  g: G,
+  quotes: ExternalMarketQuotes | undefined,
+  usdKrw: number,
+  eurKrw: number,
+): G {
+  if (!quotes || Object.keys(quotes).length === 0) return g;
+  let touched = false;
+  const members = g.members.map((m) => {
+    if (m.priceKrw > 0) return m;
+    const pk = quoteToPriceKrw(m.symbol, quotes, usdKrw, eurKrw);
+    if (pk <= 0) return m;
+    touched = true;
+    return { ...m, priceKrw: pk };
+  });
+  return touched ? { ...g, members } : g;
+}
+
 /** 워치리스트 종목을 해당 그룹 티커와 일치하는 계산기 그룹 members 에 합침 (대시보드 바와 동일 후보) */
 export function mergeWatchlistSymbolsIntoCalculatorGroups<G extends CalcGroupLite>(
   ownerName: string,
@@ -90,17 +148,25 @@ export function mergeWatchlistSymbolsIntoCalculatorGroups<G extends CalcGroupLit
   ownerAllToken: string,
   enrichedPositions: CalcPositionLite[],
   usdKrw: number,
+  quoteCtx?: MergeWatchlistQuoteContext,
 ): G[] {
+  const quotes = quoteCtx?.quotes;
+  const eurKrw =
+    typeof quoteCtx?.eurKrw === "number" && quoteCtx.eurKrw > 0 ? quoteCtx.eurKrw : 1450;
+
   const items = enrichedPositions.filter((p) => p.owner === ownerName);
   const applicable = watchlistRows.filter((r) =>
     watchlistRowAppliesToOwner(r, ownerName, ownerAllToken),
   );
 
   return groups.map((g) => {
+    const finish = (next: G) =>
+      refreshGroupRepHint(enrichMembersFromMarketQuotes(next, quotes, usdKrw, eurKrw));
+
     const wlHits = applicable.filter((r) =>
       allocationTickerMatches(g.groupKey, watchlistSliceTickerKey(r)),
     );
-    if (wlHits.length === 0) return refreshGroupRepHint(g);
+    if (wlHits.length === 0) return finish(g);
 
     const seen = new Set(g.members.map((m) => m.symbol.trim().toUpperCase()));
     const extra: CalcMemberLite[] = [];
@@ -116,12 +182,17 @@ export function mergeWatchlistSymbolsIntoCalculatorGroups<G extends CalcGroupLit
       }
       seen.add(symKey);
       const priceRow = items.find((p) => p.symbol.trim().toUpperCase() === symKey);
-      const priceKrw =
+      let priceKrw =
         priceRow && priceRow.currentPrice > 0
           ? priceRow.currency === "USD"
             ? priceRow.currentPrice * usdKrw
-            : priceRow.currentPrice
+            : priceRow.currency === "EUR"
+              ? priceRow.currentPrice * eurKrw
+              : priceRow.currentPrice
           : 0;
+      if (priceKrw <= 0) {
+        priceKrw = quoteToPriceKrw(symRaw, quotes, usdKrw, eurKrw);
+      }
       extra.push({
         symbol: symRaw,
         name: (typeof r.name === "string" && r.name.trim()) ? r.name.trim() : symRaw,
@@ -129,9 +200,9 @@ export function mergeWatchlistSymbolsIntoCalculatorGroups<G extends CalcGroupLit
         priceKrw,
       });
     }
-    if (extra.length === 0) return refreshGroupRepHint(g);
+    if (extra.length === 0) return finish(g);
     const merged = { ...g, members: [...g.members, ...extra] } as G;
-    return refreshGroupRepHint(merged);
+    return finish(merged);
   });
 }
 
