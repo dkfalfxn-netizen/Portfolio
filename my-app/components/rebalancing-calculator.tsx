@@ -706,9 +706,13 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     [rows, mode],
   );
 
-  // ── 매매 실행 순서 ────────────────────────────────────────────────────────
+  // ── 매매 실행 순서 (실행 가능한 종목 위주 — 현금 행은 매매 단계가 아니므로 제외) ──
   const actionItems = useMemo(() => {
-    const significant = rows.filter((r) => Math.abs(r.diffKrw) >= 10000);
+    const significant = rows.filter((r) => {
+      if (Math.abs(r.diffKrw) < 10000) return false;
+      const isCash = r.groupKey === "현금" || r.groupKey.toLowerCase().includes("cash");
+      return !isCash;
+    });
     if (mode === "buy-only") {
       return significant.filter((r) => r.diffKrw > 0).sort((a, b) => b.diffKrw - a.diffKrw);
     }
