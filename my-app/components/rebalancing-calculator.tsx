@@ -735,6 +735,9 @@ function RebalancingOwner({
   cloudSyncKey,
 }: Props) {
   const [resolvedNameBySymbol, setResolvedNameBySymbol] = useState<Record<string, string>>({});
+  /** 이미 fetch 요청을 보낸 심볼 집합 — resolvedNameBySymbol을 deps에 넣으면 fetch 완료 후
+   *  state가 바뀌어 effect가 재실행되는 루프를 유발하므로 ref로 별도 관리한다. */
+  const requestedSymbolsRef = useRef<Set<string>>(new Set());
 
   // ── 목표 비중 state: 계산기 전용 키에서 초깃값 읽기 (대시보드와 독립) ──
   const [targets, setTargets] = useState<Record<string, string>>(() => {
@@ -1024,25 +1027,31 @@ function RebalancingOwner({
   useEffect(() => {
     const unresolved = new Set<string>();
     for (const g of groups) {
+      const repKey = normalizeTickerKey(g.repSymbol);
       if (
         isLikelyKoreanTicker(g.repSymbol) &&
         (!g.repName || g.repName.trim() === "" || g.repName.trim().toUpperCase() === g.repSymbol.trim().toUpperCase()) &&
-        !resolvedNameBySymbol[normalizeTickerKey(g.repSymbol)]
+        !requestedSymbolsRef.current.has(repKey)
       ) {
         unresolved.add(g.repSymbol);
       }
       for (const m of g.members) {
         if (isUndecidedSlotMemberSymbol(m.symbol)) continue;
+        const mKey = normalizeTickerKey(m.symbol);
         if (
           isLikelyKoreanTicker(m.symbol) &&
           (!m.name || m.name.trim() === "" || m.name.trim().toUpperCase() === m.symbol.trim().toUpperCase()) &&
-          !resolvedNameBySymbol[normalizeTickerKey(m.symbol)]
+          !requestedSymbolsRef.current.has(mKey)
         ) {
           unresolved.add(m.symbol);
         }
       }
     }
     if (unresolved.size === 0) return;
+    // fetch 전에 먼저 요청 집합에 등록 → 중복 요청 방지
+    for (const sym of unresolved) {
+      requestedSymbolsRef.current.add(normalizeTickerKey(sym));
+    }
     const ac = new AbortController();
     const list = [...unresolved];
     void fetch(`/api/symbol-name?symbols=${encodeURIComponent(list.join(","))}`, { signal: ac.signal })
@@ -1061,7 +1070,7 @@ function RebalancingOwner({
       })
       .catch(() => {});
     return () => ac.abort();
-  }, [groups, resolvedNameBySymbol]);
+  }, [groups]);
 
   /** handleLoad가 localStorage를 덮어쓰기 전에 취소할 수 있도록 ref로 타이머 ID 관리 */
   const autosaveTimerRef = useRef<number | null>(null);

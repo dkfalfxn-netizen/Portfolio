@@ -845,8 +845,19 @@ function TargetStockWeightNeu({
     const onRefresh = () => {
       const all = loadAllTargetStockWeights();
       const saved = all[ownerName] ?? {};
-      skipSaveRef.current = true;
-      setTargetsByTicker({ ...saved });
+      setTargetsByTicker((prev) => {
+        // 실제로 값이 달라진 경우에만 state 업데이트 → 불필요한 리렌더 + save effect 연쇄 차단
+        const prevKeys = Object.keys(prev);
+        const savedKeys = Object.keys(saved);
+        if (
+          prevKeys.length === savedKeys.length &&
+          prevKeys.every((k) => prev[k] === (saved as Record<string, number>)[k])
+        ) {
+          return prev;
+        }
+        skipSaveRef.current = true;
+        return { ...saved };
+      });
     };
     window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
