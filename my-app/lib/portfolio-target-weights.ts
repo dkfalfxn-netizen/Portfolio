@@ -62,13 +62,19 @@ export function parseTargetStockWeightFromServer(raw: unknown): TargetStockWeigh
   return out;
 }
 
-/** 서버에서 받은 맵을 로컬과 병합(보유자 단위는 서버가 우선)한 뒤 저장하고, UI 갱신 이벤트를 보냅니다. */
+/** 서버에서 받은 맵을 로컬과 병합(같은 보유자·같은 티커면 서버 값이 우선)한 뒤 저장하고, UI 갱신 이벤트를 보냅니다.
+ * 미보유(워치리스트만 있는) 목표 티커 등 로컬에만 있는 줄은 서버 맵에 없으므로 살려 둠. */
 export function mergeAndPersistTargetStockWeightsFromServer(server: unknown): void {
   if (typeof window === "undefined") return;
   const parsed = parseTargetStockWeightFromServer(server);
   if (Object.keys(parsed).length === 0) return;
   const local = loadAllTargetStockWeights();
-  const next = { ...local, ...parsed };
+  const next: TargetStockWeightByOwner = { ...local };
+  for (const [owner, row] of Object.entries(parsed)) {
+    if (typeof owner !== "string" || !owner.trim()) continue;
+    const prevInner = local[owner] ?? {};
+    next[owner] = { ...prevInner, ...row };
+  }
   try {
     window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(next));
   } catch {

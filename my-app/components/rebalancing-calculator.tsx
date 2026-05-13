@@ -26,9 +26,11 @@ import {
   REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
 } from "@/lib/rebalance-visual-order";
 
-/** 대시보드 목표만 있고 현재 평가 0원인 그룹을 계산기 행에 포함 (대시보드 LS 기준 — 계산기에만 남은 stale 티커는 제외) */
+/** 대시보드·계산기 LS에 목표만 있고 현재 평가 0원인 그룹을 계산기 행에 포함 (같은 키면 대시보드 비중 우선). */
 function mergeSavedTargetGroupsWithoutHoldings(ownerName: string, baseGroups: GroupAllocation[]): GroupAllocation[] {
-  const saved = loadAllTargetStockWeights()[ownerName] ?? {};
+  const fromCalc = loadAllCalculatorTargetWeights()[ownerName] ?? {};
+  const fromDash = loadAllTargetStockWeights()[ownerName] ?? {};
+  const saved = { ...fromCalc, ...fromDash };
   const seen = new Set(baseGroups.map((g) => g.groupKey.trim()));
   const extra: GroupAllocation[] = [];
   for (const [key, target] of Object.entries(saved)) {
