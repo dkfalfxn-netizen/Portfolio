@@ -422,25 +422,37 @@ function RebalancingBarSortableRow({
   const targetLinePct = Math.min((row.targetPct / maxScale) * 100, 100);
   const isCash = pinned;
   const groupTargetPct = parseFloat(targets[row.groupKey] ?? "0") || 0;
-  let targetPctInputSum: number | null = null;
+  const TGT_PCT_MATCH_EPS = 0.051;
+  let tgtPctPartialSum = 0;
+  let tgtPctFilledValidCount = 0;
+  let tgtPctEmptyCount = 0;
+  let tgtPctInvalid = false;
   if (memberSplitMode === "targetPct") {
-    let acc = 0;
-    let allFilled = true;
     for (const m of row.members) {
       const raw = (memberSplitsForGroup[m.symbol] ?? "").trim().replace(",", ".");
       if (raw === "") {
-        allFilled = false;
-        break;
+        tgtPctEmptyCount++;
+        continue;
       }
       const n = parseFloat(raw);
-      if (!Number.isFinite(n) || n < 0) {
-        allFilled = false;
-        break;
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        tgtPctInvalid = true;
+        continue;
       }
-      acc += n;
+      tgtPctPartialSum += n;
+      tgtPctFilledValidCount++;
     }
-    targetPctInputSum = allFilled ? acc : null;
   }
+  const tgtPctAllFilled =
+    memberSplitMode === "targetPct" &&
+    row.members.length > 0 &&
+    !tgtPctInvalid &&
+    tgtPctEmptyCount === 0 &&
+    tgtPctFilledValidCount === row.members.length;
+  const tgtPctDiffVsGroup =
+    tgtPctAllFilled && Number.isFinite(groupTargetPct) ? tgtPctPartialSum - groupTargetPct : null;
+  const tgtPctMatchesGroup =
+    tgtPctDiffVsGroup !== null && Math.abs(tgtPctDiffVsGroup) <= TGT_PCT_MATCH_EPS;
 
   const outerStyle =
     !pinned ?
@@ -584,18 +596,77 @@ function RebalancingBarSortableRow({
                   예: 그룹 목표가 <span className="tabular-nums">{groupTargetPct.toFixed(1)}</span>%일 때{" "}
                   <span className="tabular-nums">5</span>·<span className="tabular-nums">5</span>·
                   <span className="tabular-nums">4</span>·<span className="tabular-nums">6</span>처럼 합이{" "}
-                  <span className="tabular-nums">20</span>이 되게 맞추거나, 합이 달라도{" "}
+                  <span className="tabular-nums">20</span>이 되게 맞추거나,                   합이 달라도{" "}
                   <span className="text-foreground/90">비율 유지한 채 그룹 목표%</span>에 맞게 자동 스케일합니다.
                   모든 종목 줄을 채워야 적용됩니다. 비우면 가중치 모드와 같이 평가금 비율로 나눕니다.
-                  {targetPctInputSum !== null && (
-                    <span className="ml-1 tabular-nums text-foreground/80">
-                      (입력 합 {targetPctInputSum.toFixed(2)}% → 그룹 {groupTargetPct.toFixed(1)}%에 맞춤)
-                    </span>
-                  )}
+                  아래 칸에서 입력 합과 그룹 목표를 확인할 수 있습니다.
                 </>
               )}
             </span>
           </div>
+          {memberSplitMode === "targetPct" && rebalanceMode !== "buy-only" ?
+            <div
+              className="mt-1.5 ml-7 sm:ml-8 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-slate-600/45 bg-slate-900/55 px-2 py-1.5"
+              role="status"
+              aria-label="종목 목표 퍼센트 검증"
+            >
+              <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+                검증
+              </span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] tabular-nums">
+                <span className="text-muted-foreground">
+                  그룹 목표{" "}
+                  <span className="font-medium text-foreground">{groupTargetPct.toFixed(1)}%</span>
+                </span>
+                {tgtPctInvalid ?
+                  <span className="font-medium text-amber-400">목표% 칸에 0~100 숫자만 입력해 주세요.</span>
+                : tgtPctFilledValidCount === 0 && tgtPctEmptyCount === row.members.length ?
+                  <span className="text-muted-foreground">종목 목표% 입력 시 여기에 합계가 표시됩니다.</span>
+                : !tgtPctAllFilled ?
+                  <>
+                    <span className="text-muted-foreground">
+                      입력된 줄만 합{" "}
+                      <span className="font-medium text-foreground">{tgtPctPartialSum.toFixed(2)}%</span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      (<span className="text-foreground">{tgtPctFilledValidCount}</span>/
+                      <span className="text-foreground">{row.members.length}</span>줄)
+                    </span>
+                    <span className="text-muted-foreground/90">모든 줄을 채우면 그룹 목표와 비교합니다.</span>
+                  </>
+                : groupTargetPct <= 0 ?
+                  <span className="text-muted-foreground">
+                    종목 입력 합 <span className="font-medium text-foreground">{tgtPctPartialSum.toFixed(2)}%</span>
+                    {" · "}
+                    그룹 목표가 0%라 스케일은 적용되지 않습니다.
+                  </span>
+                : (
+                  <>
+                    <span className="text-muted-foreground">
+                      종목 입력 합{" "}
+                      <span className="font-medium text-foreground">{tgtPctPartialSum.toFixed(2)}%</span>
+                    </span>
+                    {tgtPctMatchesGroup ?
+                      <span className="font-medium text-emerald-400">그룹 목표와 일치 ✓</span>
+                    : (
+                      <span className="text-muted-foreground">
+                        차이{" "}
+                        <span
+                          className={
+                            (tgtPctDiffVsGroup ?? 0) > 0 ? "font-medium text-amber-400" : "font-medium text-sky-400"
+                          }
+                        >
+                          {(tgtPctDiffVsGroup ?? 0) > 0 ? "+" : ""}
+                          {(tgtPctDiffVsGroup ?? 0).toFixed(2)}%p
+                        </span>
+                        {" · 비율 유지 후 그룹 목표에 맞게 스케일되어 계산됩니다."}
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          : null}
           <div className="mt-1 space-y-1 pl-7 sm:pl-8">
             {row.members.map((m) => {
               const portPct = totalKrw > 0 ? (m.valueKrw / totalKrw) * 100 : 0;
