@@ -419,8 +419,13 @@ function RebalancingBarSortableRow({
       {!pinned && row.members.length > 0 ?
         <div className="border-t border-dashed border-slate-800/55 pb-1.5 pt-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-7 sm:pl-8">
-            <span className="w-full text-[9px] font-medium uppercase tracking-wide text-muted-foreground/90">
-              종목별 분배 가중치 (전 줄 비우면 평가금 비율 · 모든 줄에 숫자 넣을 때만 적용)
+            <span className="w-full text-[9px] font-medium leading-snug text-muted-foreground/95">
+              그룹 매매 차액을 종목끼리 나눌 비율(가중치)입니다. 포트폴리오 %나 목표 %가 아닙니다.
+              예: 반반 → 각각 <span className="tabular-nums">1</span>과{" "}
+              <span className="tabular-nums">1</span>(또는 <span className="tabular-nums">50</span>과{" "}
+              <span className="tabular-nums">50</span> — 숫자 크기는 비율만 의미합니다).
+              같은 그룹 종목 줄을 <span className="font-medium text-foreground/90">모두</span> 양수로 채워야 적용되고,
+              하나라도 비우면 평가금 비율로 자동 분배합니다.
             </span>
           </div>
           <div className="mt-1 space-y-1 pl-7 sm:pl-8">
@@ -435,17 +440,18 @@ function RebalancingBarSortableRow({
                     현재 {portPct.toFixed(2)}% · {fmtKrw(m.valueKrw)}
                   </span>
                   <label className="ml-auto flex items-center gap-1 sm:ml-0">
-                    <span className="sr-only">{m.symbol} 분배 가중치</span>
+                    <span className="shrink-0 text-[9px] text-muted-foreground">가중치</span>
+                    <span className="sr-only">{m.symbol} 매매 차액 분배 가중치</span>
                     <input
                       type="number"
                       min={0}
-                      step={1}
-                      placeholder="자동"
+                      step={0.1}
+                      placeholder="비움"
                       className="w-16 rounded border bg-background px-1 py-0.5 text-right tabular-nums"
                       value={memberSplitsForGroup[m.symbol] ?? ""}
                       onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
-                      aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 매매액 분배 가중치`}
-                      title="그룹 매매 차액을 종목별로 나눌 비율입니다. 같은 그룹 종목 줄마다 모두 양수를 넣어야 적용되고, 하나라도 비우면 평가금 비율로 계산합니다."
+                      aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 매매 차액 분배 가중치`}
+                      title="이 종목이 그룹 전체 매매 차액 중 차지할 비중의 비율. 모든 종목 줄에 양수를 넣어야 적용됩니다. 비우면 평가금 비율."
                     />
                   </label>
                 </div>
@@ -1003,7 +1009,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
           보유·평가가 없는 줄(S&P500 등)은 현재 비중이 0%이고 바가 비어 있는 것이 정상입니다(데이터 누락이 아닙니다).
           목표 합은 보통 100%입니다. 우측 숫자가 빨간 ▲면 합이 100%를 넘어 한 번에 만족할 수 없는 조합입니다 — 일부 목표를 줄이거나 초과 분야에서 줄여 주세요.
           목표 줄은 보유 그룹·관심종목에 해당하는 티커만 나타나며, 예전에 저장만 되어 있던 다른 이름(AI·원자력 등)은 더 이상 자동으로 붙지 않습니다.
-          같은 그룹에 종목이 여러 개면 아래에서 분배 가중치를 넣을 수 있습니다. 같은 그룹의 모든 종목 줄에 양수를 넣을 때만 반영되고, 하나라도 비우면 평가금 비율로 나눕니다.
+          같은 그룹에 종목이 여러 개면, 그룹 옆의 %는 전체 포트에서의 목표 비중이고, 펼친 줄 오른쪽 「가중치」는 그 그룹의 매수·매도 차액을 종목끼리 나눌 비율(임의 숫자, 합으로 정규화)입니다. 포트 %를 넣는 칸이 아닙니다. 모든 종목 줄을 양수로 채워야 적용되고 하나라도 비우면 평가금 비율로 나눕니다.
           관심종목에 넣어 둔 티커·그룹명은 대시보드 바와 같이 해당 그룹 아래 종목 줄로 붙습니다.
         </p>
 
