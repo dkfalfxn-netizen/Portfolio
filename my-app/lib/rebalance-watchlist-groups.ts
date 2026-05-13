@@ -34,6 +34,26 @@ export function allocationTickerMatches(a: string, b: string): boolean {
   return a.trim().toUpperCase() === b.trim().toUpperCase();
 }
 
+/** 보유 allocation 슬라이스 티커 + 해당 보유자 워치 슬라이스 티커만 허용 (대시보드 목표 요약과 동일 기준, LS 잔재 줄 차단) */
+export function allowedCalculatorStubTickerKeysUpper(params: {
+  ownerName: string;
+  allocationTickers: string[];
+  watchlistRows: WatchlistRowForRebalance[];
+  watchlistOwnerAllToken: string;
+}): Set<string> {
+  const s = new Set<string>();
+  for (const t of params.allocationTickers) {
+    const u = t.trim().toUpperCase();
+    if (u) s.add(u);
+  }
+  for (const row of params.watchlistRows) {
+    if (!watchlistRowAppliesToOwner(row, params.ownerName, params.watchlistOwnerAllToken)) continue;
+    const key = watchlistSliceTickerKey(row).trim().toUpperCase();
+    if (key) s.add(key);
+  }
+  return s;
+}
+
 export type CalcPositionLite = {
   owner: string;
   symbol: string;

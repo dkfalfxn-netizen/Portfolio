@@ -29,23 +29,40 @@ import {
 } from "@/lib/rebalance-visual-order";
 import {
   allocationTickerMatches,
+  allowedCalculatorStubTickerKeysUpper,
   mergeWatchlistSymbolsIntoCalculatorGroups,
   type WatchlistRowForRebalance,
 } from "@/lib/rebalance-watchlist-groups";
 
-/** 대시보드·계산기 LS에 목표만 있고 현재 평가 0원인 그룹을 계산기 행에 포함 (같은 키면 대시보드 비중 우선). */
-function mergeSavedTargetGroupsWithoutHoldings(ownerName: string, baseGroups: GroupAllocation[]): GroupAllocation[] {
+/** 미보유 스텁 행 복원 시 허용 티커만 사용 — 보유 슬라이스·워치 슬라이스 외 LS 잔재(AI 등)로 목표 합이 100% 넘는 현상 차단 */
+function mergeSavedTargetGroupsWithoutHoldings(
+  ownerName: string,
+  baseGroups: GroupAllocation[],
+  ctx: {
+    allocationTickers: string[];
+    watchlistRows: WatchlistRowForRebalance[];
+    watchlistOwnerAllToken: string;
+  },
+): GroupAllocation[] {
   const fromCalc = loadAllCalculatorTargetWeights()[ownerName] ?? {};
   const fromDash = loadAllTargetStockWeights()[ownerName] ?? {};
   const saved = { ...fromCalc, ...fromDash };
-  const seen = new Set(baseGroups.map((g) => g.groupKey.trim()));
+  const allowedStub = allowedCalculatorStubTickerKeysUpper({
+    ownerName,
+    allocationTickers: ctx.allocationTickers,
+    watchlistRows: ctx.watchlistRows,
+    watchlistOwnerAllToken: ctx.watchlistOwnerAllToken,
+  });
+  const seenUpper = new Set(baseGroups.map((g) => g.groupKey.trim().toUpperCase()));
   const extra: GroupAllocation[] = [];
   for (const [key, target] of Object.entries(saved)) {
     const k = key.trim();
+    const ku = k.toUpperCase();
     // stale key 정리: 목표가 0% 이하인 미보유 그룹은 계산기 목록에 복원하지 않음
     if (!(Number(target) > 0)) continue;
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
+    if (!k || !allowedStub.has(ku)) continue;
+    if (seenUpper.has(ku)) continue;
+    seenUpper.add(ku);
     extra.push({
       groupKey: k,
       displayName: k,
@@ -985,6 +1002,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
           대시보드 목표를 가져오려면「대시보드 불러오기」를 누르세요. 미설정 그룹은 0%로 표시됩니다.
           보유·평가가 없는 줄(S&P500 등)은 현재 비중이 0%이고 바가 비어 있는 것이 정상입니다(데이터 누락이 아닙니다).
           목표 합은 보통 100%입니다. 우측 숫자가 빨간 ▲면 합이 100%를 넘어 한 번에 만족할 수 없는 조합입니다 — 일부 목표를 줄이거나 초과 분야에서 줄여 주세요.
+          목표 줄은 보유 그룹·관심종목에 해당하는 티커만 나타나며, 예전에 저장만 되어 있던 다른 이름(AI·원자력 등)은 더 이상 자동으로 붙지 않습니다.
           같은 그룹에 종목이 여러 개면 아래에서 분배 가중치를 넣을 수 있습니다. 같은 그룹의 모든 종목 줄에 양수를 넣을 때만 반영되고, 하나라도 비우면 평가금 비율로 나눕니다.
           관심종목에 넣어 둔 티커·그룹명은 대시보드 바와 같이 해당 그룹 아래 종목 줄로 붙습니다.
         </p>
@@ -1393,7 +1411,11 @@ export function RebalancingCalculator({
       });
 
       if (mergeTargetsReady) {
-        groups = mergeSavedTargetGroupsWithoutHoldings(ownerName, groups);
+        groups = mergeSavedTargetGroupsWithoutHoldings(ownerName, groups, {
+          allocationTickers: data.map((d) => d.ticker),
+          watchlistRows,
+          watchlistOwnerAllToken,
+        });
       }
 
       groups = mergeWatchlistSymbolsIntoCalculatorGroups(
