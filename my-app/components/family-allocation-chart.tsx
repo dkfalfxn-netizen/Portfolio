@@ -5,8 +5,11 @@ import { createPortal } from "react-dom";
 import { ResponsiveContainer, Tooltip, Treemap } from "recharts";
 import {
   HAS_LOCAL_CHANGES_KEY,
+  loadAllCalculatorMemberSplitModes,
+  loadAllCalculatorMemberSplits,
   loadAllTargetStockWeights,
   PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT,
+  REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT,
   TARGET_WEIGHT_STORAGE_KEY,
 } from "@/lib/portfolio-target-weights";
 import {
@@ -24,6 +27,7 @@ import {
   REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
 } from "@/lib/rebalance-visual-order";
 import { fmtInt } from "@/lib/format-money";
+import { memberPortfolioTargetPctMap } from "@/lib/rebalance-member-portfolio-targets";
 const NEON_PALETTE = [
   "#0891B2",
   "#65A30D",
@@ -191,6 +195,75 @@ function entriesForAllocationTooltip(slice: Pick<AllocationSlice, "ticker" | "al
   return nonCashEntriesSortedByWeight(slice.allEntries);
 }
 
+function mapNumGetInsensitive(m: Record<string, number>, key: string): number | undefined {
+  const t = key.trim();
+  if (t === "") return undefined;
+  const v0 = m[t];
+  if (Number.isFinite(v0)) return v0;
+  const u = t.toUpperCase();
+  for (const [rk, v] of Object.entries(m)) {
+    if (rk.trim().toUpperCase() === u && Number.isFinite(v)) return v;
+  }
+  return undefined;
+}
+
+/** 저장소에 심볼 키로 직접 있는 목표 %(포트 전체) — 계산기 분배보다 우선 */
+function directSavedPortfolioTargetPct(symbol: string, saved: Record<string, number>): number | null {
+  const v = mapNumGetInsensitive(saved, symbol);
+  return v !== undefined ? v : null;
+}
+
+function fmtCurrentVersusPortfolioTargetTooltip(
+  currentSlicePct: number,
+  portfolioTargetPct: number | null,
+): string {
+  const c = `${currentSlicePct.toFixed(1)}%`;
+  if (portfolioTargetPct === null || !Number.isFinite(portfolioTargetPct)) return `현재 ${c}`;
+  return `현재 ${c} · 목표 ${portfolioTargetPct.toFixed(1)}%`;
+}
+
+/** 복수 종목 그룹: 계산기 분배·모드와 동일 규칙으로 종목별 포트 전체 목표 % */
+function computeGroupedMemberPortfolioTargets(
+  ownerName: string,
+  slice: Pick<AllocationSlice, "ticker" | "allEntries">,
+  groupTargetPct: number,
+): Record<string, number> {
+  if (typeof window === "undefined") return {};
+  const inner = entriesForAllocationTooltip(slice);
+  if (inner.length < 2) return {};
+  const splitsRoot = loadAllCalculatorMemberSplits();
+  const modesRoot = loadAllCalculatorMemberSplitModes();
+  const splitNumeric = splitsRoot[ownerName]?.[slice.ticker] ?? {};
+  const mode = modesRoot[ownerName]?.[slice.ticker] ?? "targetPct";
+  const syms = inner.map((e) => e.symbol.trim()).filter((s) => s.length > 0);
+  const ws = inner.map((e) => e.weight ?? 0);
+  return memberPortfolioTargetPctMap({
+    groupTargetPct,
+    memberSymbolsOrdered: syms,
+    withinSliceWeights: ws,
+    splitNumeric,
+    mode,
+  });
+}
+
+function resolvePortfolioTargetPctForTooltip(
+  slice: Pick<AllocationSlice, "ticker" | "allEntries">,
+  saved: Record<string, number>,
+  entrySymbol: string,
+  groupedMemberMap: Record<string, number>,
+  isGrouped: boolean,
+): number | null {
+  const dir = directSavedPortfolioTargetPct(entrySymbol, saved);
+  if (dir !== null) return dir;
+  const hasGroupRow = Object.prototype.hasOwnProperty.call(saved, slice.ticker);
+  if (!hasGroupRow) return null;
+  const gTar = saved[slice.ticker] ?? 0;
+  if (!Number.isFinite(gTar)) return null;
+  if (!isGrouped) return gTar;
+  const mapped = mapNumGetInsensitive(groupedMemberMap, entrySymbol);
+  return mapped !== undefined ? mapped : null;
+}
+
 function formatKrw(n: number) {
   return `₩${fmtInt(n)}`;
 }
@@ -216,32 +289,53 @@ function shadeHexToBlack(hex: string, f: number): string {
 function NeonTooltip({
   active,
   payload,
+  ownerName,
 }: {
   active?: boolean;
   payload?: Array<{
     payload: AllocationSlice;
   }>;
+  ownerName: string;
 }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   const entries = entriesForAllocationTooltip(p);
   const isGroup = entries.length > 1;
-  const entryPctText = (w?: number) => `${(w ?? p.weight).toFixed(1)}%`;
+  const saved =
+    typeof window !== "undefined" ? (loadAllTargetStockWeights()[ownerName] ?? {}) : {};
+  const hasGroupRow = Object.prototype.hasOwnProperty.call(saved, p.ticker);
+  const groupTarNum = saved[p.ticker] ?? 0;
+  const groupedMemberMap =
+    typeof window !== "undefined" && hasGroupRow && isGroup ?
+      computeGroupedMemberPortfolioTargets(ownerName, p, groupTarNum)
+    : {};
   return (
     <div className="rounded-lg border border-white/15 bg-zinc-950/95 px-3 py-2 text-xs shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md">
       {isGroup ? (
         <div className="mb-1.5 space-y-1">
-          <p className="mb-1 font-bold text-cyan-400">{p.ticker}</p>
+          <div className="mb-0.5">
+            <p className="font-bold text-cyan-400">{p.ticker}</p>
+            {hasGroupRow ?
+              <p className="text-[10px] tabular-nums text-zinc-500">
+                그룹 목표 {groupTarNum.toFixed(1)}% · 포트 전체
+              </p>
+            : null}
+          </div>
           {entries.map((e, ei) => (
             <div
               key={`${p.ticker}-tt-${ei}-${e.symbol}-${e.name}`}
-              className="flex items-baseline justify-between gap-2"
+              className="flex items-baseline justify-between gap-3"
             >
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-semibold text-zinc-300">{e.symbol}</span>
-                <span className="text-zinc-500">{e.name}</span>
+              <div className="flex min-w-0 items-baseline gap-1.5">
+                <span className="shrink-0 font-semibold text-zinc-300">{e.symbol}</span>
+                <span className="truncate text-zinc-500">{e.name}</span>
               </div>
-              <span className="tabular-nums text-zinc-400">{entryPctText(e.weight)}</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums text-zinc-300">
+                {fmtCurrentVersusPortfolioTargetTooltip(
+                  e.weight ?? 0,
+                  resolvePortfolioTargetPctForTooltip(p, saved, e.symbol, groupedMemberMap, true),
+                )}
+              </span>
             </div>
           ))}
         </div>
@@ -250,13 +344,29 @@ function NeonTooltip({
           {entries[0]?.symbol && entries[0].symbol !== entries[0].name && (
             <p className="font-bold text-cyan-400">{entries[0].symbol}</p>
           )}
-          <p className="font-semibold text-foreground">
-            {p.displayName} <span className="tabular-nums text-zinc-400">({entryPctText(entries[0]?.weight)})</span>
+          <p className="font-semibold text-foreground">{p.displayName}</p>
+          <p className="mt-0.5 tabular-nums text-zinc-400">
+            {fmtCurrentVersusPortfolioTargetTooltip(
+              entries[0]?.weight ?? 0,
+              resolvePortfolioTargetPctForTooltip(
+                p,
+                saved,
+                entries[0]?.symbol ?? "",
+                groupedMemberMap,
+                false,
+              ),
+            )}
           </p>
         </div>
       )}
       <p className="text-muted-foreground">
-        {formatKrw(p.value)} · {p.weight.toFixed(1)}%
+        {formatKrw(p.value)} · 현재 포트 {p.weight.toFixed(1)}%
+        {hasGroupRow ?
+          <>
+            {" "}
+            · 그룹 목표 {groupTarNum.toFixed(1)}%
+          </>
+        : null}
       </p>
     </div>
   );
@@ -387,12 +497,16 @@ function TargetWeightSortableBarRow({
   setTarget,
   TARGET_AT,
   MAX_RATIO,
+  ownerName,
+  calcSplitBump,
 }: {
   slice: AllocationSlice;
   targetsByTicker: Record<string, number>;
   setTarget: (ticker: string, raw: string) => void;
   TARGET_AT: number;
   MAX_RATIO: number;
+  ownerName: string;
+  calcSplitBump: number;
 }) {
   const isCashRow = isCashRebalanceTicker(slice.ticker);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -438,7 +552,22 @@ function TargetWeightSortableBarRow({
 
   const tooltipEntries = entriesForAllocationTooltip(slice);
   const isGrouped = tooltipEntries.length > 1;
-  const tooltipPctText = (w?: number) => `${(w ?? slice.weight).toFixed(1)}%`;
+
+  const groupedMemberMap = useMemo(() => {
+    void calcSplitBump;
+    const gTar = targetsByTicker[slice.ticker] ?? 0;
+    if (!hasInputTarget || !isGrouped) return {} as Record<string, number>;
+    return computeGroupedMemberPortfolioTargets(ownerName, slice, gTar);
+  }, [
+    calcSplitBump,
+    ownerName,
+    slice,
+    slice.ticker,
+    slice.allEntries,
+    targetsByTicker,
+    hasInputTarget,
+    isGrouped,
+  ]);
 
   const outerStyle =
     !isCashRow ?
@@ -465,30 +594,47 @@ function TargetWeightSortableBarRow({
       : <span className="w-5 shrink-0" aria-hidden />}
 
       {tooltipEntries.length > 0 && (
-        <div className="pointer-events-none absolute bottom-[calc(100%+4px)] left-0 z-30 hidden w-max min-w-[140px] rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
+        <div className="pointer-events-none absolute bottom-[calc(100%+4px)] left-0 z-30 hidden min-w-[200px] w-max rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
           {isGrouped ?
             <div className="space-y-1">
-              <p className="font-bold text-cyan-400">{slice.ticker}</p>
+              <div>
+                <p className="font-bold text-cyan-400">{slice.ticker}</p>
+                {hasInputTarget ?
+                  <p className="text-[9px] tabular-nums text-zinc-500">그룹 목표 {target.toFixed(1)}%</p>
+                : null}
+              </div>
               {tooltipEntries.map((e, ei) => (
                 <div
                   key={`${slice.ticker}-bar-${ei}-${e.symbol}-${e.name}`}
-                  className="flex items-baseline justify-between gap-2"
+                  className="flex items-baseline justify-between gap-3"
                 >
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="font-semibold text-zinc-300">{e.symbol}</span>
-                    <span className="text-zinc-500">{e.name}</span>
+                  <div className="flex min-w-0 items-baseline gap-1.5">
+                    <span className="shrink-0 font-semibold text-zinc-300">{e.symbol}</span>
+                    <span className="truncate text-zinc-500">{e.name}</span>
                   </div>
-                  <span className="tabular-nums text-zinc-400">{tooltipPctText(e.weight)}</span>
+                  <span className="shrink-0 whitespace-nowrap tabular-nums text-zinc-300">
+                    {fmtCurrentVersusPortfolioTargetTooltip(
+                      e.weight ?? 0,
+                      resolvePortfolioTargetPctForTooltip(slice, targetsByTicker, e.symbol, groupedMemberMap, true),
+                    )}
+                  </span>
                 </div>
               ))}
             </div>
           : <div className="space-y-0.5">
               <p className="font-bold text-cyan-400">{tooltipEntries[0].symbol || slice.ticker}</p>
-              <p className="font-semibold text-zinc-200">
-                {tooltipEntries[0].name || slice.displayName}{" "}
-                <span className="tabular-nums text-zinc-400">
-                  ({tooltipPctText(tooltipEntries[0].weight)})
-                </span>
+              <p className="font-semibold text-zinc-200">{tooltipEntries[0].name || slice.displayName}</p>
+              <p className="tabular-nums text-zinc-400">
+                {fmtCurrentVersusPortfolioTargetTooltip(
+                  tooltipEntries[0].weight ?? 0,
+                  resolvePortfolioTargetPctForTooltip(
+                    slice,
+                    targetsByTicker,
+                    tooltipEntries[0].symbol ?? "",
+                    groupedMemberMap,
+                    false,
+                  ),
+                )}
               </p>
             </div>
           }
@@ -755,6 +901,8 @@ function TargetStockWeightNeu({
   const [saveFailedBrief, setSaveFailedBrief] = useState(false);
   const [splitCount, setSplitCount] = useState<string>("1");
   const [barTickerOrder, setBarTickerOrder] = useState<string[] | null>(null);
+  /** 계산기 종목별 분배 LS 변경 시 종목별 목표 표시 즉시 재계산 */
+  const [calcSplitBump, setCalcSplitBump] = useState(0);
 
   useEffect(() => {
     setBarTickerOrder(loadVisualOrderKeysForOwner(ownerName));
@@ -765,6 +913,13 @@ function TargetStockWeightNeu({
     window.addEventListener(REBALANCE_VISUAL_ORDER_REFRESH_EVENT, h);
     return () => window.removeEventListener(REBALANCE_VISUAL_ORDER_REFRESH_EVENT, h);
   }, [ownerName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const bump = () => setCalcSplitBump((n) => n + 1);
+    window.addEventListener(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT, bump);
+    return () => window.removeEventListener(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT, bump);
+  }, []);
 
   const sortNonCashByTarget = useCallback(
     (a: AllocationSlice, b: AllocationSlice) => {
@@ -1071,6 +1226,8 @@ function TargetStockWeightNeu({
                 setTarget={setTarget}
                 TARGET_AT={TARGET_AT}
                 MAX_RATIO={MAX_RATIO}
+                ownerName={ownerName}
+                calcSplitBump={calcSplitBump}
               />
             ))}
             {cashSlices.map((slice) => (
@@ -1081,6 +1238,8 @@ function TargetStockWeightNeu({
                 setTarget={setTarget}
                 TARGET_AT={TARGET_AT}
                 MAX_RATIO={MAX_RATIO}
+                ownerName={ownerName}
+                calcSplitBump={calcSplitBump}
               />
             ))}
           </div>
@@ -1325,7 +1484,7 @@ export function FamilyAllocationDonut({
                 aspectRatio={1.6}
               >
                 <Tooltip
-                  content={<NeonTooltip />}
+                  content={<NeonTooltip ownerName={ownerName} />}
                   allowEscapeViewBox={{ x: true, y: true }}
                   wrapperStyle={{ zIndex: 50 }}
                 />
