@@ -1329,34 +1329,6 @@ function RebalancingOwner({
             )}
           </div>
         )}
-        <label className="flex items-center gap-1 text-xs text-muted-foreground">
-          기준
-          <select
-            value={splitAmountMode}
-            onChange={(e) => setSplitAmountMode(e.target.value as SplitAmountMode)}
-            className="max-w-[10rem] rounded border border-border bg-background px-1.5 py-1 text-[11px] text-foreground outline-none ring-primary/35 focus:ring-1"
-            aria-label="회당 분할 금액 계산 방식"
-            title="매도(차액 음수)·분할 1회면 두 방식 동일. 매수이고 보유 평가가 있고 분할 n≥2일 때만 1차 금액이 달라집니다."
-          >
-            <option value="remainder">남은액 ÷ n</option>
-            <option value="milestone">목표÷n까지(1차)</option>
-          </select>
-        </label>
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-muted-foreground shrink-0">분할</span>
-          <input
-            type="number"
-            min={1}
-            max={20}
-            step={1}
-            className="w-14 rounded border bg-background px-2 py-1 text-right tabular-nums text-xs"
-            value={splitCountInput}
-            onChange={(e) => setSplitCountInput(e.target.value)}
-            aria-label="분할 횟수"
-          />
-          <span className="text-muted-foreground shrink-0">회</span>
-        </div>
-
         {/* 우측 컨트롤 */}
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <label className="flex cursor-pointer select-none items-center gap-1 text-xs text-muted-foreground">
@@ -1467,12 +1439,40 @@ function RebalancingOwner({
         </p>
       )}
 
-      {/* ── 상세 수치 테이블 (접기) ──────────────────────────────────────────── */}
-      <details>
-        <summary className="cursor-pointer select-none py-1 text-xs text-muted-foreground transition-colors hover:text-foreground sm:text-sm">
-          ▶ 상세 수치 보기
-        </summary>
-        <div className="mt-2 overflow-x-auto">
+      {/* ── 상세 수치 (항상 표시) ─────────────────────────────────────────────── */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/60 pb-2">
+          <h3 className="text-xs font-semibold text-foreground sm:text-sm">상세 수치</h3>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            기준
+            <select
+              value={splitAmountMode}
+              onChange={(e) => setSplitAmountMode(e.target.value as SplitAmountMode)}
+              className="max-w-[10rem] rounded border border-border bg-background px-1.5 py-1 text-[11px] text-foreground outline-none ring-primary/35 focus:ring-1"
+              aria-label="회당 분할 금액 계산 방식"
+              title="매도(차액 음수)·분할 1회면 두 방식 동일. 매수이고 보유 평가가 있고 분할 n≥2일 때만 1차 금액이 달라집니다."
+            >
+              <option value="remainder">남은액 ÷ n</option>
+              <option value="milestone">목표÷n까지(1차)</option>
+            </select>
+          </label>
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground shrink-0">분할</span>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              step={1}
+              className="w-14 rounded border bg-background px-2 py-1 text-right tabular-nums text-xs"
+              value={splitCountInput}
+              onChange={(e) => setSplitCountInput(e.target.value)}
+              aria-label="분할 횟수"
+            />
+            <span className="text-muted-foreground shrink-0">회</span>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm">
             <thead>
               <tr className="border-b text-muted-foreground">
@@ -1757,7 +1757,7 @@ function RebalancingOwner({
             : null}
           </div>
         </div>
-      </details>
+      </div>
 
       <p className="text-xs text-muted-foreground">
         * 주수는 현재가 기준 정수(floor) 참고용입니다. 실제 매매 시 수수료·가격 변동을 감안하세요.
