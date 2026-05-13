@@ -17,8 +17,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { fmtInt, parseKoreanIntDigits } from "@/lib/format-money";
 import {
   CALCULATOR_TARGET_STORAGE_KEY,
+  loadAllCalculatorMemberSplits,
   loadAllCalculatorTargetWeights,
   loadAllTargetStockWeights,
+  persistCalculatorMemberSplitsForOwner,
 } from "@/lib/portfolio-target-weights";
 import {
   loadVisualOrderKeysForOwner,
@@ -167,10 +169,38 @@ function formatTickerLabel(
   return `${s} (${n})`;
 }
 
-function calcMemberAdjustments(g: GroupAllocation, diffKrw: number): MemberAdj[] {
+function valueBasedMemberRatios(g: GroupAllocation): number[] {
   if (g.members.length === 0) return [];
-  return g.members.map((m) => {
-    const ratio = g.valueKrw > 0 ? m.valueKrw / g.valueKrw : 1 / g.members.length;
+  if (g.valueKrw > 0) return g.members.map((m) => m.valueKrw / g.valueKrw);
+  return g.members.map(() => 1 / g.members.length);
+}
+
+/** 입력된 양수 가중치로 정규화; 모두 비었거나 일부만 채우면 평가금 비율 */
+function memberRatiosForGroup(g: GroupAllocation, splitInputs?: Record<string, string>): number[] {
+  if (g.members.length === 0) return [];
+  const weights = g.members.map((m) => {
+    const raw = (splitInputs?.[m.symbol] ?? "").trim().replace(",", ".");
+    if (raw === "") return NaN;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) && n > 0 ? n : NaN;
+  });
+  const anyFilled = weights.some((w) => Number.isFinite(w));
+  const allFilled = weights.every((w) => Number.isFinite(w));
+  if (!anyFilled || !allFilled) return valueBasedMemberRatios(g);
+  const sum = weights.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+  if (sum <= 0) return valueBasedMemberRatios(g);
+  return weights.map((w) => (Number.isFinite(w) ? w / sum : 0));
+}
+
+function calcMemberAdjustments(
+  g: GroupAllocation,
+  diffKrw: number,
+  splitInputs?: Record<string, string>,
+): MemberAdj[] {
+  if (g.members.length === 0) return [];
+  const ratios = memberRatiosForGroup(g, splitInputs);
+  return g.members.map((m, i) => {
+    const ratio = ratios[i] ?? 0;
     const memberDiffKrw = diffKrw * ratio;
     return {
       ...m,
@@ -249,11 +279,19 @@ function RebalancingBarSortableRow({
   targets,
   setTargets,
   maxScale,
+  totalKrw,
+  memberSplitsForGroup,
+  onMemberSplitChange,
+  resolvedNameBySymbol,
 }: {
   row: ComputedRow;
   targets: Record<string, string>;
   setTargets: Dispatch<SetStateAction<Record<string, string>>>;
   maxScale: number;
+  totalKrw: number;
+  memberSplitsForGroup: Record<string, string>;
+  onMemberSplitChange: (groupKey: string, symbol: string, raw: string) => void;
+  resolvedNameBySymbol: Record<string, string>;
 }) {
   const pinned = isPinnedCashPortfolioGroup(row.groupKey);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -278,77 +316,122 @@ function RebalancingBarSortableRow({
     : undefined;
 
   return (
-    <div ref={setNodeRef} style={outerStyle} className="flex items-center border-b border-slate-800/40 py-1.5 last:border-0">
-      {!pinned ?
-        <button
-          type="button"
-          className="touch-none mr-0.5 shrink-0 cursor-grab rounded p-0.5 text-muted-foreground hover:text-foreground active:cursor-grabbing"
-          title="순서 이동 (드래그)"
-          {...attributes}
-          {...listeners}
-          aria-label={`${row.groupKey} 순서 변경`}
-        >
-          <GripVertical className="h-4 w-4" />
-        </button>
-      : <span className="mr-0.5 w-5 shrink-0" aria-hidden />}
+    <div
+      ref={setNodeRef}
+      style={outerStyle}
+      className="border-b border-slate-800/40 last:border-0"
+    >
+      <div className="flex items-center py-1.5">
+        {!pinned ?
+          <button
+            type="button"
+            className="touch-none mr-0.5 shrink-0 cursor-grab rounded p-0.5 text-muted-foreground hover:text-foreground active:cursor-grabbing"
+            title="순서 이동 (드래그)"
+            {...attributes}
+            {...listeners}
+            aria-label={`${row.groupKey} 순서 변경`}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+        : <span className="mr-0.5 w-5 shrink-0" aria-hidden />}
 
-      <div className="flex w-36 shrink-0 items-center gap-0.5 sm:w-44">
-        <span
-          className="min-w-0 flex-1 truncate text-[11px] font-medium sm:text-xs"
-          title={row.displayName || row.groupKey}
-        >
-          {row.displayName || row.groupKey}
-        </span>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={0.1}
-            className="w-12 rounded border bg-background px-1 py-0.5 text-right text-[11px] tabular-nums"
-            value={targets[row.groupKey] ?? ""}
-            onChange={(e) => setTargets((prev) => ({ ...prev, [row.groupKey]: e.target.value }))}
-            title="목표 비중 입력 — 계산기 전용 저장소에 자동 저장됩니다."
-            aria-label={`${row.displayName || row.groupKey} 목표 비중 퍼센트`}
+        <div className="flex w-36 shrink-0 items-center gap-0.5 sm:w-44">
+          <span
+            className="min-w-0 flex-1 truncate text-[11px] font-medium sm:text-xs"
+            title={row.displayName || row.groupKey}
+          >
+            {row.displayName || row.groupKey}
+          </span>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.1}
+              className="w-12 rounded border bg-background px-1 py-0.5 text-right text-[11px] tabular-nums"
+              value={targets[row.groupKey] ?? ""}
+              onChange={(e) => setTargets((prev) => ({ ...prev, [row.groupKey]: e.target.value }))}
+              title="목표 비중 입력 — 계산기 전용 저장소에 자동 저장됩니다."
+              aria-label={`${row.displayName || row.groupKey} 목표 비중 퍼센트`}
+            />
+            <span className="text-[10px] text-muted-foreground">%</span>
+          </div>
+        </div>
+
+        <div className="relative mx-1.5 h-5 flex-1 min-w-0">
+          <div className="absolute inset-y-1 inset-x-0 rounded-sm bg-slate-800/60" />
+          {[0.25, 0.5, 0.75].map((f) => (
+            <div
+              key={f}
+              className="pointer-events-none absolute inset-y-1 w-px bg-slate-700/40"
+              style={{ left: `${f * 100}%` }}
+            />
+          ))}
+          <div
+            className={`absolute inset-y-1 left-0 rounded-sm transition-all duration-300 ${
+              rowIsOver ? "bg-emerald-500/75" : rowIsUnder ? "bg-rose-500/75" : "bg-slate-500/60"
+            }`}
+            style={{ width: `${currentBarPct}%` }}
           />
-          <span className="text-[10px] text-muted-foreground">%</span>
+          {row.targetPct > 0 ?
+            <div
+              className="absolute inset-y-0 w-0 border-l-2 border-dashed border-white/55 transition-all duration-300"
+              style={{ left: `${targetLinePct}%` }}
+            />
+          : null}
+        </div>
+
+        <div className="w-24 shrink-0 text-right text-[11px] sm:w-28">
+          {isCash ?
+            <CashAllocationDeviationLabel targetPct={row.targetPct} actualPct={row.currentPct} />
+          : rowIsOver ?
+            <span className="font-medium tabular-nums text-emerald-400">▼+{absDiff.toFixed(1)}%p 초과</span>
+          : rowIsUnder ?
+            <span className="font-medium tabular-nums text-rose-400">▲{absDiff.toFixed(1)}%p 부족</span>
+          : (
+            <span className="text-muted-foreground">✓</span>
+          )}
         </div>
       </div>
 
-      <div className="relative mx-1.5 h-5 flex-1 min-w-0">
-        <div className="absolute inset-y-1 inset-x-0 rounded-sm bg-slate-800/60" />
-        {[0.25, 0.5, 0.75].map((f) => (
-          <div
-            key={f}
-            className="pointer-events-none absolute inset-y-1 w-px bg-slate-700/40"
-            style={{ left: `${f * 100}%` }}
-          />
-        ))}
-        <div
-          className={`absolute inset-y-1 left-0 rounded-sm transition-all duration-300 ${
-            rowIsOver ? "bg-emerald-500/75" : rowIsUnder ? "bg-rose-500/75" : "bg-slate-500/60"
-          }`}
-          style={{ width: `${currentBarPct}%` }}
-        />
-        {row.targetPct > 0 ?
-          <div
-            className="absolute inset-y-0 w-0 border-l-2 border-dashed border-white/55 transition-all duration-300"
-            style={{ left: `${targetLinePct}%` }}
-          />
-        : null}
-      </div>
-
-      <div className="w-24 shrink-0 text-right text-[11px] sm:w-28">
-        {isCash ?
-          <CashAllocationDeviationLabel targetPct={row.targetPct} actualPct={row.currentPct} />
-        : rowIsOver ?
-          <span className="font-medium tabular-nums text-emerald-400">▼+{absDiff.toFixed(1)}%p 초과</span>
-        : rowIsUnder ?
-          <span className="font-medium tabular-nums text-rose-400">▲{absDiff.toFixed(1)}%p 부족</span>
-        : (
-          <span className="text-muted-foreground">✓</span>
-        )}
-      </div>
+      {!pinned && row.members.length > 0 ?
+        <div className="border-t border-dashed border-slate-800/55 pb-1.5 pt-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-7 sm:pl-8">
+            <span className="w-full text-[9px] font-medium uppercase tracking-wide text-muted-foreground/90">
+              종목별 분배 가중치 (전 줄 비우면 평가금 비율 · 모든 줄에 숫자 넣을 때만 적용)
+            </span>
+          </div>
+          <div className="mt-1 space-y-1 pl-7 sm:pl-8">
+            {row.members.map((m) => {
+              const portPct = totalKrw > 0 ? (m.valueKrw / totalKrw) * 100 : 0;
+              return (
+                <div key={`${row.groupKey}:${m.symbol}`} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                  <span className="min-w-[8rem] max-w-[14rem] truncate font-medium text-muted-foreground">
+                    {formatTickerLabel(m.symbol, m.name, resolvedNameBySymbol)}
+                  </span>
+                  <span className="tabular-nums text-muted-foreground/90">
+                    현재 {portPct.toFixed(2)}% · {fmtKrw(m.valueKrw)}
+                  </span>
+                  <label className="ml-auto flex items-center gap-1 sm:ml-0">
+                    <span className="sr-only">{m.symbol} 분배 가중치</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      placeholder="자동"
+                      className="w-16 rounded border bg-background px-1 py-0.5 text-right tabular-nums"
+                      value={memberSplitsForGroup[m.symbol] ?? ""}
+                      onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
+                      aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 매매액 분배 가중치`}
+                      title="그룹 매매 차액을 종목별로 나눌 비율입니다. 같은 그룹 종목 줄마다 모두 양수를 넣어야 적용되고, 하나라도 비우면 평가금 비율로 계산합니다."
+                    />
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      : null}
     </div>
   );
 }
@@ -397,6 +480,55 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
       return next;
     });
   }, [groups, ownerName]);
+
+  /** 그룹 내 종목별 매매액 분배 가중치 (계산기 전용 LS) */
+  const [memberSplits, setMemberSplits] = useState<Record<string, Record<string, string>>>(() =>
+    typeof window !== "undefined"
+      ? (() => {
+          const raw = loadAllCalculatorMemberSplits()[ownerName] ?? {};
+          const out: Record<string, Record<string, string>> = {};
+          for (const g of groups) {
+            const row: Record<string, string> = {};
+            for (const m of g.members) {
+              const n = raw[g.groupKey]?.[m.symbol];
+              row[m.symbol] = n != null && Number.isFinite(n) ? String(n) : "";
+            }
+            if (Object.keys(row).length > 0) out[g.groupKey] = row;
+          }
+          return out;
+        })()
+      : {},
+  );
+
+  useEffect(() => {
+    setMemberSplits((prev) => {
+      const saved = loadAllCalculatorMemberSplits()[ownerName] ?? {};
+      const next: Record<string, Record<string, string>> = {};
+      for (const g of groups) {
+        const gk = g.groupKey;
+        const row: Record<string, string> = {};
+        for (const m of g.members) {
+          const prevV = prev[gk]?.[m.symbol];
+          const n = saved[gk]?.[m.symbol];
+          row[m.symbol] =
+            prevV !== undefined && prevV !== ""
+              ? prevV
+              : n != null && Number.isFinite(n)
+                ? String(n)
+                : "";
+        }
+        if (Object.keys(row).length > 0) next[gk] = row;
+      }
+      return next;
+    });
+  }, [groups, ownerName]);
+
+  const handleMemberSplitChange = useCallback((groupKey: string, symbol: string, raw: string) => {
+    setMemberSplits((prev) => ({
+      ...prev,
+      [groupKey]: { ...(prev[groupKey] ?? {}), [symbol]: raw },
+    }));
+  }, []);
 
   const [visualOrderKeys, setVisualOrderKeys] = useState<string[] | null>(null);
 
@@ -492,7 +624,12 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
       return orderedGroups.map((g) => {
         const targetPct = parseFloat(targets[g.groupKey] ?? "0") || 0;
         const diffKrw = (targetPct / 100) * totalKrw - g.valueKrw;
-        return { ...g, targetPct, diffKrw, memberAdjustments: calcMemberAdjustments(g, diffKrw) };
+        return {
+          ...g,
+          targetPct,
+          diffKrw,
+          memberAdjustments: calcMemberAdjustments(g, diffKrw, memberSplits[g.groupKey]),
+        };
       }).filter((r) => !isGhostRow(r));
     }
 
@@ -510,9 +647,14 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
 
     return rawRows.map(({ g, targetPct, rawDiff }) => {
       const diffKrw = rawDiff > 0 ? rawDiff * scale : 0;
-      return { ...g, targetPct, diffKrw, memberAdjustments: calcMemberAdjustments(g, diffKrw) };
+      return {
+        ...g,
+        targetPct,
+        diffKrw,
+        memberAdjustments: calcMemberAdjustments(g, diffKrw, memberSplits[g.groupKey]),
+      };
     }).filter((r) => !isGhostRow(r));
-  }, [orderedGroups, targets, totalKrw, mode, newMoneyKrw]);
+  }, [orderedGroups, targets, totalKrw, mode, newMoneyKrw, memberSplits]);
 
   const { sortableBarGroupKeys, sortableContextIds } = useMemo(() => {
     const nk = rows.filter((r) => !isPinnedCashPortfolioGroup(r.groupKey)).map((r) => r.groupKey);
@@ -595,6 +737,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
 
   /** handleLoad가 localStorage를 덮어쓰기 전에 취소할 수 있도록 ref로 타이머 ID 관리 */
   const autosaveTimerRef = useRef<number | null>(null);
+  const memberSplitAutosaveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -612,6 +755,24 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     };
   }, [targets, ownerName]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (memberSplitAutosaveTimerRef.current != null) {
+      window.clearTimeout(memberSplitAutosaveTimerRef.current);
+    }
+    const id = window.setTimeout(() => {
+      memberSplitAutosaveTimerRef.current = null;
+      persistCalculatorMemberSplitsForOwner(ownerName, memberSplits);
+    }, 420) as unknown as number;
+    memberSplitAutosaveTimerRef.current = id;
+    return () => {
+      if (memberSplitAutosaveTimerRef.current != null) {
+        window.clearTimeout(memberSplitAutosaveTimerRef.current);
+        memberSplitAutosaveTimerRef.current = null;
+      }
+    };
+  }, [memberSplits, ownerName]);
+
   /** 대시보드 목표 비중 불러오기 — localStorage 목표와 페이지 요약본을 합산해 현재 행(groups)에 맞춘다 */
   const handleLoad = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -627,6 +788,10 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     if (autosaveTimerRef.current != null) {
       window.clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
+    }
+    if (memberSplitAutosaveTimerRef.current != null) {
+      window.clearTimeout(memberSplitAutosaveTimerRef.current);
+      memberSplitAutosaveTimerRef.current = null;
     }
 
     // 계산기 localStorage를 병합된 대시보드 목표로 교체
@@ -649,9 +814,10 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
 
   const handleSave = useCallback(() => {
     persistCalculatorTargets(ownerName, targets);
+    persistCalculatorMemberSplitsForOwner(ownerName, memberSplits);
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 2000);
-  }, [targets, ownerName]);
+  }, [targets, ownerName, memberSplits]);
 
   /** 초기화: 계산기 저장값으로 복원 (없으면 0%) */
   const handleReset = useCallback(() => {
@@ -661,6 +827,17 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
       init[g.groupKey] = dashboardTargetInputString(saved, g.groupKey);
     }
     setTargets(init);
+    const msaved = loadAllCalculatorMemberSplits()[ownerName] ?? {};
+    const msNext: Record<string, Record<string, string>> = {};
+    for (const g of groups) {
+      const row: Record<string, string> = {};
+      for (const m of g.members) {
+        const n = msaved[g.groupKey]?.[m.symbol];
+        row[m.symbol] = n != null && Number.isFinite(n) ? String(n) : "";
+      }
+      if (Object.keys(row).length > 0) msNext[g.groupKey] = row;
+    }
+    setMemberSplits(msNext);
   }, [groups, ownerName]);
 
   return (
@@ -803,6 +980,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
           대시보드 목표를 가져오려면「대시보드 불러오기」를 누르세요. 미설정 그룹은 0%로 표시됩니다.
           보유·평가가 없는 줄(S&P500 등)은 현재 비중이 0%이고 바가 비어 있는 것이 정상입니다(데이터 누락이 아닙니다).
           목표 합은 보통 100%입니다. 우측 숫자가 빨간 ▲면 합이 100%를 넘어 한 번에 만족할 수 없는 조합입니다 — 일부 목표를 줄이거나 초과 분야에서 줄여 주세요.
+          같은 그룹에 종목이 여러 개면 아래에서 분배 가중치를 넣을 수 있습니다. 같은 그룹의 모든 종목 줄에 양수를 넣을 때만 반영되고, 하나라도 비우면 평가금 비율로 나눕니다.
         </p>
 
         {/* 스케일 헤더 — 바 행과 동일한 레이아웃으로 정렬 */}
@@ -836,6 +1014,10 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                   targets={targets}
                   setTargets={setTargets}
                   maxScale={maxScale}
+                  totalKrw={totalKrw}
+                  memberSplitsForGroup={memberSplits[r.groupKey] ?? {}}
+                  onMemberSplitChange={handleMemberSplitChange}
+                  resolvedNameBySymbol={resolvedNameBySymbol}
                 />
               ))}
             </div>

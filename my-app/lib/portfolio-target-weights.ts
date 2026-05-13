@@ -7,6 +7,9 @@ export const TARGET_WEIGHT_STORAGE_KEY = "portfolio_target_stock_weight_v1";
 /** 리밸런싱 계산기 전용 목표 비중 키 (대시보드와 독립) */
 export const CALCULATOR_TARGET_STORAGE_KEY = "portfolio_calculator_target_weight_v1";
 
+/** 계산기 그룹 내 종목별 매매액 분배 가중치 (보유자 → 그룹키 → 심볼 → 양수 가중치) */
+export const CALCULATOR_MEMBER_SPLIT_STORAGE_KEY = "portfolio_calculator_member_split_v1";
+
 /** 원형 차트 내부 교차 탭 동기화용 브라우저 이벤트 */
 export const PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT = "portfolio-target-weights-refresh";
 
@@ -81,4 +84,77 @@ export function mergeAndPersistTargetStockWeightsFromServer(server: unknown): vo
     return;
   }
   window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
+}
+
+/** 계산기 그룹 내 종목 분배 가중치: owner → groupKey → symbol → weight */
+export type CalculatorMemberSplitByOwner = Record<string, Record<string, Record<string, number>>>;
+
+export function loadAllCalculatorMemberSplits(): CalculatorMemberSplitByOwner {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(CALCULATOR_MEMBER_SPLIT_STORAGE_KEY);
+    if (!raw) return {};
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null) return {};
+    return sanitizeCalculatorMemberSplitsRoot(p);
+  } catch {
+    return {};
+  }
+}
+
+function sanitizeCalculatorMemberSplitsRoot(raw: unknown): CalculatorMemberSplitByOwner {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: CalculatorMemberSplitByOwner = {};
+  for (const [owner, mid] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof owner !== "string" || !owner.trim()) continue;
+    if (!mid || typeof mid !== "object" || Array.isArray(mid)) continue;
+    const groups: Record<string, Record<string, number>> = {};
+    for (const [gk, symMap] of Object.entries(mid as Record<string, unknown>)) {
+      if (typeof gk !== "string" || !gk.trim()) continue;
+      if (!symMap || typeof symMap !== "object" || Array.isArray(symMap)) continue;
+      const inner: Record<string, number> = {};
+      for (const [sym, v] of Object.entries(symMap as Record<string, unknown>)) {
+        if (typeof sym !== "string" || !sym.trim()) continue;
+        const n = Number(v);
+        if (Number.isFinite(n) && n >= 0 && n <= 1e9) inner[sym.trim()] = n;
+      }
+      if (Object.keys(inner).length > 0) groups[gk.trim()] = inner;
+    }
+    if (Object.keys(groups).length > 0) out[owner.trim()] = groups;
+  }
+  return out;
+}
+
+/** 문자열 상태(입력칸)를 숫자 맵으로 정제해 한 보유자 분만 통째로 저장 */
+export function persistCalculatorMemberSplitsForOwner(
+  ownerName: string,
+  splits: Record<string, Record<string, string>>,
+): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const all = loadAllCalculatorMemberSplits();
+    const nested: Record<string, Record<string, number>> = {};
+    for (const [gk, symMap] of Object.entries(splits)) {
+      const g = gk.trim();
+      if (!g) continue;
+      const row: Record<string, number> = {};
+      for (const [sym, val] of Object.entries(symMap)) {
+        const s = sym.trim();
+        if (!s) continue;
+        const raw = typeof val === "string" ? val.trim().replace(",", ".") : "";
+        if (raw === "") continue;
+        const n = parseFloat(raw);
+        if (!Number.isFinite(n) || n < 0) continue;
+        row[s] = Math.min(1e9, n);
+      }
+      if (Object.keys(row).length > 0) nested[g] = row;
+    }
+    const before = JSON.stringify(all[ownerName] ?? {});
+    all[ownerName] = nested;
+    if (JSON.stringify(all[ownerName]) === before) return false;
+    window.localStorage.setItem(CALCULATOR_MEMBER_SPLIT_STORAGE_KEY, JSON.stringify(all));
+    return true;
+  } catch {
+    return false;
+  }
 }
