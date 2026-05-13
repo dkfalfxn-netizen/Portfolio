@@ -10,6 +10,11 @@ export const CALCULATOR_TARGET_STORAGE_KEY = "portfolio_calculator_target_weight
 /** 계산기 그룹 내 종목별 매매액 분배 가중치 (보유자 → 그룹키 → 심볼 → 양수 가중치) */
 export const CALCULATOR_MEMBER_SPLIT_STORAGE_KEY = "portfolio_calculator_member_split_v1";
 
+/** 그룹 내 분배 입력 해석: 상대 가중치 vs 종목별 포트 목표%(합을 그룹 목표%에 맞게 스케일) */
+export const CALCULATOR_MEMBER_SPLIT_MODE_STORAGE_KEY = "portfolio_calculator_member_split_mode_v1";
+
+export type CalculatorMemberSplitMode = "weight" | "targetPct";
+
 /** 원형 차트 내부 교차 탭 동기화용 브라우저 이벤트 */
 export const PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT = "portfolio-target-weights-refresh";
 
@@ -153,6 +158,59 @@ export function persistCalculatorMemberSplitsForOwner(
     all[ownerName] = nested;
     if (JSON.stringify(all[ownerName]) === before) return false;
     window.localStorage.setItem(CALCULATOR_MEMBER_SPLIT_STORAGE_KEY, JSON.stringify(all));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type CalculatorMemberSplitModeByOwner = Record<
+  string,
+  Record<string, CalculatorMemberSplitMode>
+>;
+
+export function loadAllCalculatorMemberSplitModes(): CalculatorMemberSplitModeByOwner {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(CALCULATOR_MEMBER_SPLIT_MODE_STORAGE_KEY);
+    if (!raw) return {};
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null) return {};
+    const out: CalculatorMemberSplitModeByOwner = {};
+    for (const [owner, mid] of Object.entries(p as Record<string, unknown>)) {
+      if (typeof owner !== "string" || !owner.trim()) continue;
+      if (!mid || typeof mid !== "object" || Array.isArray(mid)) continue;
+      const groups: Record<string, CalculatorMemberSplitMode> = {};
+      for (const [gk, v] of Object.entries(mid as Record<string, unknown>)) {
+        if (typeof gk !== "string" || !gk.trim()) continue;
+        if (v === "weight" || v === "targetPct") groups[gk.trim()] = v;
+      }
+      if (Object.keys(groups).length > 0) out[owner.trim()] = groups;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** 그룹별 분배 방식만 저장 */
+export function persistCalculatorMemberSplitModesForOwner(
+  ownerName: string,
+  modes: Record<string, CalculatorMemberSplitMode>,
+): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const all = loadAllCalculatorMemberSplitModes();
+    const cleaned: Record<string, CalculatorMemberSplitMode> = {};
+    for (const [gk, v] of Object.entries(modes)) {
+      const g = gk.trim();
+      if (!g) continue;
+      if (v === "weight" || v === "targetPct") cleaned[g] = v;
+    }
+    const before = JSON.stringify(all[ownerName] ?? {});
+    all[ownerName] = cleaned;
+    if (JSON.stringify(all[ownerName]) === before) return false;
+    window.localStorage.setItem(CALCULATOR_MEMBER_SPLIT_MODE_STORAGE_KEY, JSON.stringify(all));
     return true;
   } catch {
     return false;

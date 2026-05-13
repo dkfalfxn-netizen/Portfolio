@@ -17,9 +17,12 @@ import { CSS } from "@dnd-kit/utilities";
 import { fmtInt, parseKoreanIntDigits } from "@/lib/format-money";
 import {
   CALCULATOR_TARGET_STORAGE_KEY,
+  type CalculatorMemberSplitMode,
+  loadAllCalculatorMemberSplitModes,
   loadAllCalculatorMemberSplits,
   loadAllCalculatorTargetWeights,
   loadAllTargetStockWeights,
+  persistCalculatorMemberSplitModesForOwner,
   persistCalculatorMemberSplitsForOwner,
 } from "@/lib/portfolio-target-weights";
 import {
@@ -214,12 +217,58 @@ function memberRatiosForGroup(g: GroupAllocation, splitInputs?: Record<string, s
   return weights.map((w) => (Number.isFinite(w) ? w / sum : 0));
 }
 
+/** 종목 줄에 포트 전체 기준 목표 % 입력(0~100). 모두 채우면 합을 그룹 목표%에 맞게 스케일해 목표액·차액 산출 */
+function tryMemberAdjustmentsTargetPortfolioPct(
+  g: GroupAllocation,
+  splitInputs: Record<string, string> | undefined,
+  totalKrwEffective: number,
+  groupTargetPct: number,
+): MemberAdj[] | null {
+  if (!splitInputs || g.members.length === 0) return null;
+  const pcts: number[] = [];
+  for (const m of g.members) {
+    const raw = (splitInputs[m.symbol] ?? "").trim().replace(",", ".");
+    if (raw === "") return null;
+    const n = parseFloat(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+    pcts.push(n);
+  }
+  const sumPct = pcts.reduce((a, b) => a + b, 0);
+  if (sumPct <= 0) return null;
+  const scale = groupTargetPct / sumPct;
+  return g.members.map((m, i) => {
+    const pct = pcts[i]! * scale;
+    const targetKrw = (pct / 100) * totalKrwEffective;
+    const diffKrw = targetKrw - m.valueKrw;
+    return {
+      ...m,
+      diffKrw,
+      shares: m.priceKrw > 0 ? diffKrw / m.priceKrw : null,
+    };
+  });
+}
+
 function calcMemberAdjustments(
   g: GroupAllocation,
   diffKrw: number,
-  splitInputs?: Record<string, string>,
+  splitInputs: Record<string, string> | undefined,
+  ctx: {
+    splitMode: CalculatorMemberSplitMode;
+    allowTargetPct: boolean;
+    totalKrwEffective: number;
+    groupTargetPct: number;
+  },
 ): MemberAdj[] {
   if (g.members.length === 0) return [];
+  if (ctx.allowTargetPct && ctx.splitMode === "targetPct") {
+    const direct = tryMemberAdjustmentsTargetPortfolioPct(
+      g,
+      splitInputs,
+      ctx.totalKrwEffective,
+      ctx.groupTargetPct,
+    );
+    if (direct) return direct;
+  }
   const ratios = memberRatiosForGroup(g, splitInputs);
   return g.members.map((m, i) => {
     const ratio = ratios[i] ?? 0;
@@ -304,6 +353,9 @@ function RebalancingBarSortableRow({
   totalKrw,
   memberSplitsForGroup,
   onMemberSplitChange,
+  memberSplitMode,
+  onMemberSplitModeChange,
+  rebalanceMode,
   resolvedNameBySymbol,
 }: {
   row: ComputedRow;
@@ -313,6 +365,9 @@ function RebalancingBarSortableRow({
   totalKrw: number;
   memberSplitsForGroup: Record<string, string>;
   onMemberSplitChange: (groupKey: string, symbol: string, raw: string) => void;
+  memberSplitMode: CalculatorMemberSplitMode;
+  onMemberSplitModeChange: (groupKey: string, mode: CalculatorMemberSplitMode) => void;
+  rebalanceMode: Mode;
   resolvedNameBySymbol: Record<string, string>;
 }) {
   const pinned = isPinnedCashPortfolioGroup(row.groupKey);
@@ -327,6 +382,26 @@ function RebalancingBarSortableRow({
   const currentBarPct = Math.min((row.currentPct / maxScale) * 100, 100);
   const targetLinePct = Math.min((row.targetPct / maxScale) * 100, 100);
   const isCash = pinned;
+  const groupTargetPct = parseFloat(targets[row.groupKey] ?? "0") || 0;
+  let targetPctInputSum: number | null = null;
+  if (memberSplitMode === "targetPct") {
+    let acc = 0;
+    let allFilled = true;
+    for (const m of row.members) {
+      const raw = (memberSplitsForGroup[m.symbol] ?? "").trim().replace(",", ".");
+      if (raw === "") {
+        allFilled = false;
+        break;
+      }
+      const n = parseFloat(raw);
+      if (!Number.isFinite(n) || n < 0) {
+        allFilled = false;
+        break;
+      }
+      acc += n;
+    }
+    targetPctInputSum = allFilled ? acc : null;
+  }
 
   const outerStyle =
     !pinned ?
@@ -418,14 +493,68 @@ function RebalancingBarSortableRow({
 
       {!pinned && row.members.length > 0 ?
         <div className="border-t border-dashed border-slate-800/55 pb-1.5 pt-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-7 sm:pl-8">
+          <div className="flex flex-wrap items-center gap-2 pl-7 sm:pl-8">
+            <span className="text-[9px] font-medium text-muted-foreground shrink-0">그룹 내 분배</span>
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                title="매매 차액을 상대 비율로 나눕니다."
+                className={`rounded border px-1.5 py-0.5 text-[9px] transition-colors ${
+                  memberSplitMode === "weight"
+                    ? "border-primary bg-primary/15 text-foreground"
+                    : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/70"
+                }`}
+                onClick={() => onMemberSplitModeChange(row.groupKey, "weight")}
+              >
+                가중치
+              </button>
+              <button
+                type="button"
+                disabled={rebalanceMode === "buy-only"}
+                title={
+                  rebalanceMode === "buy-only"
+                    ? "신규 투자금 모드에서는 종목별 목표%를 쓸 수 없습니다."
+                    : "각 종목의 포트폴리오 목표 %(합은 그룹 슬라이더 %에 맞게 자동 스케일)."
+                }
+                className={`rounded border px-1.5 py-0.5 text-[9px] transition-colors ${
+                  rebalanceMode === "buy-only"
+                    ? "cursor-not-allowed opacity-45"
+                    : memberSplitMode === "targetPct"
+                      ? "border-primary bg-primary/15 text-foreground"
+                      : "border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/70"
+                }`}
+                onClick={() => rebalanceMode !== "buy-only" && onMemberSplitModeChange(row.groupKey, "targetPct")}
+              >
+                종목 목표%
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-7 sm:pl-8 mt-1">
             <span className="w-full text-[9px] font-medium leading-snug text-muted-foreground/95">
-              그룹 매매 차액을 종목끼리 나눌 비율(가중치)입니다. 포트폴리오 %나 목표 %가 아닙니다.
-              예: 반반 → 각각 <span className="tabular-nums">1</span>과{" "}
-              <span className="tabular-nums">1</span>(또는 <span className="tabular-nums">50</span>과{" "}
-              <span className="tabular-nums">50</span> — 숫자 크기는 비율만 의미합니다).
-              같은 그룹 종목 줄을 <span className="font-medium text-foreground/90">모두</span> 양수로 채워야 적용되고,
-              하나라도 비우면 평가금 비율로 자동 분배합니다.
+              {memberSplitMode === "weight" ?
+                <>
+                  그룹 <span className="text-foreground/90">매매 차액</span>을 종목끼리 나눌{" "}
+                  <span className="text-foreground/90">상대 가중치</span>입니다(포트 % 아님).
+                  예: 반반 → <span className="tabular-nums">1</span>과 <span className="tabular-nums">1</span>.
+                  같은 그룹 종목 줄을 <span className="font-medium text-foreground/90">모두</span> 양수로 채워야 적용되고,
+                  하나라도 비우면 평가금 비율로 자동 분배합니다.
+                </>
+              : (
+                <>
+                  각 종목의 <span className="text-foreground/90">포트폴리오 목표 비중(%)</span>을 넣습니다.
+                  예: 그룹 목표가 <span className="tabular-nums">{groupTargetPct.toFixed(1)}</span>%일 때{" "}
+                  <span className="tabular-nums">5</span>·<span className="tabular-nums">5</span>·
+                  <span className="tabular-nums">4</span>·<span className="tabular-nums">6</span>처럼 합이{" "}
+                  <span className="tabular-nums">20</span>이 되게 맞추거나, 합이 달라도{" "}
+                  <span className="text-foreground/90">비율 유지한 채 그룹 목표%</span>에 맞게 자동 스케일합니다.
+                  모든 종목 줄을 채워야 적용됩니다. 비우면 가중치 모드와 같이 평가금 비율로 나눕니다.
+                  {targetPctInputSum !== null && (
+                    <span className="ml-1 tabular-nums text-foreground/80">
+                      (입력 합 {targetPctInputSum.toFixed(2)}% → 그룹 {groupTargetPct.toFixed(1)}%에 맞춤)
+                    </span>
+                  )}
+                </>
+              )}
             </span>
           </div>
           <div className="mt-1 space-y-1 pl-7 sm:pl-8">
@@ -440,18 +569,31 @@ function RebalancingBarSortableRow({
                     현재 {portPct.toFixed(2)}% · {fmtKrw(m.valueKrw)}
                   </span>
                   <label className="ml-auto flex items-center gap-1 sm:ml-0">
-                    <span className="shrink-0 text-[9px] text-muted-foreground">가중치</span>
-                    <span className="sr-only">{m.symbol} 매매 차액 분배 가중치</span>
+                    <span className="shrink-0 text-[9px] text-muted-foreground">
+                      {memberSplitMode === "weight" ? "가중치" : "목표%"}
+                    </span>
+                    <span className="sr-only">
+                      {m.symbol}{" "}
+                      {memberSplitMode === "weight" ? "매매 차액 분배 가중치" : "포트폴리오 목표 비중 퍼센트"}
+                    </span>
                     <input
                       type="number"
                       min={0}
+                      max={memberSplitMode === "targetPct" ? 100 : undefined}
                       step={0.1}
-                      placeholder="비움"
+                      placeholder={memberSplitMode === "weight" ? "비움" : "예: 5"}
                       className="w-16 rounded border bg-background px-1 py-0.5 text-right tabular-nums"
                       value={memberSplitsForGroup[m.symbol] ?? ""}
                       onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
-                      aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 매매 차액 분배 가중치`}
-                      title="이 종목이 그룹 전체 매매 차액 중 차지할 비중의 비율. 모든 종목 줄에 양수를 넣어야 적용됩니다. 비우면 평가금 비율."
+                      aria-label={
+                        `${row.displayName || row.groupKey} · ${m.symbol} ` +
+                        (memberSplitMode === "weight" ? "매매 차액 분배 가중치" : "포트폴리오 목표 %")
+                      }
+                      title={
+                        memberSplitMode === "weight"
+                          ? "상대 비율. 모든 종목 줄에 양수를 넣어야 적용. 비우면 평가금 비율."
+                          : "포트폴리오에서 이 종목이 차지할 목표 %. 모든 줄 입력 시 합을 그룹 목표에 맞게 스케일."
+                      }
                     />
                   </label>
                 </div>
@@ -566,6 +708,38 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     }));
   }, []);
 
+  const [memberSplitModes, setMemberSplitModes] = useState<Record<string, CalculatorMemberSplitMode>>(() => {
+    if (typeof window === "undefined") return {};
+    const saved = loadAllCalculatorMemberSplitModes()[ownerName] ?? {};
+    const out: Record<string, CalculatorMemberSplitMode> = {};
+    for (const g of groups) {
+      const m = saved[g.groupKey];
+      out[g.groupKey] = m === "targetPct" || m === "weight" ? m : "weight";
+    }
+    return out;
+  });
+
+  useEffect(() => {
+    setMemberSplitModes((prev) => {
+      const saved = loadAllCalculatorMemberSplitModes()[ownerName] ?? {};
+      const keys = new Set(groups.map((g) => g.groupKey));
+      const next: Record<string, CalculatorMemberSplitMode> = {};
+      for (const g of groups) {
+        const gk = g.groupKey;
+        next[gk] = prev[gk] ?? saved[gk] ?? "weight";
+      }
+      for (const k of Object.keys(next)) {
+        if (!keys.has(k)) delete next[k];
+      }
+      return next;
+    });
+  }, [groups, ownerName]);
+
+  const handleMemberSplitModeChange = useCallback((groupKey: string, nextMode: CalculatorMemberSplitMode) => {
+    setMemberSplitModes((prev) => ({ ...prev, [groupKey]: nextMode }));
+    setMemberSplits((prev) => ({ ...prev, [groupKey]: {} }));
+  }, []);
+
   const [visualOrderKeys, setVisualOrderKeys] = useState<string[] | null>(null);
 
   useEffect(() => {
@@ -657,6 +831,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     };
 
     if (mode === "buy-sell") {
+      const totalEff = totalKrw;
       return orderedGroups.map((g) => {
         const targetPct = parseFloat(targets[g.groupKey] ?? "0") || 0;
         const diffKrw = (targetPct / 100) * totalKrw - g.valueKrw;
@@ -664,13 +839,19 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
           ...g,
           targetPct,
           diffKrw,
-          memberAdjustments: calcMemberAdjustments(g, diffKrw, memberSplits[g.groupKey]),
+          memberAdjustments: calcMemberAdjustments(g, diffKrw, memberSplits[g.groupKey], {
+            splitMode: memberSplitModes[g.groupKey] ?? "weight",
+            allowTargetPct: true,
+            totalKrwEffective: totalEff,
+            groupTargetPct: targetPct,
+          }),
         };
       }).filter((r) => !isGhostRow(r));
     }
 
     // buy-only
     const newTotal = totalKrw + Math.max(newMoneyKrw, 0);
+    const totalEff = newTotal;
     const rawRows = orderedGroups.map((g) => {
       const targetPct = parseFloat(targets[g.groupKey] ?? "0") || 0;
       const rawDiff = (targetPct / 100) * newTotal - g.valueKrw;
@@ -687,10 +868,15 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
         ...g,
         targetPct,
         diffKrw,
-        memberAdjustments: calcMemberAdjustments(g, diffKrw, memberSplits[g.groupKey]),
+        memberAdjustments: calcMemberAdjustments(g, diffKrw, memberSplits[g.groupKey], {
+          splitMode: memberSplitModes[g.groupKey] ?? "weight",
+          allowTargetPct: false,
+          totalKrwEffective: totalEff,
+          groupTargetPct: targetPct,
+        }),
       };
     }).filter((r) => !isGhostRow(r));
-  }, [orderedGroups, targets, totalKrw, mode, newMoneyKrw, memberSplits]);
+  }, [orderedGroups, targets, totalKrw, mode, newMoneyKrw, memberSplits, memberSplitModes]);
 
   const { sortableBarGroupKeys, sortableContextIds } = useMemo(() => {
     const nk = rows.filter((r) => !isPinnedCashPortfolioGroup(r.groupKey)).map((r) => r.groupKey);
@@ -788,6 +974,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     const id = window.setTimeout(() => {
       memberSplitAutosaveTimerRef.current = null;
       persistCalculatorMemberSplitsForOwner(ownerName, memberSplits);
+      persistCalculatorMemberSplitModesForOwner(ownerName, memberSplitModes);
     }, 420) as unknown as number;
     memberSplitAutosaveTimerRef.current = id;
     return () => {
@@ -796,7 +983,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
         memberSplitAutosaveTimerRef.current = null;
       }
     };
-  }, [memberSplits, ownerName]);
+  }, [memberSplits, memberSplitModes, ownerName]);
 
   /** 대시보드 목표 비중 불러오기 — localStorage 목표와 페이지 요약본을 합산해 현재 행(groups)에 맞춘다 */
   const handleLoad = useCallback(() => {
@@ -840,9 +1027,10 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
   const handleSave = useCallback(() => {
     persistCalculatorTargets(ownerName, targets);
     persistCalculatorMemberSplitsForOwner(ownerName, memberSplits);
+    persistCalculatorMemberSplitModesForOwner(ownerName, memberSplitModes);
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 2000);
-  }, [targets, ownerName, memberSplits]);
+  }, [targets, ownerName, memberSplits, memberSplitModes]);
 
   /** 초기화: 계산기 저장값으로 복원 (없으면 0%) */
   const handleReset = useCallback(() => {
@@ -863,6 +1051,13 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
       if (Object.keys(row).length > 0) msNext[g.groupKey] = row;
     }
     setMemberSplits(msNext);
+    const modesSaved = loadAllCalculatorMemberSplitModes()[ownerName] ?? {};
+    const modesNext: Record<string, CalculatorMemberSplitMode> = {};
+    for (const g of groups) {
+      const m = modesSaved[g.groupKey];
+      modesNext[g.groupKey] = m === "targetPct" || m === "weight" ? m : "weight";
+    }
+    setMemberSplitModes(modesNext);
   }, [groups, ownerName]);
 
   return (
@@ -1006,7 +1201,9 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
           보유·평가가 없는 줄(S&P500 등)은 현재 비중이 0%이고 바가 비어 있는 것이 정상입니다(데이터 누락이 아닙니다).
           목표 합은 보통 100%입니다. 우측 숫자가 빨간 ▲면 합이 100%를 넘어 한 번에 만족할 수 없는 조합입니다 — 일부 목표를 줄이거나 초과 분야에서 줄여 주세요.
           목표 줄은 보유 그룹·관심종목에 해당하는 티커만 나타나며, 예전에 저장만 되어 있던 다른 이름(AI·원자력 등)은 더 이상 자동으로 붙지 않습니다.
-          같은 그룹에 종목이 여러 개면, 그룹 옆의 %는 전체 포트에서의 목표 비중이고, 펼친 줄 오른쪽 「가중치」는 그 그룹의 매수·매도 차액을 종목끼리 나눌 비율(임의 숫자, 합으로 정규화)입니다. 포트 %를 넣는 칸이 아닙니다. 모든 종목 줄을 양수로 채워야 적용되고 하나라도 비우면 평가금 비율로 나눕니다.
+          같은 그룹에 종목이 여러 개면, 그룹 옆의 %는 전체 포트 목표 비중입니다. 펼친 블록에서 「가중치」는 매매 차액을 나눌 상대 비율이고,
+          「종목 목표%」를 쓰면 각 줄에 포트폴리오 목표 %(예: 5·5·4·6)를 넣을 수 있으며 입력 합이 그룹 목표와 다르면 비율 유지한 채 자동 스케일합니다(매수+매도 모드만).
+          분배 입력이 비어 있거나 덜 채워지면 평가금 비율로 나눕니다.
           관심종목에 넣어 둔 티커·그룹명은 대시보드 바와 같이 해당 그룹 아래 종목 줄로 붙습니다.
         </p>
 
@@ -1044,6 +1241,9 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                   totalKrw={totalKrw}
                   memberSplitsForGroup={memberSplits[r.groupKey] ?? {}}
                   onMemberSplitChange={handleMemberSplitChange}
+                  memberSplitMode={memberSplitModes[r.groupKey] ?? "weight"}
+                  onMemberSplitModeChange={handleMemberSplitModeChange}
+                  rebalanceMode={mode}
                   resolvedNameBySymbol={resolvedNameBySymbol}
                 />
               ))}
