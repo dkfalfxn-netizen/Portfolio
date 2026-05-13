@@ -1081,11 +1081,26 @@ export default function Home() {
   /** 대시보드 목표 비중 — 저장·변경 이벤트마다 최신값으로 갱신 */
   const [dashboardTargetsByOwner, setDashboardTargetsByOwner] = useState<Record<string, Record<string, number>>>({});
   useEffect(() => {
-    setDashboardTargetsByOwner(loadAllTargetStockWeights());
-    const handler = () => setDashboardTargetsByOwner(loadAllTargetStockWeights());
-    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, handler);
-    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, handler);
-  }, []);
+    /** 실제 보유 종목 ticker 집합만 포함하도록 필터링:
+     *  AI·원자력처럼 보유가 없어 대시보드 bar에 표시되지 않는 종목의
+     *  구 타겟값(TARGET_WEIGHT_STORAGE_KEY)이 계산기로 복사되지 않도록 차단 */
+    const compute = () => {
+      const raw = loadAllTargetStockWeights();
+      const filtered: Record<string, Record<string, number>> = {};
+      for (const { ownerName, data } of allocationByOwner) {
+        const ownerRaw = raw[ownerName] ?? {};
+        filtered[ownerName] = {};
+        for (const item of data) {
+          const k = item.ticker;
+          filtered[ownerName][k] = ownerRaw[k] ?? 0;
+        }
+      }
+      setDashboardTargetsByOwner(filtered);
+    };
+    compute();
+    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
+    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
+  }, [allocationByOwner]);
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
   const [buyJournal, setBuyJournal] = useState<BuyJournalEntry[]>([]);
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});

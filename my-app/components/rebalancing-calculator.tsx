@@ -627,19 +627,12 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     try { window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(allCalc)); } catch { /* ignore */ }
 
     // targets를 현재 groups 기준으로 완전 재구성:
-    //   - 실제 보유가 있는 그룹: 대시보드 저장값 사용 (없으면 "0")
-    //   - ghost 행(보유 없음): 항상 "0" 강제
-    //     → AI·원자력처럼 대시보드에 보유가 없어 bar에 표시되지 않지만
-    //       TARGET_WEIGHT_STORAGE_KEY에 구 값이 남아 있는 경우 복원 차단
+    //   - saved는 page.tsx에서 실제 보유 종목만 포함하도록 필터링된 값
+    //     (AI·원자력 등 보유 없는 그룹은 saved에 포함되지 않으므로 "0" 처리됨)
     const next: Record<string, string> = {};
     for (const g of groups) {
-      const hasHoldings = g.valueKrw > 0 || g.currentPct > 0;
-      if (hasHoldings) {
-        const v = saved[g.groupKey];
-        next[g.groupKey] = v != null && Number.isFinite(v) ? String(v) : "0";
-      } else {
-        next[g.groupKey] = "0";
-      }
+      const v = saved[g.groupKey];
+      next[g.groupKey] = v != null && Number.isFinite(v) ? String(v) : "0";
     }
     setTargets(next);
     // 외부 래퍼에 ownerData 재계산 요청 (미보유 ghost 행 갱신)
