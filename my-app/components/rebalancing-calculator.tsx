@@ -594,18 +594,40 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
     return () => window.clearTimeout(id);
   }, [targets, ownerName]);
 
-  /** 대시보드 목표 비중 불러오기 — 계산기 키를 대시보드 값으로 교체(stale 키 제거 포함) */
+  /** 대시보드 목표 비중 불러오기 — 계산기 키를 대시보드 값으로 교체(stale 키 제거 포함)
+   *  합계가 100% 초과면 비례 정규화(소수점 1자리)하여 100%로 맞춘다. */
   const handleLoad = useCallback(() => {
     if (typeof window === "undefined") return;
     const saved = loadAllTargetStockWeights()[ownerName] ?? {};
-    // 계산기 키를 대시보드 저장값으로 완전 교체 (병합 아님 → stale 키 자동 제거)
+
+    // 합계 계산 후 필요 시 비례 정규화
+    const rawSum = Object.values(saved).reduce((s, v) => s + (Number(v) || 0), 0);
+    const needsNorm = rawSum > 100.05;
+    const normalized: Record<string, number> = {};
+    for (const [k, v] of Object.entries(saved)) {
+      const n = Number(v) || 0;
+      normalized[k] = needsNorm ? Math.round((n / rawSum) * 1000) / 10 : n;
+    }
+
+    // 정규화 후 부동소수점 오차 보정: 가장 큰 항목에 나머지를 더함
+    if (needsNorm) {
+      const normSum = Object.values(normalized).reduce((s, v) => s + v, 0);
+      const diff = Math.round((100 - normSum) * 10) / 10;
+      if (diff !== 0) {
+        const maxKey = Object.entries(normalized).sort((a, b) => b[1] - a[1])[0]?.[0];
+        if (maxKey) normalized[maxKey] = Math.round((normalized[maxKey] + diff) * 10) / 10;
+      }
+    }
+
+    // 계산기 키를 정규화된 값으로 완전 교체
     const allCalc = loadAllCalculatorTargetWeights();
-    allCalc[ownerName] = { ...saved };
+    allCalc[ownerName] = { ...normalized };
     try { window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(allCalc)); } catch { /* ignore */ }
-    // targets state도 대시보드 저장값으로 교체
+
+    // targets state도 정규화된 값으로 교체
     const next: Record<string, string> = {};
-    for (const k of Object.keys(saved)) {
-      next[k] = dashboardTargetInputString(saved, k);
+    for (const [k, v] of Object.entries(normalized)) {
+      next[k] = Number.isFinite(v) ? String(v) : "0";
     }
     setTargets(next);
     // 외부 래퍼에 ownerData 재계산 요청 (미보유 행 추가)
