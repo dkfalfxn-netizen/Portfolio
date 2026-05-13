@@ -281,6 +281,13 @@ function calcMemberAdjustments(
     ratios = masked.map((r) => r / sumR);
   }
   return g.members.map((m, i) => {
+    if (isUndecidedSlotMemberSymbol(m.symbol)) {
+      return {
+        ...m,
+        diffKrw: 0,
+        shares: m.priceKrw > 0 ? 0 : null,
+      };
+    }
     const ratio = ratios[i] ?? 0;
     const memberDiffKrw = diffKrw * ratio;
     return {
@@ -935,6 +942,7 @@ function RebalancingOwner({
   const [mode, setMode] = useState<Mode>("buy-sell");
   const [newMoneyInput, setNewMoneyInput] = useState("");
   const [splitCountInput, setSplitCountInput] = useState("1");
+  const [splitAmountMode, setSplitAmountMode] = useState<SplitAmountMode>("remainder");
   const [hideSmall, setHideSmall] = useState(false);
   const [saveToast, setSaveToast] = useState(false);
   /** 상세 표 하단: 개별 종목 포트폴리오 목표 % → 필요 주수 참고 계산 */
@@ -1321,6 +1329,18 @@ function RebalancingOwner({
             )}
           </div>
         )}
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          기준
+          <select
+            value={splitAmountMode}
+            onChange={(e) => setSplitAmountMode(e.target.value as SplitAmountMode)}
+            className="max-w-[10rem] rounded border border-border bg-background px-1.5 py-1 text-[11px] text-foreground outline-none ring-primary/35 focus:ring-1"
+            aria-label="회당 분할 금액 계산 방식"
+          >
+            <option value="remainder">남은액 ÷ n</option>
+            <option value="milestone">목표÷n까지(1차)</option>
+          </select>
+        </label>
         <div className="flex items-center gap-1.5 text-xs">
           <span className="text-muted-foreground shrink-0">분할</span>
           <input
@@ -1331,6 +1351,7 @@ function RebalancingOwner({
             className="w-14 rounded border bg-background px-2 py-1 text-right tabular-nums text-xs"
             value={splitCountInput}
             onChange={(e) => setSplitCountInput(e.target.value)}
+            aria-label="분할 횟수"
           />
           <span className="text-muted-foreground shrink-0">회</span>
         </div>
@@ -1478,6 +1499,20 @@ function RebalancingOwner({
                 const isCash =
                   r.groupKey === "현금" || r.groupKey.toLowerCase().includes("cash");
 
+                const perSplitRowKrw =
+                  significant && splitCount > 1 ?
+                    perSplitKrwCore(
+                      splitAmountMode,
+                      splitCount,
+                      {
+                        diffKrw: r.diffKrw,
+                        targetPct: r.targetPct,
+                        valueKrw: r.valueKrw,
+                      },
+                      effectiveTotalKrw,
+                    )
+                  : 0;
+
                 return (
                   <tr
                     key={r.groupKey}
@@ -1522,9 +1557,19 @@ function RebalancingOwner({
                     >
                       {!significant
                         ? "—"
-                        : splitCount > 1
-                          ? `${r.diffKrw > 0 ? "▲" : "▼"} ${fmtKrw(r.diffKrw / splitCount)}`
-                          : "—"}
+                      : splitCount > 1 ?
+                        <span className="inline-flex flex-wrap items-baseline justify-end gap-x-0.5 tabular-nums">
+                          <span>
+                            {r.diffKrw > 0 ? "▲" : "▼"} {fmtKrw(perSplitRowKrw)}
+                          </span>
+                          {splitAmountMode === "remainder" && (
+                            <span className="font-normal text-muted-foreground">×{splitCount}</span>
+                          )}
+                          {splitAmountMode === "milestone" && (
+                            <span className="font-normal text-muted-foreground">·1차</span>
+                          )}
+                        </span>
+                      : "—"}
                     </td>
                     <td className="py-2 px-2 text-right">
                       {isCash ? (
@@ -1566,7 +1611,7 @@ function RebalancingOwner({
                           className={r.diffKrw > 0 ? "tabular-nums text-rose-400" : "tabular-nums text-blue-400"}
                         >
                           {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
-                          {formatMemberSharesOrAmount(r.diffKrw / splitCount, r.repPrice)}
+                          {formatMemberSharesOrAmount(perSplitRowKrw, r.repPrice)}
                         </span>
                       ) : (
                         <div className="space-y-0.5">
@@ -1581,7 +1626,7 @@ function RebalancingOwner({
                                     m.diffKrw >= 0 ? "text-rose-400" : "text-blue-400"
                                   }
                                 >
-                                  {formatMemberSharesOrAmount(m.diffKrw / splitCount, m.priceKrw)}
+                                  {formatMemberSharesOrAmount(memberSplitKrw(r, m, perSplitRowKrw), m.priceKrw)}
                                 </span>
                               </p>
                             ))}
