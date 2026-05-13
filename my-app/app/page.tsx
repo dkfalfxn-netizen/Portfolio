@@ -1739,14 +1739,25 @@ export default function Home() {
     });
   }, [ownerNames, enrichedPositions, cashByOwner, usdKrw]);
 
-  /** 대시보드 타겟 동기화 — family-allocation-chart에서 보유 종목만 저장하므로
-   *  별도 필터 없이 TARGET_WEIGHT_STORAGE_KEY 값을 그대로 사용 */
+  /** 실제 보유 종목 ticker만 포함하도록 필터링 — AI·원자력 등 구 타겟 차단 */
   useEffect(() => {
-    const sync = () => setDashboardTargetsByOwner(loadAllTargetStockWeights());
-    sync();
-    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, sync);
-    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, sync);
-  }, []);
+    const compute = () => {
+      const raw = loadAllTargetStockWeights();
+      const filtered: Record<string, Record<string, number>> = {};
+      for (const { ownerName, data } of allocationByOwner) {
+        const ownerRaw = raw[ownerName] ?? {};
+        filtered[ownerName] = {};
+        for (const item of data) {
+          const k = item.ticker;
+          filtered[ownerName][k] = ownerRaw[k] ?? 0;
+        }
+      }
+      setDashboardTargetsByOwner(filtered);
+    };
+    compute();
+    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
+    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
+  }, [allocationByOwner]);
 
   const positionsByOwner = useMemo(() => {
     return ownerNames.map((ownerName) => {
