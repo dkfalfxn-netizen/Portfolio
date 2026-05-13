@@ -616,20 +616,20 @@ function RebalancingBarSortableRow({
               return (
                 <div
                   key={`${row.groupKey}:${m.symbol}`}
-                  className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-200"
+                  className="grid grid-cols-1 items-center gap-x-3 gap-y-1 text-xs text-slate-200 sm:grid-cols-[minmax(0,1fr)_1fr_5.5rem]"
                 >
                   <span
-                    className={`min-w-[9rem] max-w-[16rem] truncate font-medium text-slate-100 ${
+                    className={`min-w-0 truncate font-medium text-slate-100 ${
                       isUndecidedSlotMemberSymbol(m.symbol) ? "italic text-slate-300" : ""
                     }`}
                   >
                     {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
                   </span>
-                  <span className="tabular-nums text-slate-400">
+                  <span className="min-w-0 justify-self-end text-right tabular-nums text-slate-400 sm:whitespace-nowrap">
                     현재 {portPct.toFixed(2)}% · {fmtKrw(m.valueKrw)}
                   </span>
-                  <label className="ml-auto flex items-center gap-1.5 sm:ml-0">
-                    <span className="shrink-0 text-xs font-medium text-slate-400">목표%</span>
+                  <label className="flex w-full min-w-0 items-center justify-end gap-1 sm:w-[5.5rem] sm:justify-self-end">
+                    <span className="shrink-0 text-[10px] font-medium text-slate-400 sm:text-[11px]">목표%</span>
                     <span className="sr-only">
                       {m.symbol} 포트폴리오 목표 비중 퍼센트
                     </span>
@@ -638,8 +638,8 @@ function RebalancingBarSortableRow({
                       min={0}
                       max={100}
                       step={0.1}
-                      placeholder="예: 5"
-                      className="w-[4.25rem] rounded-md border border-slate-600/80 bg-background px-1.5 py-1 text-right text-xs font-medium tabular-nums text-slate-100"
+                      placeholder="5"
+                      className="h-7 w-10 shrink-0 rounded-md border border-slate-600/80 bg-background px-0.5 py-0.5 text-center text-xs font-medium tabular-nums text-slate-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       value={memberSplitsForGroup[m.symbol] ?? ""}
                       onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
                       aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 포트폴리오 목표 %`}
