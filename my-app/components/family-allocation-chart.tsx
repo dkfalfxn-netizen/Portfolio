@@ -28,6 +28,7 @@ import {
 } from "@/lib/rebalance-visual-order";
 import { fmtInt } from "@/lib/format-money";
 import { memberPortfolioTargetPctMap } from "@/lib/rebalance-member-portfolio-targets";
+import { type SplitAmountMode, perSplitKrwCore } from "@/lib/rebalance-split-amount";
 const NEON_PALETTE = [
   "#0891B2",
   "#65A30D",
@@ -579,7 +580,7 @@ function TargetWeightSortableBarRow({
     : undefined;
 
   return (
-    <div ref={setNodeRef} style={outerStyle} className="group relative flex items-center gap-1">
+    <div ref={setNodeRef} style={outerStyle} className="group relative flex min-h-0 items-center gap-1 py-0 leading-none">
       {!isCashRow ?
         <button
           type="button"
@@ -589,12 +590,12 @@ function TargetWeightSortableBarRow({
           {...listeners}
           aria-label={`${slice.ticker} 순서 변경`}
         >
-          <GripVertical className="h-3.5 w-3.5" />
+          <GripVertical className="h-3 w-3" />
         </button>
-      : <span className="w-5 shrink-0" aria-hidden />}
+      : <span className="w-[22px] shrink-0" aria-hidden />}
 
       {tooltipEntries.length > 0 && (
-        <div className="pointer-events-none absolute bottom-[calc(100%+4px)] left-0 z-30 hidden min-w-[200px] w-max rounded-lg border border-white/15 bg-zinc-950/95 px-2.5 py-2 text-[10px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
+        <div className="pointer-events-none absolute bottom-[calc(100%+4px)] left-0 z-30 hidden w-max min-w-[160px] rounded-lg border border-white/15 bg-zinc-950/95 px-2 py-1.5 text-[9px] shadow-[0_0_20px_rgba(0,229,255,0.15)] backdrop-blur-md group-hover:block">
           {isGrouped ?
             <div className="space-y-1">
               <div>
@@ -641,11 +642,16 @@ function TargetWeightSortableBarRow({
         </div>
       )}
 
-      <div className="flex w-[108px] shrink-0 items-center justify-between gap-1">
-        <span className="truncate text-[11px] font-semibold text-zinc-200" title={slice.displayName}>
-          {slice.ticker}
+      <div className="flex w-[118px] shrink-0 items-center gap-1 sm:w-[124px]">
+        <span
+          className="min-w-0 flex-1 truncate text-[9px] font-normal leading-tight text-zinc-300 tabular-nums"
+          title={slice.displayName || slice.ticker}
+        >
+          {slice.displayName && slice.displayName !== slice.ticker
+            ? `${slice.ticker} (${slice.displayName})`
+            : slice.ticker}
         </span>
-        <div className="flex shrink-0 items-center">
+        <div className="flex shrink-0 items-center gap-0.5">
           <input
             type="number"
             min={0}
@@ -653,17 +659,27 @@ function TargetWeightSortableBarRow({
             step={0.1}
             placeholder="—"
             aria-label={`${slice.ticker} 목표 비중 %`}
-            className="w-9 rounded border border-white/10 bg-zinc-900/80 px-0.5 py-0 text-right text-[10px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            className="w-7 rounded border border-white/10 bg-zinc-900/80 px-0.5 py-px text-right text-[9px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
             value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
             onChange={(e) => setTarget(slice.ticker, e.target.value)}
           />
-          <span className="ml-0.5 text-[9px] text-zinc-600">%</span>
+          <span className="text-[8px] text-zinc-600">%</span>
         </div>
       </div>
 
+      <div className="w-8 shrink-0 text-right text-[8px] font-normal tabular-nums leading-none text-zinc-500">
+        {slice.weight.toFixed(2)}%
+      </div>
       <div
-        className="relative h-[18px] flex-1 overflow-hidden rounded-sm"
+        className="hidden w-[4.25rem] shrink-0 truncate text-right text-[8px] tabular-nums leading-none text-zinc-500 md:block"
+        title={formatKrw(Math.round(slice.value))}
+      >
+        {formatKrw(Math.round(slice.value))}
+      </div>
+
+      <div
+        className="relative h-[13px] flex-1 overflow-hidden rounded-sm"
         style={{ background: "rgba(255,255,255,0.04)" }}
       >
         <div
@@ -675,21 +691,21 @@ function TargetWeightSortableBarRow({
         />
         {barWidthPct > 0 ?
           <div
-            className="absolute left-0 top-[2px] bottom-[2px] rounded-sm transition-all duration-300"
+            className="absolute left-0 top-px bottom-px rounded-sm transition-all duration-300"
             style={{ width: `${barWidthPct}%`, background: barBg, boxShadow: barGlow }}
           />
         : hasInputTarget && !hasPositiveTarget ?
           <div
-            className="absolute left-0 top-[2px] bottom-[2px] w-[3px] rounded-sm opacity-70"
+            className="absolute left-0 top-px bottom-px w-[3px] rounded-sm opacity-70"
             style={{ background: "rgba(161,161,170,0.5)" }}
           />
         : null}
         {isClipped ?
-          <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[8px] text-emerald-300/70">›</span>
+          <span className="absolute right-0.5 top-1/2 -translate-y-1/2 text-[7px] text-emerald-300/70">›</span>
         : null}
       </div>
 
-      <div className="w-[96px] shrink-0 text-right text-[10px] tabular-nums leading-none">
+      <div className="w-[4.5rem] shrink-0 text-right text-[8px] tabular-nums leading-snug sm:w-[4.75rem]">
         {!hasInputTarget ?
           <span className="text-zinc-600">—</span>
         : !hasPositiveTarget && actual > 0 ?
@@ -900,6 +916,7 @@ function TargetStockWeightNeu({
   const [savedAtText, setSavedAtText] = useState<string | null>(null);
   const [saveFailedBrief, setSaveFailedBrief] = useState(false);
   const [splitCount, setSplitCount] = useState<string>("1");
+  const [splitAmountMode, setSplitAmountMode] = useState<SplitAmountMode>("remainder");
   const [barTickerOrder, setBarTickerOrder] = useState<string[] | null>(null);
   /** 계산기 종목별 분배 LS 변경 시 종목별 목표 표시 즉시 재계산 */
   const [calcSplitBump, setCalcSplitBump] = useState(0);
@@ -1115,7 +1132,7 @@ function TargetStockWeightNeu({
         const targetKrw = total * target / 100;
         const diffKrw = targetKrw - sl.value;
         if (Math.abs(diffKrw) < 1000) return null; // 1천 원 이하 차이는 표시 생략
-        return { ticker: sl.ticker, diffKrw, targetKrw, currentKrw: sl.value };
+        return { ticker: sl.ticker, diffKrw, targetKrw, currentKrw: sl.value, targetPct: target };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
       .sort((a, b) => {
@@ -1143,7 +1160,7 @@ function TargetStockWeightNeu({
 
   return (
     <div
-      className="flex flex-col rounded-2xl p-3"
+      className="flex flex-col rounded-2xl p-2"
       style={{
         background: "#151a24",
         boxShadow:
@@ -1151,8 +1168,8 @@ function TargetStockWeightNeu({
       }}
     >
       {/* ── Header ── */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px]">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px]">
           <span className="font-semibold tracking-wide text-zinc-100">포트폴리오 비중 리밸런싱</span>
           <span className="flex items-center gap-1 text-zinc-500">
             <span className="inline-block h-[5px] w-[9px] rounded-sm bg-red-500/80" />
@@ -1166,7 +1183,7 @@ function TargetStockWeightNeu({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span
-            className={`text-[10px] tabular-nums font-semibold ${
+            className={`text-[9px] tabular-nums font-semibold ${
               showTargetSumError
                 ? "text-rose-400"
                 : hasAnyTarget && targetSumOk
@@ -1187,7 +1204,7 @@ function TargetStockWeightNeu({
             type="button"
             onClick={() => void handleClickSave()}
             disabled={saveStatus === "saving" || slices.length === 0}
-            className="rounded border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-200 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded border border-sky-500/40 bg-sky-500/15 px-1.5 py-0 text-[9px] font-semibold text-sky-200 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saveStatus === "saving" ? "…" : "저장"}
           </button>
@@ -1199,25 +1216,25 @@ function TargetStockWeightNeu({
       </div>
 
       {/* ── Shared scale labels (비현금 행 왼쪽 드래그 핸들 폭 반영) ── */}
-      <div className="mb-1 flex items-end gap-1.5 pl-[128px] pr-[96px]">
+      <div className="mb-0.5 flex items-end gap-1 pl-[180px] pr-20 md:pl-[252px]">
         <div className="relative flex-1">
           {[0, 25, 50, 75, 100].map((pct) => (
             <span
               key={pct}
-              className="absolute -translate-x-1/2 text-[8px] tabular-nums text-zinc-600"
+              className="absolute -translate-x-1/2 text-[7px] tabular-nums text-zinc-600"
               style={{ left: `${(pct / 100) * TARGET_AT * 100}%` }}
             >
               {pct}%
             </span>
           ))}
-          <div className="h-3" />
+          <div className="h-2.5" />
         </div>
       </div>
 
       {/* ── Bar rows (비현금 드래그 가능, 현금 고정 하단) ── */}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleBarDragEnd}>
         <SortableContext items={sortableContextIds} strategy={verticalListSortingStrategy}>
-          <div className="space-y-[3px]">
+          <div className="space-y-px">
             {orderedNonCashSlices.map((slice) => (
               <TargetWeightSortableBarRow
                 key={slice.ticker}
@@ -1248,42 +1265,67 @@ function TargetStockWeightNeu({
 
       {/* ── Rebalancing amounts (collapsible) ── */}
       {rebalanceItems.length > 0 && (
-        <details className="mt-3 group/reb">
-          <summary className="cursor-pointer select-none list-none text-[10px] text-zinc-500 hover:text-zinc-300 transition">
+        <details className="mt-2 group/reb">
+          <summary className="cursor-pointer select-none list-none text-[9px] text-zinc-500 hover:text-zinc-300 transition">
             <span className="group-open/reb:hidden">▶ 리밸런싱 금액 보기</span>
             <span className="hidden group-open/reb:inline">▼ 리밸런싱 금액 접기</span>
           </summary>
           <div className="mt-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <span className="text-[9px] text-zinc-500">총액 {formatKrw(Math.round(total))} 기준</span>
-              <label className="flex items-center gap-1 text-[9px] text-zinc-500">
-                분할
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  step={1}
-                  value={splitCount}
-                  onChange={(e) => setSplitCount(e.target.value)}
-                  className="w-8 rounded border border-white/10 bg-zinc-900/80 px-1 py-0 text-center text-[9px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 focus:ring-1"
-                  style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
-                  aria-label="분할 수"
-                />
-                회
-              </label>
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[9px] tabular-nums text-zinc-500">총액 {formatKrw(Math.round(total))} 기준</span>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <label className="flex items-center gap-1 text-[9px] text-zinc-500">
+                  기준
+                  <select
+                    value={splitAmountMode}
+                    onChange={(e) => setSplitAmountMode(e.target.value as SplitAmountMode)}
+                    className="max-w-[9.5rem] rounded border border-white/10 bg-zinc-900/80 px-1 py-0.5 text-[8px] text-zinc-200 outline-none ring-sky-500/40 focus:ring-1"
+                    aria-label="분할 금액 계산"
+                  >
+                    <option value="remainder">남은액 ÷ n</option>
+                    <option value="milestone">목표÷n까지(1차)</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-1 text-[9px] text-zinc-500">
+                  분할
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    step={1}
+                    value={splitCount}
+                    onChange={(e) => setSplitCount(e.target.value)}
+                    className="w-8 rounded border border-white/10 bg-zinc-900/80 px-1 py-0 text-center text-[9px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 focus:ring-1"
+                    style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
+                    aria-label="분할 수"
+                  />
+                  회
+                </label>
+              </div>
             </div>
             {(() => {
               const n = Math.max(1, Math.floor(Number(splitCount) || 1));
               return (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                   {rebalanceItems.map((item) => {
-                    const perSplit = item.diffKrw / n;
+                    const perSigned = perSplitKrwCore(
+                      splitAmountMode,
+                      n,
+                      { diffKrw: item.diffKrw, targetPct: item.targetPct, valueKrw: item.currentKrw },
+                      total,
+                    );
+                    const perAbs = Math.abs(perSigned);
                     return (
                       <div key={item.ticker} className="flex items-center justify-between gap-1 text-[10px]">
                         <span className="truncate font-semibold text-zinc-300">{item.ticker}</span>
                         <span className={`tabular-nums font-bold shrink-0 ${item.diffKrw > 0 ? "text-red-400" : "text-blue-400"}`}>
-                          {item.diffKrw > 0 ? "▲" : "▼"} {formatKrwCompact(Math.abs(perSplit))}
-                          {n > 1 && <span className="ml-0.5 font-normal text-zinc-600">×{n}</span>}
+                          {item.diffKrw > 0 ? "▲" : "▼"} {formatKrwCompact(perAbs)}
+                          {n > 1 && splitAmountMode === "remainder" && (
+                            <span className="ml-0.5 font-normal text-zinc-600">×{n}</span>
+                          )}
+                          {n > 1 && splitAmountMode === "milestone" && (
+                            <span className="ml-0.5 font-normal text-zinc-600">·1차</span>
+                          )}
                         </span>
                       </div>
                     );

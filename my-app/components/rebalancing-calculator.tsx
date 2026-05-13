@@ -31,6 +31,7 @@ import {
   persistVisualOrderForOwner,
   REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
 } from "@/lib/rebalance-visual-order";
+import { type SplitAmountMode, perSplitKrwCore } from "@/lib/rebalance-split-amount";
 import {
   allocationTickerMatches,
   allowedCalculatorStubTickerKeysUpper,
@@ -168,14 +169,22 @@ function formatTickerLabel(
 
 function valueBasedMemberRatios(g: GroupAllocation): number[] {
   if (g.members.length === 0) return [];
-  if (g.valueKrw > 0) return g.members.map((m) => m.valueKrw / g.valueKrw);
-  return g.members.map(() => 1 / g.members.length);
+  const und = (m: (typeof g.members)[number]) => isUndecidedSlotMemberSymbol(m.symbol);
+  if (g.valueKrw > 0) {
+    return g.members.map((m) => (und(m) ? 0 : m.valueKrw / g.valueKrw));
+  }
+  const eligible = g.members.filter((m) => !und(m));
+  const n = eligible.length;
+  if (n === 0) return g.members.map(() => 0);
+  const share = 1 / n;
+  return g.members.map((m) => (und(m) ? 0 : share));
 }
 
-/** 입력된 양수 가중치로 정규화; 모두 비었거나 일부만 채우면 평가금 비율 */
+/** 입력된 양수 가중치로 정규화; 미정 슬롯은 항상 비중 0. 모두 비었거나 일부만 채우면 평가금 비율 */
 function memberRatiosForGroup(g: GroupAllocation, splitInputs?: Record<string, string>): number[] {
   if (g.members.length === 0) return [];
   const weights = g.members.map((m) => {
+    if (isUndecidedSlotMemberSymbol(m.symbol)) return 0;
     const raw = (splitInputs?.[m.symbol] ?? "").trim().replace(",", ".");
     if (raw === "") return NaN;
     const n = parseFloat(raw);
@@ -200,6 +209,10 @@ function tryMemberAdjustmentsTargetPortfolioPct(
   if (!splitInputs || g.members.length === 0) return null;
   const pcts: number[] = [];
   for (const m of g.members) {
+    if (isUndecidedSlotMemberSymbol(m.symbol)) {
+      pcts.push(0);
+      continue;
+    }
     const raw = (splitInputs[m.symbol] ?? "").trim().replace(",", ".");
     if (raw === "") {
       pcts.push(0);
@@ -243,9 +256,30 @@ function calcMemberAdjustments(
       ctx.totalKrwEffective,
       ctx.groupTargetPct,
     );
-    if (direct) return direct;
+    if (direct) {
+      return direct.map((adj) =>
+        isUndecidedSlotMemberSymbol(adj.symbol)
+          ? { ...adj, diffKrw: 0, shares: adj.priceKrw > 0 ? 0 : null }
+          : adj,
+      );
+    }
   }
-  const ratios = memberRatiosForGroup(g, splitInputs);
+  const rawRatios = memberRatiosForGroup(g, splitInputs);
+  const masked = g.members.map((m, i) =>
+    isUndecidedSlotMemberSymbol(m.symbol) ? 0 : Math.max(0, rawRatios[i] ?? 0),
+  );
+  let sumR = masked.reduce((a, b) => a + b, 0);
+  let ratios = masked;
+  if (sumR <= 0) {
+    const vb = valueBasedMemberRatios(g);
+    const m2 = g.members.map((m, i) =>
+      isUndecidedSlotMemberSymbol(m.symbol) ? 0 : Math.max(0, vb[i] ?? 0),
+    );
+    sumR = m2.reduce((a, b) => a + b, 0);
+    ratios = sumR > 0 ? m2.map((r) => r / sumR) : m2;
+  } else {
+    ratios = masked.map((r) => r / sumR);
+  }
   return g.members.map((m, i) => {
     const ratio = ratios[i] ?? 0;
     const memberDiffKrw = diffKrw * ratio;
@@ -255,6 +289,12 @@ function calcMemberAdjustments(
       shares: m.priceKrw > 0 ? memberDiffKrw / m.priceKrw : null,
     };
   });
+}
+
+function memberSplitKrw(row: ComputedRow, m: MemberAdj, perSplitRowKrw: number): number {
+  const d = row.diffKrw;
+  if (Math.abs(d) < 1e-9) return 0;
+  return perSplitRowKrw * (m.diffKrw / d);
 }
 
 /** 차트 리밸런싱 위젯과 동일: 현금 행 목표·현재 비중(%p) 편차 */
@@ -605,7 +645,7 @@ function RebalancingBarSortableRow({
           <div className="-mx-0.5 mt-2 overflow-x-auto pl-7 sm:pl-8">
             <div className="min-w-0 sm:min-w-[36rem]">
               <div
-                className="mb-1 hidden border-b border-slate-700/50 px-2 pb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:grid sm:grid-cols-[13rem_4.75rem_9.5rem_6.25rem] sm:gap-x-3 sm:px-2.5"
+                className="mb-0.5 hidden border-b border-slate-700/50 px-2 pb-1 text-[9px] font-bold uppercase tracking-wide text-slate-500 sm:grid sm:grid-cols-[13rem_4.75rem_9.5rem_6.25rem] sm:gap-x-2 sm:px-2.5"
                 aria-hidden
               >
                 <span>종목</span>
@@ -619,10 +659,10 @@ function RebalancingBarSortableRow({
                 return (
                   <div
                     key={`${row.groupKey}:${m.symbol}`}
-                    className="grid grid-cols-1 gap-y-2 py-3 pr-1 first:pt-2 last:pb-2 sm:grid-cols-[13rem_4.75rem_9.5rem_6.25rem] sm:items-center sm:gap-x-3 sm:gap-y-0 sm:py-2.5"
+                    className="grid grid-cols-1 gap-y-1 py-2 pr-1 first:pt-1.5 last:pb-1.5 sm:grid-cols-[13rem_4.75rem_9.5rem_6.25rem] sm:items-center sm:gap-x-2 sm:gap-y-0 sm:py-1.5"
                   >
                     <span
-                      className={`min-w-0 truncate text-xs font-medium text-slate-100 sm:text-sm ${
+                      className={`min-w-0 truncate text-[10px] font-medium leading-tight text-slate-100 sm:text-[11px] ${
                         isUndecidedSlotMemberSymbol(m.symbol) ? "italic text-slate-400" : ""
                       }`}
                       title={allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
@@ -630,27 +670,27 @@ function RebalancingBarSortableRow({
                       {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
                     </span>
                     <div className="flex items-baseline justify-start gap-0.5 sm:justify-end">
-                      <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">
+                      <span className="text-[9px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">
                         현재{" "}
                       </span>
-                      <span className="text-base font-bold tabular-nums leading-none text-slate-50 sm:text-lg">
+                      <span className="text-[11px] font-semibold tabular-nums leading-none text-slate-200 sm:text-xs">
                         {portPct.toFixed(2)}
                       </span>
-                      <span className="text-sm font-bold text-slate-300 sm:text-base">%</span>
+                      <span className="text-[9px] font-medium text-slate-400">%</span>
                     </div>
                     <div className="text-left sm:text-right">
-                      <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">
+                      <span className="text-[9px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">
                         평가{" "}
                       </span>
-                      <span className="text-xs tabular-nums text-slate-400/80 sm:text-sm">
+                      <span className="text-[9px] tabular-nums text-slate-400/85 sm:text-[10px]">
                         {fmtKrw(m.valueKrw)}
                       </span>
                     </div>
-                    <label className="flex w-full max-w-[8rem] items-center gap-2 sm:w-[6.25rem] sm:max-w-none sm:justify-self-end">
-                      <span className="hidden w-10 shrink-0 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:inline sm:w-[2.75rem]">
+                    <label className="flex w-full max-w-[8rem] items-center gap-1.5 sm:w-[6.25rem] sm:max-w-none sm:justify-self-end">
+                      <span className="hidden w-9 shrink-0 text-right text-[9px] font-semibold uppercase tracking-wide text-slate-500 sm:inline sm:w-10">
                         목표
                       </span>
-                      <span className="shrink-0 text-[10px] font-semibold text-slate-500 sm:hidden">목표%</span>
+                      <span className="shrink-0 text-[9px] font-semibold text-slate-500 sm:hidden">목표%</span>
                       <span className="sr-only">
                         {m.symbol} 포트폴리오 목표 비중 퍼센트
                       </span>
@@ -660,7 +700,7 @@ function RebalancingBarSortableRow({
                         max={100}
                         step={0.1}
                         placeholder="—"
-                        className="h-8 w-full min-w-[2.75rem] max-w-[4.5rem] rounded-md border-2 border-slate-500/90 bg-slate-950/90 px-1.5 py-1 text-center text-sm font-semibold tabular-nums text-slate-50 shadow-inner outline-none ring-slate-600/30 transition-[border-color,box-shadow] focus:border-primary focus:ring-2 focus:ring-primary/35 sm:max-w-[3.5rem] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        className="h-7 w-full min-w-[2.5rem] max-w-[4rem] rounded border border-slate-500/80 bg-slate-950/90 px-1 py-0.5 text-center text-[11px] font-semibold tabular-nums text-slate-50 shadow-inner outline-none ring-slate-600/25 transition-[border-color,box-shadow] focus:border-primary focus:ring-1 focus:ring-primary/35 sm:max-w-[3.25rem] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         value={memberSplitsForGroup[m.symbol] ?? ""}
                         onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
                         aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 포트폴리오 목표 %`}
