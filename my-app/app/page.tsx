@@ -27,6 +27,7 @@ import {
   HAS_LOCAL_CHANGES_KEY,
   loadAllTargetStockWeights,
   mergeAndPersistTargetStockWeightsFromServer,
+  PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT,
 } from "@/lib/portfolio-target-weights";
 import { mergeAndPersistOwnerScratchpadsFromServer, loadAllOwnerScratchpads } from "@/lib/portfolio-owner-scratchpad";
 import { todayKST, yesterdayKST } from "@/lib/date-utils";
@@ -1077,6 +1078,14 @@ export default function Home() {
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
+  /** 대시보드 목표 비중 — 저장·변경 이벤트마다 최신값으로 갱신 */
+  const [dashboardTargetsByOwner, setDashboardTargetsByOwner] = useState<Record<string, Record<string, number>>>({});
+  useEffect(() => {
+    setDashboardTargetsByOwner(loadAllTargetStockWeights());
+    const handler = () => setDashboardTargetsByOwner(loadAllTargetStockWeights());
+    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, handler);
+  }, []);
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
   const [buyJournal, setBuyJournal] = useState<BuyJournalEntry[]>([]);
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
@@ -3757,6 +3766,7 @@ export default function Home() {
               allocationByOwner={allocationByOwner}
               enrichedPositions={enrichedPositions}
               usdKrw={usdKrw}
+              dashboardTargetsByOwner={dashboardTargetsByOwner}
             />
           </section>
 
@@ -5935,6 +5945,7 @@ export default function Home() {
               allocationByOwner={allocationByOwner}
               enrichedPositions={enrichedPositions}
               usdKrw={usdKrw}
+              dashboardTargetsByOwner={dashboardTargetsByOwner}
             />
           </section>
           </div>

@@ -116,6 +116,8 @@ type Props = {
   totalKrw: number;
   /** 대시보드 불러오기 후 외부 래퍼가 ownerData를 재계산하도록 알림 */
   onDashboardLoaded?: () => void;
+  /** 대시보드 현재 목표 비중 (저장 이벤트로 항상 최신값 전달) */
+  dashboardTargets?: Record<string, number> | null;
 };
 
 type Mode = "buy-sell" | "buy-only";
@@ -355,7 +357,7 @@ function floorShares(diffKrw: number, priceKrw: number): number {
   return Math.floor(Math.abs(diffKrw) / priceKrw);
 }
 
-function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Props) {
+function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dashboardTargets }: Props) {
   const [resolvedNameBySymbol, setResolvedNameBySymbol] = useState<Record<string, string>>({});
 
   // ── 목표 비중 state: 계산기 전용 키에서 초깃값 읽기 (대시보드와 독립) ──
@@ -607,10 +609,11 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
   }, [targets, ownerName]);
 
   /** 대시보드 목표 비중 불러오기 — 현재 groups 전체를 덮어씀.
-   *  대시보드에 있는 그룹은 대시보드 저장값 그대로, 없는 그룹은 명시적으로 "0"으로 세팅. */
+   *  dashboardTargets prop(최신 대시보드 state)을 우선 사용하고, 없으면 localStorage 폴백. */
   const handleLoad = useCallback(() => {
     if (typeof window === "undefined") return;
-    const saved = loadAllTargetStockWeights()[ownerName] ?? {};
+    // prop으로 내려온 최신 대시보드 값 우선 사용 (localStorage 보다 항상 최신)
+    const saved: Record<string, number> = dashboardTargets ?? loadAllTargetStockWeights()[ownerName] ?? {};
 
     // autosave 타이머를 먼저 취소해 구 targets 가 localStorage를 덮어쓰는 race 방지
     if (autosaveTimerRef.current != null) {
@@ -642,7 +645,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
     onDashboardLoaded?.();
     setLoadToast(true);
     setTimeout(() => setLoadToast(false), 2000);
-  }, [ownerName, groups, onDashboardLoaded]);
+  }, [ownerName, groups, onDashboardLoaded, dashboardTargets]);
 
   const handleSave = useCallback(() => {
     persistCalculatorTargets(ownerName, targets);
@@ -1119,6 +1122,7 @@ export function RebalancingCalculator({
   allocationByOwner,
   enrichedPositions,
   usdKrw,
+  dashboardTargetsByOwner = {},
 }: {
   allocationByOwner: {
     ownerName: string;
@@ -1135,6 +1139,8 @@ export function RebalancingCalculator({
     currency: string;
   }[];
   usdKrw: number;
+  /** 대시보드 현재 목표 비중 (저장 이벤트마다 최신값) */
+  dashboardTargetsByOwner?: Record<string, Record<string, number>>;
 }) {
   const [selectedOwner, setSelectedOwner] = useState(allocationByOwner[0]?.ownerName ?? "");
   const mergeTargetsReady = useClientReady();
@@ -1223,6 +1229,7 @@ export function RebalancingCalculator({
           groups={current.groups}
           totalKrw={current.totalKrw}
           onDashboardLoaded={handleDashboardLoaded}
+          dashboardTargets={dashboardTargetsByOwner[current.ownerName] ?? null}
         />
       ) : (
         <p className="text-sm text-muted-foreground">보유 종목이 없습니다.</p>
