@@ -748,7 +748,15 @@ function TargetStockWeightNeu({
   const saveDebounceRef = useRef<number | null>(null);
   const [targetsByTicker, setTargetsByTicker] = useState<Record<string, number>>(() => {
     const all = loadAllTargetStockWeights();
-    return { ...(all[ownerName] ?? {}) };
+    const ownerData = all[ownerName] ?? {};
+    /** 현재 보유 종목(slices)에 해당하는 키만 포함:
+     *  AI·원자력처럼 포지션이 없어져 slices에서 빠진 구 타겟은 제외하여
+     *  TARGET_WEIGHT_STORAGE_KEY에서 자동으로 정리되도록 한다 */
+    const filtered: Record<string, number> = {};
+    for (const sl of slices) {
+      if (ownerData[sl.ticker] != null) filtered[sl.ticker] = ownerData[sl.ticker];
+    }
+    return filtered;
   });
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
   const [savedAtText, setSavedAtText] = useState<string | null>(null);
@@ -833,13 +841,18 @@ function TargetStockWeightNeu({
   useEffect(() => {
     const onRefresh = () => {
       const all = loadAllTargetStockWeights();
-      const saved = all[ownerName] ?? {};
+      const ownerData = all[ownerName] ?? {};
+      /** 새로고침 시에도 현재 보유 종목만 포함 (구 타겟 재유입 방지) */
+      const filtered: Record<string, number> = {};
+      for (const sl of slices) {
+        if (ownerData[sl.ticker] != null) filtered[sl.ticker] = ownerData[sl.ticker];
+      }
       skipSaveRef.current = true;
-      setTargetsByTicker({ ...saved });
+      setTargetsByTicker(filtered);
     };
     window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, onRefresh);
-  }, [ownerName]);
+  }, [ownerName, slices]);
 
   useEffect(() => {
     if (skipSaveRef.current) {

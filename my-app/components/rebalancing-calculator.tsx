@@ -627,8 +627,8 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     try { window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(allCalc)); } catch { /* ignore */ }
 
     // targets를 현재 groups 기준으로 완전 재구성:
-    //   - saved는 page.tsx에서 실제 보유 종목만 포함하도록 필터링된 값
-    //     (AI·원자력 등 보유 없는 그룹은 saved에 포함되지 않으므로 "0" 처리됨)
+    //   - 대시보드가 현재 보유 종목만 TARGET_WEIGHT_STORAGE_KEY에 저장하므로
+    //     saved에 포함된 값만 반영하면 AI·원자력 등 구 타겟이 자동 제거됨
     const next: Record<string, string> = {};
     for (const g of groups) {
       const v = saved[g.groupKey];
