@@ -1,9 +1,26 @@
 export type SplitAmountMode = "remainder" | "milestone";
 
 /**
+ * 총 평가액(denominator)을 그대로 둘 때, 이번 분할 금액만 반영한 뒤의 **해당 줄 비중**(≈).
+ * (평가 + 분할금) / 포트폴리오 총액. 현금 매도·증자 등은 포함하지 않는 단순 근사값.
+ */
+export function approxPortfolioPctAfterDelta(
+  holdingValueKrw: number,
+  deltaKrwSigned: number,
+  portfolioTotalDenominatorKrw: number,
+): number | null {
+  if (!(portfolioTotalDenominatorKrw > 0)) return null;
+  const v = (holdingValueKrw + deltaKrwSigned) / portfolioTotalDenominatorKrw;
+  if (!Number.isFinite(v)) return null;
+  return v * 100;
+}
+
+/**
  * 분할·리밸 시 1회분 금액.
  * - remainder: 남은 매수액 diffKrw ÷ n.
- * - milestone: 매수(diff>0)일 때 목표%·n 비중까지 채우는 1차 금액(이후 회차는 별개).
+ * - milestone (매수, diffKrw 양수, n≥2): 목표 평가의 1/n 지점까지 끌어올리는 1차 금액
+ *   (= targetKrw/n − 현재평가, 0~(전체 차액)으로 클램프). 보유평가가 0이면 remainder와 같음.
+ * - 매도(diffKrw≤0)·n===1 일 때 milestone도 remainder와 동일하게 diff/n(또는 전액).
  */
 export function perSplitKrwCore(
   mode: SplitAmountMode,

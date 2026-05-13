@@ -28,7 +28,7 @@ import {
 } from "@/lib/rebalance-visual-order";
 import { fmtInt } from "@/lib/format-money";
 import { memberPortfolioTargetPctMap } from "@/lib/rebalance-member-portfolio-targets";
-import { type SplitAmountMode, perSplitKrwCore } from "@/lib/rebalance-split-amount";
+import { type SplitAmountMode, approxPortfolioPctAfterDelta, perSplitKrwCore } from "@/lib/rebalance-split-amount";
 const NEON_PALETTE = [
   "#0891B2",
   "#65A30D",
@@ -1281,6 +1281,7 @@ function TargetStockWeightNeu({
                     onChange={(e) => setSplitAmountMode(e.target.value as SplitAmountMode)}
                     className="max-w-[9.5rem] rounded border border-white/10 bg-zinc-900/80 px-1 py-0.5 text-[8px] text-zinc-200 outline-none ring-sky-500/40 focus:ring-1"
                     aria-label="분할 금액 계산"
+                    title="매도·차액 부호가 음수면 두 방식 모두 ÷ n으로 같습니다. 매수이고 평가가 있고 n≥2일 때만 1차 금액이 달라집니다."
                   >
                     <option value="remainder">남은액 ÷ n</option>
                     <option value="milestone">목표÷n까지(1차)</option>
@@ -1315,17 +1316,23 @@ function TargetStockWeightNeu({
                       total,
                     );
                     const perAbs = Math.abs(perSigned);
+                    const pctAfter = approxPortfolioPctAfterDelta(item.currentKrw, perSigned, total);
                     return (
                       <div key={item.ticker} className="flex items-center justify-between gap-1 text-[10px]">
                         <span className="truncate font-semibold text-zinc-300">{item.ticker}</span>
-                        <span className={`tabular-nums font-bold shrink-0 ${item.diffKrw > 0 ? "text-red-400" : "text-blue-400"}`}>
-                          {item.diffKrw > 0 ? "▲" : "▼"} {formatKrwCompact(perAbs)}
-                          {n > 1 && splitAmountMode === "remainder" && (
-                            <span className="ml-0.5 font-normal text-zinc-600">×{n}</span>
-                          )}
-                          {n > 1 && splitAmountMode === "milestone" && (
-                            <span className="ml-0.5 font-normal text-zinc-600">·1차</span>
-                          )}
+                        <span className={`tabular-nums font-bold shrink-0 text-right ${item.diffKrw > 0 ? "text-red-400" : "text-blue-400"}`}>
+                          <span className="whitespace-nowrap">
+                            {item.diffKrw > 0 ? "▲" : "▼"} {formatKrwCompact(perAbs)}
+                            {n > 1 && splitAmountMode === "remainder" && (
+                              <span className="ml-0.5 font-normal text-zinc-600">×{n}</span>
+                            )}
+                            {n > 1 && splitAmountMode === "milestone" && (
+                              <span className="ml-0.5 font-normal text-zinc-600">·1차</span>
+                            )}
+                            {pctAfter != null ?
+                              <span className="ml-0.5 font-normal text-zinc-500">{` (→ ${pctAfter.toFixed(2)}%)`}</span>
+                            : null}
+                          </span>
                         </span>
                       </div>
                     );

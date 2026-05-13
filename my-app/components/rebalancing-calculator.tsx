@@ -31,7 +31,7 @@ import {
   persistVisualOrderForOwner,
   REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
 } from "@/lib/rebalance-visual-order";
-import { type SplitAmountMode, perSplitKrwCore } from "@/lib/rebalance-split-amount";
+import { type SplitAmountMode, approxPortfolioPctAfterDelta, perSplitKrwCore } from "@/lib/rebalance-split-amount";
 import {
   allocationTickerMatches,
   allowedCalculatorStubTickerKeysUpper,
@@ -1336,6 +1336,7 @@ function RebalancingOwner({
             onChange={(e) => setSplitAmountMode(e.target.value as SplitAmountMode)}
             className="max-w-[10rem] rounded border border-border bg-background px-1.5 py-1 text-[11px] text-foreground outline-none ring-primary/35 focus:ring-1"
             aria-label="회당 분할 금액 계산 방식"
+            title="매도(차액 음수)·분할 1회면 두 방식 동일. 매수이고 보유 평가가 있고 분할 n≥2일 때만 1차 금액이 달라집니다."
           >
             <option value="remainder">남은액 ÷ n</option>
             <option value="milestone">목표÷n까지(1차)</option>
@@ -1513,6 +1514,11 @@ function RebalancingOwner({
                     )
                   : 0;
 
+                const rowPctAfterSplit =
+                  significant && splitCount > 1 && effectiveTotalKrw > 0 ?
+                    approxPortfolioPctAfterDelta(r.valueKrw, perSplitRowKrw, effectiveTotalKrw)
+                  : null;
+
                 return (
                   <tr
                     key={r.groupKey}
@@ -1568,6 +1574,9 @@ function RebalancingOwner({
                           {splitAmountMode === "milestone" && (
                             <span className="font-normal text-muted-foreground">·1차</span>
                           )}
+                          {rowPctAfterSplit != null ?
+                            <span className="font-normal text-muted-foreground">{` (→ ${rowPctAfterSplit.toFixed(2)}%)`}</span>
+                          : null}
                         </span>
                       : "—"}
                     </td>
@@ -1612,24 +1621,37 @@ function RebalancingOwner({
                         >
                           {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
                           {formatMemberSharesOrAmount(perSplitRowKrw, r.repPrice)}
+                          {rowPctAfterSplit != null ?
+                            <span className="text-muted-foreground">{` (→ ${rowPctAfterSplit.toFixed(2)}%)`}</span>
+                          : null}
                         </span>
                       ) : (
                         <div className="space-y-0.5">
                           {r.memberAdjustments
                             .filter((m) => Math.abs(m.diffKrw) >= 10000)
-                            .map((m) => (
-                              <p key={`${m.symbol}-per-split`} className="tabular-nums">
-                                <span className="text-muted-foreground">{allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
-                                <span
-                                  title={m.priceKrw <= 0 ? "종목 시세 없음 · 매매 차액만 표시" : undefined}
-                                  className={
-                                    m.diffKrw >= 0 ? "text-rose-400" : "text-blue-400"
-                                  }
-                                >
-                                  {formatMemberSharesOrAmount(memberSplitKrw(r, m, perSplitRowKrw), m.priceKrw)}
-                                </span>
-                              </p>
-                            ))}
+                            .map((m) => {
+                              const mPer = memberSplitKrw(r, m, perSplitRowKrw);
+                              const mPctAfter =
+                                approxPortfolioPctAfterDelta(m.valueKrw, mPer, effectiveTotalKrw);
+                              return (
+                                <p key={`${m.symbol}-per-split`} className="tabular-nums">
+                                  <span className="text-muted-foreground">
+                                    {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
+                                  </span>{" "}
+                                  <span
+                                    title={
+                                      m.priceKrw <= 0 ? "종목 시세 없음 · 매매 차액만 표시" : undefined
+                                    }
+                                    className={m.diffKrw >= 0 ? "text-rose-400" : "text-blue-400"}
+                                  >
+                                    {formatMemberSharesOrAmount(mPer, m.priceKrw)}
+                                    {mPctAfter != null ?
+                                      <span className="text-muted-foreground">{` (→ ${mPctAfter.toFixed(2)}%)`}</span>
+                                    : null}
+                                  </span>
+                                </p>
+                              );
+                            })}
                         </div>
                       )}
                     </td>
