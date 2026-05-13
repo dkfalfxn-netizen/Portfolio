@@ -27,6 +27,11 @@ import {
   persistVisualOrderForOwner,
   REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
 } from "@/lib/rebalance-visual-order";
+import {
+  allocationTickerMatches,
+  mergeWatchlistSymbolsIntoCalculatorGroups,
+  type WatchlistRowForRebalance,
+} from "@/lib/rebalance-watchlist-groups";
 
 /** 대시보드·계산기 LS에 목표만 있고 현재 평가 0원인 그룹을 계산기 행에 포함 (같은 키면 대시보드 비중 우선). */
 function mergeSavedTargetGroupsWithoutHoldings(ownerName: string, baseGroups: GroupAllocation[]): GroupAllocation[] {
@@ -981,6 +986,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
           보유·평가가 없는 줄(S&P500 등)은 현재 비중이 0%이고 바가 비어 있는 것이 정상입니다(데이터 누락이 아닙니다).
           목표 합은 보통 100%입니다. 우측 숫자가 빨간 ▲면 합이 100%를 넘어 한 번에 만족할 수 없는 조합입니다 — 일부 목표를 줄이거나 초과 분야에서 줄여 주세요.
           같은 그룹에 종목이 여러 개면 아래에서 분배 가중치를 넣을 수 있습니다. 같은 그룹의 모든 종목 줄에 양수를 넣을 때만 반영되고, 하나라도 비우면 평가금 비율로 나눕니다.
+          관심종목에 넣어 둔 티커·그룹명은 대시보드 바와 같이 해당 그룹 아래 종목 줄로 붙습니다.
         </p>
 
         {/* 스케일 헤더 — 바 행과 동일한 레이아웃으로 정렬 */}
@@ -1308,6 +1314,8 @@ export function RebalancingCalculator({
   usdKrw,
   dashboardTargetsByOwner = {},
   dashboardTargetsDraftByOwner = {},
+  watchlistRows = [],
+  watchlistOwnerAllToken = "__ALL__",
 }: {
   allocationByOwner: {
     ownerName: string;
@@ -1326,6 +1334,9 @@ export function RebalancingCalculator({
   usdKrw: number;
   dashboardTargetsByOwner?: Record<string, Record<string, number>>;
   dashboardTargetsDraftByOwner?: Record<string, Record<string, number>>;
+  /** 대시보드 도넛과 동일하게 그룹 후보에 워치 종목을 붙입니다 */
+  watchlistRows?: WatchlistRowForRebalance[];
+  watchlistOwnerAllToken?: string;
 }) {
   const [selectedOwner, setSelectedOwner] = useState(allocationByOwner[0]?.ownerName ?? "");
   const mergeTargetsReady = useClientReady();
@@ -1347,7 +1358,8 @@ export function RebalancingCalculator({
 
       const repMap = new Map<string, { symbol: string; name: string; priceKrw: number }>();
       for (const p of items) {
-        const gk = p.chartGroup?.trim() || p.symbol;
+        const gkRaw = p.chartGroup?.trim() || p.symbol;
+        const gk = gkRaw.trim().toUpperCase();
         if (!repMap.has(gk) && p.currentPrice > 0) {
           const priceKrw =
             p.currency === "USD" ? p.currentPrice * usdKrw : p.currentPrice;
@@ -1356,9 +1368,12 @@ export function RebalancingCalculator({
       }
 
       let groups: GroupAllocation[] = data.map((d) => {
-        const rep = repMap.get(d.ticker);
+        const dk = d.ticker.trim().toUpperCase();
+        const rep = repMap.get(dk);
         const members = items
-          .filter((p) => (p.chartGroup?.trim() || p.symbol) === d.ticker)
+          .filter((p) =>
+            allocationTickerMatches(p.chartGroup?.trim() || p.symbol, d.ticker),
+          )
           .map((p) => ({
             symbol: p.symbol,
             name: p.name,
@@ -1381,9 +1396,26 @@ export function RebalancingCalculator({
         groups = mergeSavedTargetGroupsWithoutHoldings(ownerName, groups);
       }
 
+      groups = mergeWatchlistSymbolsIntoCalculatorGroups(
+        ownerName,
+        groups,
+        watchlistRows,
+        watchlistOwnerAllToken,
+        enrichedPositions,
+        usdKrw,
+      );
+
       return { ownerName, groups, totalKrw: total };
     });
-  }, [allocationByOwner, enrichedPositions, usdKrw, mergeTargetsReady, calcStorageBump]);
+  }, [
+    allocationByOwner,
+    enrichedPositions,
+    usdKrw,
+    mergeTargetsReady,
+    calcStorageBump,
+    watchlistRows,
+    watchlistOwnerAllToken,
+  ]);
 
   const current = ownerData.find((o) => o.ownerName === displayOwner);
 

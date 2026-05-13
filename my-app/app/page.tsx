@@ -3814,6 +3814,8 @@ export default function Home() {
               usdKrw={usdKrw}
               dashboardTargetsByOwner={dashboardTargetsByOwner}
               dashboardTargetsDraftByOwner={dashboardTargetsDraftByOwner}
+              watchlistRows={watchlistRows}
+              watchlistOwnerAllToken={WATCHLIST_OWNER_ALL}
             />
           </section>
 
@@ -5994,6 +5996,8 @@ export default function Home() {
               usdKrw={usdKrw}
               dashboardTargetsByOwner={dashboardTargetsByOwner}
               dashboardTargetsDraftByOwner={dashboardTargetsDraftByOwner}
+              watchlistRows={watchlistRows}
+              watchlistOwnerAllToken={WATCHLIST_OWNER_ALL}
             />
           </section>
           </div>
