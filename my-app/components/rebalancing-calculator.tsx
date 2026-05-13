@@ -1617,6 +1617,7 @@ export function RebalancingCalculator({
   }, [allocationByOwner, selectedOwner]);
 
   const ownerData = useMemo(() => {
+    void calcStorageBump;
     return allocationByOwner.map(({ ownerName, data, total }) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
 
