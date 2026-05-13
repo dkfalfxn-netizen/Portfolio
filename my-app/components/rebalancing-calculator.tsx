@@ -304,20 +304,38 @@ function CashAllocationDeviationLabel({
   const belowBand = hasPositiveTarget && relDev < -0.05;
 
   if (!hasPositiveTarget && actualPct > 0) {
-    return <span className="text-emerald-400">목표 0% ▼ +{actualPct.toFixed(1)}%p</span>;
+    return (
+      <span className="inline-flex items-center rounded-full border border-emerald-500/60 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-emerald-300">
+        목표 0% · +{actualPct.toFixed(1)}%p
+      </span>
+    );
   }
   if (!hasPositiveTarget) {
-    return <span className="text-zinc-400">목표 0%</span>;
+    return (
+      <span className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/60 px-2 py-0.5 text-[11px] font-medium text-slate-400">
+        목표 0%
+      </span>
+    );
   }
   if (withinBand) {
-    return <span className="text-sky-400">≈ 목표</span>;
+    return (
+      <span className="inline-flex items-center rounded-full border border-sky-500/50 bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-300">
+        ≈ 목표
+      </span>
+    );
   }
   if (belowBand) {
     return (
-      <span className="text-rose-400">▲ {Math.abs(diffPp).toFixed(1)}%p 부족</span>
+      <span className="inline-flex items-center rounded-full border border-rose-500/65 bg-rose-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-rose-300">
+        ▲ {Math.abs(diffPp).toFixed(1)}%p 부족
+      </span>
     );
   }
-  return <span className="text-emerald-400">▼ +{diffPp.toFixed(1)}%p 초과</span>;
+  return (
+    <span className="inline-flex items-center rounded-full border border-emerald-500/65 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold tabular-nums text-emerald-300">
+      ▼ +{diffPp.toFixed(1)}%p 초과
+    </span>
+  );
 }
 
 /** 대시보드·리밸 바와 동일하게 현금 줄은 드래그 비활성·하단 고정 */
@@ -497,7 +515,7 @@ function RebalancingBarSortableRow({
               min={0}
               max={100}
               step={0.1}
-              className="w-12 rounded border border-slate-600/80 bg-background px-1 py-0.5 text-right text-xs font-medium tabular-nums text-slate-100"
+              className="w-12 rounded-md border-2 border-slate-500/80 bg-slate-950/80 px-1 py-0.5 text-right text-xs font-semibold tabular-nums text-slate-100 shadow-inner outline-none focus:border-primary focus:ring-1 focus:ring-primary/35"
               value={targets[row.groupKey] ?? ""}
               onChange={(e) => setTargets((prev) => ({ ...prev, [row.groupKey]: e.target.value }))}
               title="목표 비중 입력 — 계산기 전용 저장소에 자동 저장됩니다."
@@ -530,15 +548,21 @@ function RebalancingBarSortableRow({
           : null}
         </div>
 
-        <div className="w-24 shrink-0 text-right text-xs font-medium tabular-nums sm:w-28">
+        <div className="w-[7.25rem] shrink-0 text-right sm:w-[8.25rem]">
           {isCash ?
             <CashAllocationDeviationLabel targetPct={row.targetPct} actualPct={row.currentPct} />
           : rowIsOver ?
-            <span className="font-medium tabular-nums text-emerald-400">▼+{absDiff.toFixed(1)}%p 초과</span>
+            <span className="inline-flex items-center justify-end rounded-full border border-emerald-500/70 bg-emerald-500/18 px-2 py-0.5 text-[11px] font-bold tabular-nums text-emerald-300 shadow-sm">
+              ▼+{absDiff.toFixed(1)}%p 초과
+            </span>
           : rowIsUnder ?
-            <span className="font-medium tabular-nums text-rose-400">▲{absDiff.toFixed(1)}%p 부족</span>
+            <span className="inline-flex items-center justify-end rounded-full border border-rose-500/70 bg-rose-500/18 px-2 py-0.5 text-[11px] font-bold tabular-nums text-rose-300 shadow-sm">
+              ▲{absDiff.toFixed(1)}%p 부족
+            </span>
           : (
-            <span className="text-muted-foreground">✓</span>
+            <span className="inline-flex items-center justify-end rounded-full border border-slate-600/70 bg-slate-800/55 px-2 py-0.5 text-[11px] font-semibold text-slate-400">
+              적정 ✓
+            </span>
           )}
         </div>
       </div>
@@ -610,45 +634,76 @@ function RebalancingBarSortableRow({
               </div>
             </div>
           : null}
-          <div className="mt-2 space-y-2 pl-7 sm:pl-8">
-            {row.members.map((m) => {
-              const portPct = totalKrw > 0 ? (m.valueKrw / totalKrw) * 100 : 0;
-              return (
-                <div
-                  key={`${row.groupKey}:${m.symbol}`}
-                  className="grid grid-cols-1 items-center gap-x-3 gap-y-1 text-xs text-slate-200 sm:grid-cols-[minmax(0,1fr)_1fr_5.5rem]"
-                >
-                  <span
-                    className={`min-w-0 truncate font-medium text-slate-100 ${
-                      isUndecidedSlotMemberSymbol(m.symbol) ? "italic text-slate-300" : ""
-                    }`}
+          <div className="-mx-0.5 mt-2 overflow-x-auto pl-7 sm:pl-8">
+            <div className="min-w-0 sm:min-w-[36rem]">
+              <div
+                className="mb-1 hidden border-b border-slate-700/50 px-2 pb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:grid sm:grid-cols-[13rem_4.75rem_9.5rem_6.25rem] sm:gap-x-3 sm:px-2.5"
+                aria-hidden
+              >
+                <span>종목</span>
+                <span className="text-right">현재%</span>
+                <span className="text-right">평가액</span>
+                <span className="text-right">목표</span>
+              </div>
+              <div className="divide-y divide-slate-700/55 rounded-md border border-slate-700/35 bg-slate-900/20 px-2 sm:px-2.5">
+              {row.members.map((m) => {
+                const portPct = totalKrw > 0 ? (m.valueKrw / totalKrw) * 100 : 0;
+                return (
+                  <div
+                    key={`${row.groupKey}:${m.symbol}`}
+                    className="grid grid-cols-1 gap-y-2 py-3 pr-1 first:pt-2 last:pb-2 sm:grid-cols-[13rem_4.75rem_9.5rem_6.25rem] sm:items-center sm:gap-x-3 sm:gap-y-0 sm:py-2.5"
                   >
-                    {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
-                  </span>
-                  <span className="min-w-0 justify-self-end text-right tabular-nums text-slate-400 sm:whitespace-nowrap">
-                    현재 {portPct.toFixed(2)}% · {fmtKrw(m.valueKrw)}
-                  </span>
-                  <label className="flex w-full min-w-0 items-center justify-end gap-1 sm:w-[5.5rem] sm:justify-self-end">
-                    <span className="shrink-0 text-[10px] font-medium text-slate-400 sm:text-[11px]">목표%</span>
-                    <span className="sr-only">
-                      {m.symbol} 포트폴리오 목표 비중 퍼센트
+                    <span
+                      className={`min-w-0 truncate text-xs font-medium text-slate-100 sm:text-sm ${
+                        isUndecidedSlotMemberSymbol(m.symbol) ? "italic text-slate-400" : ""
+                      }`}
+                      title={allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
+                    >
+                      {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
                     </span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={0.1}
-                      placeholder="5"
-                      className="h-7 w-10 shrink-0 rounded-md border border-slate-600/80 bg-background px-0.5 py-0.5 text-center text-xs font-medium tabular-nums text-slate-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      value={memberSplitsForGroup[m.symbol] ?? ""}
-                      onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
-                      aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 포트폴리오 목표 %`}
-                      title="포트폴리오 목표 %. 비운 칸은 0%. 입력 합이 그룹 목표에 맞게 스케일되어 상세 매매액에 반영됩니다."
-                    />
-                  </label>
-                </div>
-              );
-            })}
+                    <div className="flex items-baseline justify-start gap-0.5 sm:justify-end">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">
+                        현재{" "}
+                      </span>
+                      <span className="text-base font-bold tabular-nums leading-none text-slate-50 sm:text-lg">
+                        {portPct.toFixed(2)}
+                      </span>
+                      <span className="text-sm font-bold text-slate-300 sm:text-base">%</span>
+                    </div>
+                    <div className="text-left sm:text-right">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">
+                        평가{" "}
+                      </span>
+                      <span className="text-xs tabular-nums text-slate-400/80 sm:text-sm">
+                        {fmtKrw(m.valueKrw)}
+                      </span>
+                    </div>
+                    <label className="flex w-full max-w-[8rem] items-center gap-2 sm:w-[6.25rem] sm:max-w-none sm:justify-self-end">
+                      <span className="hidden w-10 shrink-0 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:inline sm:w-[2.75rem]">
+                        목표
+                      </span>
+                      <span className="shrink-0 text-[10px] font-semibold text-slate-500 sm:hidden">목표%</span>
+                      <span className="sr-only">
+                        {m.symbol} 포트폴리오 목표 비중 퍼센트
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.1}
+                        placeholder="—"
+                        className="h-8 w-full min-w-[2.75rem] max-w-[4.5rem] rounded-md border-2 border-slate-500/90 bg-slate-950/90 px-1.5 py-1 text-center text-sm font-semibold tabular-nums text-slate-50 shadow-inner outline-none ring-slate-600/30 transition-[border-color,box-shadow] focus:border-primary focus:ring-2 focus:ring-primary/35 sm:max-w-[3.5rem] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        value={memberSplitsForGroup[m.symbol] ?? ""}
+                        onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
+                        aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 포트폴리오 목표 %`}
+                        title="포트폴리오 목표 %. 비운 칸은 0%. 입력 합이 그룹 목표에 맞게 스케일되어 상세 매매액에 반영됩니다."
+                      />
+                    </label>
+                  </div>
+                );
+              })}
+              </div>
+            </div>
           </div>
         </div>
       : null}
