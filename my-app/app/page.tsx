@@ -1080,27 +1080,6 @@ export default function Home() {
   const [isHydrated, setIsHydrated] = useState(false);
   /** 대시보드 목표 비중 — 저장·변경 이벤트마다 최신값으로 갱신 */
   const [dashboardTargetsByOwner, setDashboardTargetsByOwner] = useState<Record<string, Record<string, number>>>({});
-  useEffect(() => {
-    /** 실제 보유 종목 ticker 집합만 포함하도록 필터링:
-     *  AI·원자력처럼 보유가 없어 대시보드 bar에 표시되지 않는 종목의
-     *  구 타겟값(TARGET_WEIGHT_STORAGE_KEY)이 계산기로 복사되지 않도록 차단 */
-    const compute = () => {
-      const raw = loadAllTargetStockWeights();
-      const filtered: Record<string, Record<string, number>> = {};
-      for (const { ownerName, data } of allocationByOwner) {
-        const ownerRaw = raw[ownerName] ?? {};
-        filtered[ownerName] = {};
-        for (const item of data) {
-          const k = item.ticker;
-          filtered[ownerName][k] = ownerRaw[k] ?? 0;
-        }
-      }
-      setDashboardTargetsByOwner(filtered);
-    };
-    compute();
-    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
-    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
-  }, [allocationByOwner]);
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
   const [buyJournal, setBuyJournal] = useState<BuyJournalEntry[]>([]);
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
@@ -1759,6 +1738,28 @@ export default function Home() {
       return { ownerName, data, total };
     });
   }, [ownerNames, enrichedPositions, cashByOwner, usdKrw]);
+
+  /** 실제 보유 종목만 포함하도록 필터링된 대시보드 타겟:
+   *  AI·원자력처럼 보유 없이 TARGET_WEIGHT_STORAGE_KEY에만 남아 있는 구 타겟이
+   *  계산기로 복사되지 않도록, allocationByOwner에 있는 ticker만 포함 */
+  useEffect(() => {
+    const compute = () => {
+      const raw = loadAllTargetStockWeights();
+      const filtered: Record<string, Record<string, number>> = {};
+      for (const { ownerName, data } of allocationByOwner) {
+        const ownerRaw = raw[ownerName] ?? {};
+        filtered[ownerName] = {};
+        for (const item of data) {
+          const k = item.ticker;
+          filtered[ownerName][k] = ownerRaw[k] ?? 0;
+        }
+      }
+      setDashboardTargetsByOwner(filtered);
+    };
+    compute();
+    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
+    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
+  }, [allocationByOwner]);
 
   const positionsByOwner = useMemo(() => {
     return ownerNames.map((ownerName) => {
