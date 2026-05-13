@@ -627,18 +627,13 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
     try { window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(allCalc)); } catch { /* ignore */ }
 
     // targets를 현재 groups 기준으로 완전 재구성:
-    //   - 대시보드에 있는 그룹 → 대시보드 값 그대로
-    //   - 대시보드에 없는 현재 그룹 → 명시적으로 "0" (그룹 effect가 이전 값을 복원하지 못하도록)
-    //   - 대시보드에만 있고 holdings 없는 그룹 → 대시보드 값 유지 (ghost row용)
+    //   - 현재 groups에 있는 그룹만 포함 (대시보드값 또는 0%)
+    //   - saved에 있더라도 현재 groups에 없는 키(실제 보유 없는 stale 그룹)는 무시
+    //   → AI·원자력 같은 구 타겟이 대시보드 저장값에 남아 있어도 계산기에 복원되지 않음
     const next: Record<string, string> = {};
     for (const g of groups) {
       const v = saved[g.groupKey];
       next[g.groupKey] = v != null && Number.isFinite(v) ? String(v) : "0";
-    }
-    for (const [k, v] of Object.entries(saved)) {
-      if (!(k in next) && Number(v) > 0) {
-        next[k] = String(v);
-      }
     }
     setTargets(next);
     // 외부 래퍼에 ownerData 재계산 요청 (미보유 ghost 행 갱신)
