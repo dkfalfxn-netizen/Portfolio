@@ -1,11 +1,13 @@
 /** page·목표비중 UI 공통 — 로컬 변경 시 서버 푸시 유도 */
 export const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
 
-/** 대시보드(원형 차트) 전용 목표 비중 키 */
+/** 목표 비중 % — 대시보드·리밸런싱 계산기 공통(localStorage 단일 소스) */
 export const TARGET_WEIGHT_STORAGE_KEY = "portfolio_target_stock_weight_v1";
 
-/** 리밸런싱 계산기 전용 목표 비중 키 (대시보드와 독립) */
+/** 과거 버전 호환용: 계산기가 별도 키에만 저장했던 데이터 (신규 설치에서는 비어 있음) */
 export const CALCULATOR_TARGET_STORAGE_KEY = "portfolio_calculator_target_weight_v1";
+
+const LEGACY_CALC_TARGETS_MERGED_FLAG = "portfolio_legacy_calc_targets_merged_v2";
 
 /** 계산기 그룹 내 종목별 매매액 분배 가중치 (보유자 → 그룹키 → 심볼 → 양수 가중치) */
 export const CALCULATOR_MEMBER_SPLIT_STORAGE_KEY = "portfolio_calculator_member_split_v1";
@@ -26,6 +28,7 @@ export type TargetStockWeightByOwner = Record<string, Record<string, number>>;
 
 export function loadAllTargetStockWeights(): TargetStockWeightByOwner {
   if (typeof window === "undefined") return {};
+  migrateLegacyCalculatorTargetWeightsOnce();
   try {
     const raw = window.localStorage.getItem(TARGET_WEIGHT_STORAGE_KEY);
     if (!raw) return {};
@@ -37,17 +40,40 @@ export function loadAllTargetStockWeights(): TargetStockWeightByOwner {
   }
 }
 
-/** 리밸런싱 계산기 전용 목표 비중 로더 */
+/** @deprecated 과거 이름 유지 — `loadAllTargetStockWeights()`와 동일 */
 export function loadAllCalculatorTargetWeights(): TargetStockWeightByOwner {
-  if (typeof window === "undefined") return {};
+  return loadAllTargetStockWeights();
+}
+
+/**
+ * 계산기·대시보드 공통 목표 % 저장: 해당 보유자 행만 병합(다른 티커 목표는 유지).
+ */
+export function persistOwnerTargetWeightsFromInputStrings(
+  ownerName: string,
+  targetsStrings: Record<string, string>,
+): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    const raw = window.localStorage.getItem(CALCULATOR_TARGET_STORAGE_KEY);
-    if (!raw) return {};
-    const p = JSON.parse(raw) as unknown;
-    if (typeof p !== "object" || p === null) return {};
-    return p as TargetStockWeightByOwner;
+    const all = loadAllTargetStockWeights();
+    const prevRow = JSON.stringify(all[ownerName] ?? {});
+    const merged = { ...(all[ownerName] ?? {}) };
+    for (const [k, v] of Object.entries(targetsStrings)) {
+      const key = typeof k === "string" ? k.trim() : "";
+      if (!key) continue;
+      const rawStr = typeof v === "string" ? v.trim().replace(",", ".") : String(v ?? "");
+      if (rawStr === "") continue;
+      const n = parseFloat(rawStr);
+      if (!Number.isFinite(n)) continue;
+      merged[key] = Math.min(100, Math.max(0, n));
+    }
+    all[ownerName] = merged;
+    if (JSON.stringify(all[ownerName]) === prevRow) return false;
+    window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
+    window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
+    return true;
   } catch {
-    return {};
+    return false;
   }
 }
 
@@ -60,6 +86,56 @@ function sanitizeInner(raw: unknown): Record<string, number> {
     if (Number.isFinite(n) && n >= 0 && n <= 100) row[ticker] = n;
   }
   return row;
+}
+
+function parseTargetWeightsStoredJson(raw: string | null): TargetStockWeightByOwner {
+  if (!raw) return {};
+  try {
+    const p = JSON.parse(raw) as unknown;
+    if (typeof p !== "object" || p === null) return {};
+    const out: TargetStockWeightByOwner = {};
+    for (const [owner, inner] of Object.entries(p as Record<string, unknown>)) {
+      if (typeof owner !== "string" || !owner.trim()) continue;
+      out[owner.trim()] =
+        inner && typeof inner === "object" && !Array.isArray(inner) ? sanitizeInner(inner) : {};
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** 과거 분리 저장소(CALCULATOR_TARGET_STORAGE_KEY) → 통합 키로 1회 이관 후 레거시 키 제거 */
+function migrateLegacyCalculatorTargetWeightsOnce(): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (window.localStorage.getItem(LEGACY_CALC_TARGETS_MERGED_FLAG)) return;
+    const dash = parseTargetWeightsStoredJson(window.localStorage.getItem(TARGET_WEIGHT_STORAGE_KEY));
+    const calc = parseTargetWeightsStoredJson(window.localStorage.getItem(CALCULATOR_TARGET_STORAGE_KEY));
+    let wrote = false;
+    if (Object.keys(calc).length > 0) {
+      const merged: TargetStockWeightByOwner = { ...dash };
+      for (const [owner, row] of Object.entries(calc)) {
+        const o = owner.trim();
+        if (!o) continue;
+        merged[o] = { ...(merged[o] ?? {}), ...row };
+      }
+      window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(merged));
+      window.localStorage.removeItem(CALCULATOR_TARGET_STORAGE_KEY);
+      wrote = true;
+    }
+    window.localStorage.setItem(LEGACY_CALC_TARGETS_MERGED_FLAG, "1");
+    if (wrote) {
+      window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
+      window.dispatchEvent(new Event(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT));
+    }
+  } catch {
+    try {
+      window.localStorage.setItem(LEGACY_CALC_TARGETS_MERGED_FLAG, "1");
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 /** API·pull 응답용: 중첩 객체를 보유자별 비중 %로 정제(목표 없는 보유자는 빈 객체로 유지) */
@@ -223,7 +299,7 @@ export function persistCalculatorMemberSplitModesForOwner(
   }
 }
 
-/** 서버(sync)·API 본문 공통: 계산기 전용 상태(보유자별) — LS 키 3종과 동등 */
+/** 서버(sync)·API 본문 공통: 보유자별 번들(groupTargets은 통합 목표 LS와 동일 스냅샷) */
 export type RebalanceCalculatorWireBundle = {
   groupTargets: Record<string, number>;
   memberSplits: Record<string, Record<string, number>>;
@@ -314,31 +390,32 @@ export function buildRebalanceCalculatorByOwnerFromLocal(): RebalanceCalculatorB
   return out;
 }
 
-/** 서버 pull → LS 3종에 반영 후 계산기 UI 갱신 이벤트 */
+/** 서버 pull → 목표 통합 저장소 + 분배 LS 반영 후 UI 갱신 */
 export function mergeAndPersistRebalanceCalculatorFromServer(server: unknown): void {
   if (typeof window === "undefined") return;
   const parsed = parseRebalanceCalculatorFromServer(server);
   if (Object.keys(parsed).length === 0) return;
-  const targets = loadAllCalculatorTargetWeights();
+  const targets = loadAllTargetStockWeights();
   const splits = loadAllCalculatorMemberSplits();
   const modes = loadAllCalculatorMemberSplitModes();
   for (const [owner, bundle] of Object.entries(parsed)) {
     const o = owner.trim();
     if (!o) continue;
-    targets[o] = { ...bundle.groupTargets };
+    targets[o] = { ...(targets[o] ?? {}), ...(bundle.groupTargets ?? {}) };
     if (Object.keys(bundle.memberSplits).length > 0) splits[o] = bundle.memberSplits;
     else delete splits[o];
     if (Object.keys(bundle.memberSplitModes).length > 0) modes[o] = bundle.memberSplitModes;
     else delete modes[o];
   }
   try {
-    window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(targets));
+    window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(targets));
     window.localStorage.setItem(CALCULATOR_MEMBER_SPLIT_STORAGE_KEY, JSON.stringify(splits));
     window.localStorage.setItem(CALCULATOR_MEMBER_SPLIT_MODE_STORAGE_KEY, JSON.stringify(modes));
   } catch {
     return;
   }
   window.dispatchEvent(new Event(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT));
+  window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
 }
 
 function parseRebalanceCalculatorFromServer(server: unknown): RebalanceCalculatorByOwnerWire {

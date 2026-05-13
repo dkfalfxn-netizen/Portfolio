@@ -16,14 +16,14 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { fmtInt, parseKoreanIntDigits } from "@/lib/format-money";
 import {
-  CALCULATOR_TARGET_STORAGE_KEY,
+  PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT,
   type CalculatorMemberSplitMode,
   loadAllCalculatorMemberSplitModes,
   loadAllCalculatorMemberSplits,
-  loadAllCalculatorTargetWeights,
   loadAllTargetStockWeights,
   persistCalculatorMemberSplitModesForOwner,
   persistCalculatorMemberSplitsForOwner,
+  persistOwnerTargetWeightsFromInputStrings,
   REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT,
 } from "@/lib/portfolio-target-weights";
 import {
@@ -49,9 +49,7 @@ function mergeSavedTargetGroupsWithoutHoldings(
     watchlistOwnerAllToken: string;
   },
 ): GroupAllocation[] {
-  const fromCalc = loadAllCalculatorTargetWeights()[ownerName] ?? {};
-  const fromDash = loadAllTargetStockWeights()[ownerName] ?? {};
-  const saved = { ...fromCalc, ...fromDash };
+  const saved = loadAllTargetStockWeights()[ownerName] ?? {};
   const allowedStub = allowedCalculatorStubTickerKeysUpper({
     ownerName,
     allocationTickers: ctx.allocationTickers,
@@ -89,30 +87,6 @@ function dashboardTargetInputString(saved: Record<string, number>, groupKey: str
 }
 
 
-/** 계산기 목표 문자열을 계산기 전용 LS 키에 저장 (대시보드와 독립) */
-function persistCalculatorTargets(
-  ownerName: string,
-  targetsStrings: Record<string, string>,
-): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const all = loadAllCalculatorTargetWeights();
-    const before = JSON.stringify(all);
-    const next: Record<string, number> = {};
-    for (const [k, v] of Object.entries(targetsStrings)) {
-      const n = parseFloat(v);
-      if (!Number.isFinite(n)) continue;
-      next[k] = Math.min(100, Math.max(0, n));
-    }
-    all[ownerName] = next;
-    if (JSON.stringify(all) === before) return false;
-    window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(all));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // ─── 타입 ──────────────────────────────────────────────────────────────────────
 
 export type GroupAllocation = {
@@ -145,12 +119,6 @@ type Props = {
   ownerName: string;
   groups: GroupAllocation[];
   totalKrw: number;
-  /** 대시보드 불러오기 후 외부 래퍼가 ownerData를 재계산하도록 알림 */
-  onDashboardLoaded?: () => void;
-  /** 대시보드 현재 목표 비중 (저장 이벤트로 항상 최신값 전달, 보유+워치리스트 허용 티커 위주) */
-  dashboardTargets?: Record<string, number> | null;
-  /** 대시보드 바에서 디바운스된 편집 중 목표(localStorage 플러시보다 신선함) */
-  draftTargets?: Record<string, number> | null;
   /** 8자 이상이면 목표·메모·계산기 LS 변경을 서버에도 디바운스 반영 */
   cloudSyncKey?: string;
 };
@@ -731,9 +699,6 @@ function RebalancingOwner({
   ownerName,
   groups,
   totalKrw,
-  onDashboardLoaded,
-  dashboardTargets,
-  draftTargets,
   cloudSyncKey,
 }: Props) {
   const [resolvedNameBySymbol, setResolvedNameBySymbol] = useState<Record<string, string>>({});
@@ -741,10 +706,10 @@ function RebalancingOwner({
    *  state가 바뀌어 effect가 재실행되는 루프를 유발하므로 ref로 별도 관리한다. */
   const requestedSymbolsRef = useRef<Set<string>>(new Set());
 
-  // ── 목표 비중 state: 계산기 전용 키에서 초깃값 읽기 (대시보드와 독립) ──
+  // ── 목표 비중: 대시보드와 통합 저장소(loadAllTargetStockWeights) ──
   const [targets, setTargets] = useState<Record<string, string>>(() => {
     const saved =
-      typeof window !== "undefined" ? (loadAllCalculatorTargetWeights()[ownerName] ?? {}) : {};
+      typeof window !== "undefined" ? (loadAllTargetStockWeights()[ownerName] ?? {}) : {};
     const init: Record<string, string> = {};
     for (const g of groups) {
       init[g.groupKey] = dashboardTargetInputString(saved, g.groupKey);
@@ -755,7 +720,7 @@ function RebalancingOwner({
   // 새 그룹이 추가·삭제될 때 targets를 그룹 키에 맞춤 (빠진 행 키는 제거 → LS 자동저장으로 stale 복구 차단)
   useEffect(() => {
     setTargets((prev) => {
-      const saved = loadAllCalculatorTargetWeights()[ownerName] ?? {};
+      const saved = loadAllTargetStockWeights()[ownerName] ?? {};
       const next: Record<string, string> = {};
       for (const g of groups) {
         const k = g.groupKey;
@@ -774,6 +739,31 @@ function RebalancingOwner({
       return next;
     });
   }, [groups, ownerName]);
+
+  /** 대시보드 바·서버 pull 등 외부에서 통합 LS가 바뀐 경우 입력칸 동기화 */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncFromDisk = () => {
+      const saved = loadAllTargetStockWeights()[ownerName] ?? {};
+      setTargets((prev) => {
+        const next: Record<string, string> = {};
+        for (const g of groups) {
+          const k = g.groupKey;
+          const v = saved[k];
+          next[k] = v != null && Number.isFinite(v) ? String(v) : "0";
+        }
+        if (
+          Object.keys(prev).length === Object.keys(next).length &&
+          Object.keys(next).every((ky) => prev[ky] === next[ky])
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, syncFromDisk);
+    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, syncFromDisk);
+  }, [ownerName, groups]);
 
   /** 그룹 내 종목별 매매액 분배 가중치 (계산기 전용 LS) */
   const [memberSplits, setMemberSplits] = useState<Record<string, Record<string, string>>>(() =>
@@ -1098,8 +1088,7 @@ function RebalancingOwner({
     effectivePortfolioKrw,
   ]);
 
-  // ── 자동저장: 계산기 전용 키에만 저장, 대시보드 이벤트 미발행 ─────────────
-  const [loadToast, setLoadToast] = useState(false);
+  // ── 자동저장: 통합 목표 LS(대시보드·계산기 동일 키), `PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT` 발행 ──
 
   useEffect(() => {
     const unresolved = new Set<string>();
@@ -1159,7 +1148,7 @@ function RebalancingOwner({
     if (autosaveTimerRef.current != null) window.clearTimeout(autosaveTimerRef.current);
     const id = window.setTimeout(() => {
       autosaveTimerRef.current = null;
-      persistCalculatorTargets(ownerName, targets);
+      persistOwnerTargetWeightsFromInputStrings(ownerName, targets);
     }, 420) as unknown as number;
     autosaveTimerRef.current = id;
     return () => {
@@ -1208,47 +1197,8 @@ function RebalancingOwner({
     };
   }, [targets, memberSplits, memberSplitModes, ownerName, cloudSyncKey]);
 
-  /** 대시보드 목표 비중 불러오기 — localStorage 목표와 페이지 요약본을 합산해 현재 행(groups)에 맞춘다 */
-  const handleLoad = useCallback(() => {
-    if (typeof window === "undefined") return;
-    // 로컬스토리지(전체 목표) + 페이지가 내려준 집약본을 합산.
-    // `dashboardTargets ?? LS`처럼 prop만 쓰면 LS에 있는 미보유(워치리스트) 줄이 무시된다.
-    const fromLsDash = loadAllTargetStockWeights()[ownerName] ?? {};
-    const fromProp = dashboardTargets ?? {};
-    const fromDraft = draftTargets ?? {};
-    // 요약본 → 저장된 전체 목표 순으로 덮고, 마지막에 화면에만 있는 초안까지 합함(워치 목표 초기 입력 포함)
-    const saved = { ...fromProp, ...fromLsDash, ...fromDraft };
-
-    // autosave 타이머를 먼저 취소해 구 targets 가 localStorage를 덮어쓰는 race 방지
-    if (autosaveTimerRef.current != null) {
-      window.clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
-    }
-    if (memberSplitAutosaveTimerRef.current != null) {
-      window.clearTimeout(memberSplitAutosaveTimerRef.current);
-      memberSplitAutosaveTimerRef.current = null;
-    }
-
-    // 계산기 localStorage를 병합된 대시보드 목표로 교체
-    const allCalc = loadAllCalculatorTargetWeights();
-    allCalc[ownerName] = { ...saved };
-    try { window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(allCalc)); } catch { /* ignore */ }
-
-    // targets를 현재 groups 기준으로 재구성(행은 미보유 stub 병합으로 곧 증가)
-    const next: Record<string, string> = {};
-    for (const g of groups) {
-      const v = saved[g.groupKey];
-      next[g.groupKey] = v != null && Number.isFinite(v) ? String(v) : "0";
-    }
-    setTargets(next);
-    // 외부 래퍼에 ownerData 재계산 요청 (미보유 ghost 행 갱신)
-    onDashboardLoaded?.();
-    setLoadToast(true);
-    setTimeout(() => setLoadToast(false), 2000);
-  }, [ownerName, groups, onDashboardLoaded, dashboardTargets, draftTargets]);
-
   const handleSave = useCallback(() => {
-    persistCalculatorTargets(ownerName, targets);
+    persistOwnerTargetWeightsFromInputStrings(ownerName, targets);
     persistCalculatorMemberSplitsForOwner(ownerName, memberSplits);
     persistCalculatorMemberSplitModesForOwner(ownerName, memberSplitModes);
     setSaveToast(true);
@@ -1257,7 +1207,7 @@ function RebalancingOwner({
 
   /** 초기화: 계산기 저장값으로 복원 (없으면 0%) */
   const handleReset = useCallback(() => {
-    const saved = loadAllCalculatorTargetWeights()[ownerName] ?? {};
+    const saved = loadAllTargetStockWeights()[ownerName] ?? {};
     const init: Record<string, string> = {};
     for (const g of groups) {
       init[g.groupKey] = dashboardTargetInputString(saved, g.groupKey);
@@ -1367,19 +1317,6 @@ function RebalancingOwner({
           >
             {targetSum.toFixed(1)}%{!sumIsOver && !sumIsUnder ? " ✓" : sumIsOver ? " ▲" : " ▼"}
           </span>
-          {/* 대시보드 저장값 불러오기 */}
-          <button
-            type="button"
-            onClick={handleLoad}
-            title="대시보드에 설정된 목표 비중을 계산기로 불러옵니다 (대시보드는 변경되지 않습니다)"
-            className={`rounded border px-2 py-1 text-xs transition-all active:scale-95 ${
-              loadToast
-                ? "border-sky-500/60 bg-sky-500/10 text-sky-400"
-                : "hover:bg-muted text-muted-foreground"
-            }`}
-          >
-            {loadToast ? "불러옴 ✓" : "대시보드 불러오기"}
-          </button>
           <button
             type="button"
             onClick={handleReset}
@@ -1731,8 +1668,6 @@ export function RebalancingCalculator({
   usdKrw,
   eurKrw = 1450,
   marketQuotes,
-  dashboardTargetsByOwner = {},
-  dashboardTargetsDraftByOwner = {},
   watchlistRows = [],
   watchlistOwnerAllToken = "__ALL__",
   cloudSyncKey = "",
@@ -1756,8 +1691,6 @@ export function RebalancingCalculator({
   eurKrw?: number;
   /** 보유 외 심볼도 시세 맵(`/api/market` quotes) — 관심종목과 결합 시 미보유 종목 주수 표시 */
   marketQuotes?: Record<string, { price: number | null; currency: string | null }>;
-  dashboardTargetsByOwner?: Record<string, Record<string, number>>;
-  dashboardTargetsDraftByOwner?: Record<string, Record<string, number>>;
   /** 대시보드 도넛과 동일하게 그룹 후보에 워치 종목을 붙입니다 */
   watchlistRows?: WatchlistRowForRebalance[];
   watchlistOwnerAllToken?: string;
@@ -1766,18 +1699,21 @@ export function RebalancingCalculator({
 }) {
   const [selectedOwner, setSelectedOwner] = useState(allocationByOwner[0]?.ownerName ?? "");
   const mergeTargetsReady = useClientReady();
-  /** 대시보드 불러오기 후 계산기 키 변경을 감지해 ownerData 재계산 트리거 */
+  /** 서버 pull 등으로 분배 LS가 바뀌면 미보유 stub ownerData 재구성 트리거 */
   const [calcStorageBump, setCalcStorageBump] = useState(0);
-
-  const handleDashboardLoaded = useCallback(() => {
-    setCalcStorageBump((n) => n + 1);
-  }, []);
+  /** 통합 목표 LS 변경 시 mergeSavedWithoutHoldings가 다시 LS를 읽도록(리마운트 없이) */
+  const [targetDiskRev, setTargetDiskRev] = useState(0);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const bump = () => setCalcStorageBump((n) => n + 1);
-    window.addEventListener(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT, bump);
-    return () => window.removeEventListener(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT, bump);
+    const bumpCalc = () => setCalcStorageBump((n) => n + 1);
+    window.addEventListener(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT, bumpCalc);
+    const bumpTargets = () => setTargetDiskRev((n) => n + 1);
+    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, bumpTargets);
+    return () => {
+      window.removeEventListener(REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT, bumpCalc);
+      window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, bumpTargets);
+    };
   }, []);
 
   const displayOwner = useMemo(() => {
@@ -1787,6 +1723,7 @@ export function RebalancingCalculator({
 
   const ownerData = useMemo(() => {
     void calcStorageBump;
+    void targetDiskRev;
     return allocationByOwner.map(({ ownerName, data, total }) => {
       const items = enrichedPositions.filter((p) => p.owner === ownerName);
 
@@ -1854,6 +1791,7 @@ export function RebalancingCalculator({
     marketQuotes,
     mergeTargetsReady,
     calcStorageBump,
+    targetDiskRev,
     watchlistRows,
     watchlistOwnerAllToken,
   ]);
@@ -1886,9 +1824,6 @@ export function RebalancingCalculator({
           ownerName={current.ownerName}
           groups={current.groups}
           totalKrw={current.totalKrw}
-          onDashboardLoaded={handleDashboardLoaded}
-          dashboardTargets={dashboardTargetsByOwner[current.ownerName] ?? null}
-          draftTargets={dashboardTargetsDraftByOwner[current.ownerName] ?? null}
           cloudSyncKey={cloudSyncKey}
         />
       ) : (

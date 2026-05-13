@@ -29,7 +29,6 @@ import {
   loadAllTargetStockWeights,
   mergeAndPersistRebalanceCalculatorFromServer,
   mergeAndPersistTargetStockWeightsFromServer,
-  PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT,
 } from "@/lib/portfolio-target-weights";
 import { mergeAndPersistOwnerScratchpadsFromServer, loadAllOwnerScratchpads } from "@/lib/portfolio-owner-scratchpad";
 import { todayKST, yesterdayKST } from "@/lib/date-utils";
@@ -1080,12 +1079,6 @@ export default function Home() {
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
-  /** 대시보드 목표 비중 — 저장·변경 이벤트마다 최신값으로 갱신 */
-  const [dashboardTargetsByOwner, setDashboardTargetsByOwner] = useState<Record<string, Record<string, number>>>({});
-  /** 대시보드 바에서 편집 중인 목표(localStorage 디바운스보다 빠르게 계산기에 반영) */
-  const [dashboardTargetsDraftByOwner, setDashboardTargetsDraftByOwner] = useState<
-    Record<string, Record<string, number>>
-  >({});
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
   const [buyJournal, setBuyJournal] = useState<BuyJournalEntry[]>([]);
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
@@ -1165,10 +1158,6 @@ export default function Home() {
     sentWatchlist?: number;
   } | null>(null);
   const WATCHLIST_OWNER_ALL = "__ALL__";
-
-  const handleDashboardDraftTargets = useCallback((owner: string, map: Record<string, number>) => {
-    setDashboardTargetsDraftByOwner((prev) => ({ ...prev, [owner]: { ...map } }));
-  }, []);
 
   type WatchlistRow = { symbol: string; name: string; group?: string; owners?: string[] };
   const [watchlistRows, setWatchlistRows] = useState<WatchlistRow[]>([]);
@@ -1750,48 +1739,6 @@ export default function Home() {
       return { ownerName, data, total };
     });
   }, [ownerNames, enrichedPositions, cashByOwner, usdKrw]);
-
-  /** 계산기에 내려줄 목표 요약: 보유 그룹 + 해당 보유자 워치리스트 준 허용 티커만(LS 기타 잡티 제외) */
-  useEffect(() => {
-    const compute = () => {
-      const raw = loadAllTargetStockWeights();
-      const filtered: Record<string, Record<string, number>> = {};
-      for (const { ownerName, data } of allocationByOwner) {
-        const ownerRaw = raw[ownerName] ?? {};
-        const allowedTicker = new Set<string>();
-        for (const item of data) {
-          const k =
-            typeof item.ticker === "string"
-              ? item.ticker.trim()
-              : String(item.ticker ?? "").trim();
-          if (k) allowedTicker.add(k);
-        }
-        for (const row of watchlistRows) {
-          const symRaw = typeof row.symbol === "string" ? row.symbol.trim() : "";
-          if (!symRaw) continue;
-          const owns = row.owners;
-          const ownersOk =
-            !owns ||
-            owns.length === 0 ||
-            owns.includes(WATCHLIST_OWNER_ALL) ||
-            owns.includes(ownerName);
-          if (!ownersOk) continue;
-          const grp = typeof row.group === "string" ? row.group.trim() : "";
-          const tickerKey = grp || symRaw;
-          if (tickerKey) allowedTicker.add(tickerKey);
-        }
-        filtered[ownerName] = {};
-        for (const k of allowedTicker) {
-          const v = ownerRaw[k];
-          filtered[ownerName][k] = v != null && Number.isFinite(v) ? v : 0;
-        }
-      }
-      setDashboardTargetsByOwner(filtered);
-    };
-    compute();
-    window.addEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
-    return () => window.removeEventListener(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT, compute);
-  }, [allocationByOwner, watchlistRows]);
 
   const positionsByOwner = useMemo(() => {
     return ownerNames.map((ownerName) => {
@@ -3677,7 +3624,6 @@ export default function Home() {
                         row.owners.includes(ownerName)),
                   )}
                   cloudSyncKey={cloudSyncKey}
-                  onDraftTargets={handleDashboardDraftTargets}
                 />
               ))}
             </div>
@@ -3825,8 +3771,6 @@ export default function Home() {
               usdKrw={usdKrw}
               eurKrw={eurKrw}
               marketQuotes={marketQuery.data?.quotes}
-              dashboardTargetsByOwner={dashboardTargetsByOwner}
-              dashboardTargetsDraftByOwner={dashboardTargetsDraftByOwner}
               watchlistRows={watchlistRows}
               watchlistOwnerAllToken={WATCHLIST_OWNER_ALL}
               cloudSyncKey={cloudSyncKey}
@@ -6010,8 +5954,6 @@ export default function Home() {
               usdKrw={usdKrw}
               eurKrw={eurKrw}
               marketQuotes={marketQuery.data?.quotes}
-              dashboardTargetsByOwner={dashboardTargetsByOwner}
-              dashboardTargetsDraftByOwner={dashboardTargetsDraftByOwner}
               watchlistRows={watchlistRows}
               watchlistOwnerAllToken={WATCHLIST_OWNER_ALL}
               cloudSyncKey={cloudSyncKey}
