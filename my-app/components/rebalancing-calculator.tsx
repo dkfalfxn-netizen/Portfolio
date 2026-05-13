@@ -472,11 +472,12 @@ function floorShares(diffKrw: number, priceKrw: number): number {
   return Math.floor(Math.abs(diffKrw) / priceKrw);
 }
 
-/** 시세 있으면 ±N주, 없으면 ±원화 차액 (미보유·워치만 붙은 종목 등 priceKrw=0) */
+/** ±N주 · ±원화 액수. 시세 없으면 ±액만 (미보유·워치 등 priceKrw=0) */
 function formatMemberSharesOrAmount(diffKrw: number, priceKrw: number): string {
   const sign = diffKrw >= 0 ? "+" : "-";
-  if (priceKrw > 0) return `${sign}${floorShares(diffKrw, priceKrw)}주`;
-  return `${sign}${fmtKrw(diffKrw)}`;
+  const amtPart = `${sign}${fmtKrw(diffKrw)}`;
+  if (priceKrw > 0) return `${sign}${floorShares(diffKrw, priceKrw)}주 · ${amtPart}`;
+  return amtPart;
 }
 
 function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dashboardTargets, draftTargets }: Props) {
@@ -1148,8 +1149,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                           className={r.diffKrw > 0 ? "tabular-nums text-rose-400" : "tabular-nums text-blue-400"}
                         >
                           {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
-                          {r.diffKrw > 0 ? "+" : "-"}
-                          {floorShares(r.diffKrw, r.repPrice)}주
+                          {formatMemberSharesOrAmount(r.diffKrw, r.repPrice)}
                         </span>
                       ) : (
                         <div className="space-y-0.5">
@@ -1179,8 +1179,7 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded, dash
                           className={r.diffKrw > 0 ? "tabular-nums text-rose-400" : "tabular-nums text-blue-400"}
                         >
                           {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
-                          {r.diffKrw > 0 ? "+" : "-"}
-                          {floorShares(r.diffKrw / splitCount, r.repPrice)}주
+                          {formatMemberSharesOrAmount(r.diffKrw / splitCount, r.repPrice)}
                         </span>
                       ) : (
                         <div className="space-y-0.5">
