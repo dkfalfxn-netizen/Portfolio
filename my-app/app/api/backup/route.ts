@@ -35,19 +35,31 @@ export async function POST(req: NextRequest) {
   const withSellLog = await admin
     .from("portfolio_snapshots")
     .select(
-      "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, updated_at",
+      "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, rebalance_calculator_by_owner, updated_at",
     )
     .eq("sync_key", key)
     .maybeSingle();
-  const fallback = withSellLog.error
+  const fallbackNoRebalanceCalc = withSellLog.error
+    ? await admin
+        .from("portfolio_snapshots")
+        .select(
+          "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, updated_at",
+        )
+        .eq("sync_key", key)
+        .maybeSingle()
+    : null;
+  const fallback = fallbackNoRebalanceCalc?.error
     ? await admin
         .from("portfolio_snapshots")
         .select("positions, cash_by_owner, holdings_sort_by_owner, owner_names, updated_at")
         .eq("sync_key", key)
         .maybeSingle()
     : null;
-  const row = withSellLog.data ?? fallback?.data;
-  const selErr = fallback?.error ?? withSellLog.error;
+  const row =
+    withSellLog.data ??
+    fallbackNoRebalanceCalc?.data ??
+    fallback?.data ??
+    null;
   const snapshotRow = (row ?? null) as
     | {
         positions?: unknown;
@@ -57,14 +69,16 @@ export async function POST(req: NextRequest) {
         sell_log_by_owner?: unknown;
         target_stock_weight_by_owner?: unknown;
         owner_scratchpad_by_owner?: unknown;
+        rebalance_calculator_by_owner?: unknown;
         updated_at?: string | null;
       }
     | null;
 
-  if (selErr) {
-    return NextResponse.json({ error: selErr.message }, { status: 500 });
-  }
   if (!snapshotRow) {
+    const selErr = fallback?.error ?? fallbackNoRebalanceCalc?.error ?? withSellLog.error;
+    if (selErr) {
+      return NextResponse.json({ error: selErr.message }, { status: 500 });
+    }
     return NextResponse.json(
       { error: "서버에 해당 키의 데이터가 없습니다. 먼저 이 기기에서 동기화해 주세요." },
       { status: 404 },
@@ -79,6 +93,7 @@ export async function POST(req: NextRequest) {
     sell_log_by_owner: snapshotRow.sell_log_by_owner ?? {},
     target_stock_weight_by_owner: snapshotRow.target_stock_weight_by_owner ?? {},
     owner_scratchpad_by_owner: snapshotRow.owner_scratchpad_by_owner ?? {},
+    rebalance_calculator_by_owner: snapshotRow.rebalance_calculator_by_owner ?? {},
     source_updated_at: snapshotRow.updated_at ?? null,
   };
 

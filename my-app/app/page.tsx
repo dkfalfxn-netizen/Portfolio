@@ -2801,6 +2801,9 @@ export default function Home() {
           ...("owner_scratchpad_by_owner" in s && s.owner_scratchpad_by_owner != null
             ? { ownerScratchpadByOwner: s.owner_scratchpad_by_owner }
             : {}),
+          ...("rebalance_calculator_by_owner" in s && s.rebalance_calculator_by_owner != null
+            ? { rebalanceCalculatorByOwner: s.rebalance_calculator_by_owner }
+            : {}),
         }),
       });
       const j = (await r.json()) as { error?: string };
@@ -6314,7 +6317,8 @@ export default function Home() {
                 </label>
               </div>
               <p className="text-xs text-muted-foreground">
-                「백업」은 서버에 올라간 잔고를 백업 테이블에 한 줄씩 추가합니다(최대 1년, 500건). 「백업 내려받기」는 먼저 백업을 저장한 뒤 JSON으로 다운로드. 「백업에서 복원」은 JSON을 업로드하면 <strong className="font-medium text-foreground">시점 목록이 표시되며 원하는 시점을 선택해 복원</strong>할 수 있습니다.
+                「백업」은 서버에 올라간 잔고를 백업 테이블에 한 줄씩 추가합니다(최대 1년, 500건).
+                목표 비중과 리밸 계산기의 종목 분배·모드까지 동일 스키마(sync)로 포함됩니다. 「백업 내려받기」는 먼저 백업을 저장한 뒤 JSON으로 다운로드. 「백업에서 복원」은 JSON을 업로드하면 <strong className="font-medium text-foreground">시점 목록이 표시되며 원하는 시점을 선택해 복원</strong>할 수 있습니다.
               </p>
 
               {/* 백업 시점 선택 복원 UI */}
