@@ -400,8 +400,6 @@ function RebalancingBarSortableRow({
   totalKrw,
   memberSplitsForGroup,
   onMemberSplitChange,
-  memberSplitMode,
-  onMemberSplitModeChange,
   rebalanceMode,
   resolvedNameBySymbol,
 }: {
@@ -412,8 +410,6 @@ function RebalancingBarSortableRow({
   totalKrw: number;
   memberSplitsForGroup: Record<string, string>;
   onMemberSplitChange: (groupKey: string, symbol: string, raw: string) => void;
-  memberSplitMode: CalculatorMemberSplitMode;
-  onMemberSplitModeChange: (groupKey: string, mode: CalculatorMemberSplitMode) => void;
   rebalanceMode: Mode;
   resolvedNameBySymbol: Record<string, string>;
 }) {
@@ -435,24 +431,21 @@ function RebalancingBarSortableRow({
   let tgtPctFilledValidCount = 0;
   let tgtPctEmptyCount = 0;
   let tgtPctInvalid = false;
-  if (memberSplitMode === "targetPct") {
-    for (const m of row.members) {
-      const raw = (memberSplitsForGroup[m.symbol] ?? "").trim().replace(",", ".");
-      if (raw === "") {
-        tgtPctEmptyCount++;
-        continue;
-      }
-      const n = parseFloat(raw);
-      if (!Number.isFinite(n) || n < 0 || n > 100) {
-        tgtPctInvalid = true;
-        continue;
-      }
-      tgtPctPartialSum += n;
-      tgtPctFilledValidCount++;
+  for (const m of row.members) {
+    const raw = (memberSplitsForGroup[m.symbol] ?? "").trim().replace(",", ".");
+    if (raw === "") {
+      tgtPctEmptyCount++;
+      continue;
     }
+    const n = parseFloat(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 100) {
+      tgtPctInvalid = true;
+      continue;
+    }
+    tgtPctPartialSum += n;
+    tgtPctFilledValidCount++;
   }
   const tgtPctAllFilled =
-    memberSplitMode === "targetPct" &&
     row.members.length > 0 &&
     !tgtPctInvalid &&
     tgtPctEmptyCount === 0 &&
@@ -552,43 +545,7 @@ function RebalancingBarSortableRow({
 
       {!pinned && row.members.length > 0 ?
         <div className="border-t border-dashed border-slate-600/50 pb-2 pt-2">
-          <div className="flex flex-wrap items-center gap-2 pl-7 sm:pl-8">
-            <span className="text-xs font-semibold text-slate-200 shrink-0">그룹 내 분배</span>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                title="매매 차액을 상대 비율로 나눕니다."
-                className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-                  memberSplitMode === "weight"
-                    ? "border-primary bg-primary/15 text-slate-50"
-                    : "border-slate-600/80 bg-slate-800/60 text-slate-300 hover:bg-slate-800"
-                }`}
-                onClick={() => onMemberSplitModeChange(row.groupKey, "weight")}
-              >
-                가중치
-              </button>
-              <button
-                type="button"
-                disabled={rebalanceMode === "buy-only"}
-                title={
-                  rebalanceMode === "buy-only"
-                    ? "신규 투자금 모드에서는 종목별 목표%를 쓸 수 없습니다."
-                    : "각 종목의 포트폴리오 목표 %(합은 그룹 슬라이더 %에 맞게 자동 스케일)."
-                }
-                className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-                  rebalanceMode === "buy-only"
-                    ? "cursor-not-allowed border-slate-700/60 opacity-45"
-                    : memberSplitMode === "targetPct"
-                      ? "border-primary bg-primary/15 text-slate-50"
-                      : "border-slate-600/80 bg-slate-800/60 text-slate-300 hover:bg-slate-800"
-                }`}
-                onClick={() => rebalanceMode !== "buy-only" && onMemberSplitModeChange(row.groupKey, "targetPct")}
-              >
-                종목 목표%
-              </button>
-            </div>
-          </div>
-          {memberSplitMode === "targetPct" && rebalanceMode !== "buy-only" ?
+          {rebalanceMode !== "buy-only" ?
             <div
               className="mt-2 ml-7 sm:ml-8 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-slate-600/55 bg-slate-900/70 px-2.5 py-2"
               role="status"
@@ -672,31 +629,21 @@ function RebalancingBarSortableRow({
                     현재 {portPct.toFixed(2)}% · {fmtKrw(m.valueKrw)}
                   </span>
                   <label className="ml-auto flex items-center gap-1.5 sm:ml-0">
-                    <span className="shrink-0 text-[11px] font-medium text-slate-400">
-                      {memberSplitMode === "weight" ? "가중치" : "목표%"}
-                    </span>
+                    <span className="shrink-0 text-[11px] font-medium text-slate-400">목표%</span>
                     <span className="sr-only">
-                      {m.symbol}{" "}
-                      {memberSplitMode === "weight" ? "매매 차액 분배 가중치" : "포트폴리오 목표 비중 퍼센트"}
+                      {m.symbol} 포트폴리오 목표 비중 퍼센트
                     </span>
                     <input
                       type="number"
                       min={0}
-                      max={memberSplitMode === "targetPct" ? 100 : undefined}
+                      max={100}
                       step={0.1}
-                      placeholder={memberSplitMode === "weight" ? "비움" : "예: 5"}
+                      placeholder="예: 5"
                       className="w-[4.25rem] rounded-md border border-slate-600/80 bg-background px-1.5 py-1 text-right text-xs font-medium tabular-nums text-slate-100"
                       value={memberSplitsForGroup[m.symbol] ?? ""}
                       onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
-                      aria-label={
-                        `${row.displayName || row.groupKey} · ${m.symbol} ` +
-                        (memberSplitMode === "weight" ? "매매 차액 분배 가중치" : "포트폴리오 목표 %")
-                      }
-                      title={
-                        memberSplitMode === "weight"
-                          ? "상대 비율. 모든 종목 줄에 양수를 넣어야 적용. 비우면 평가금 비율."
-                          : "포트폴리오 목표 %. 비운 칸은 0%. 입력 합이 그룹 목표에 맞게 스케일되어 상세 매매액에 반영됩니다."
-                      }
+                      aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 포트폴리오 목표 %`}
+                      title="포트폴리오 목표 %. 비운 칸은 0%. 입력 합이 그룹 목표에 맞게 스케일되어 상세 매매액에 반영됩니다."
                     />
                   </label>
                 </div>
@@ -828,7 +775,7 @@ function RebalancingOwner({
     const out: Record<string, CalculatorMemberSplitMode> = {};
     for (const g of groups) {
       const m = saved[g.groupKey];
-      out[g.groupKey] = m === "targetPct" || m === "weight" ? m : "weight";
+      out[g.groupKey] = m === "targetPct" ? m : "targetPct";
     }
     return out;
   });
@@ -840,7 +787,7 @@ function RebalancingOwner({
       const next: Record<string, CalculatorMemberSplitMode> = {};
       for (const g of groups) {
         const gk = g.groupKey;
-        next[gk] = prev[gk] ?? saved[gk] ?? "weight";
+        next[gk] = prev[gk] ?? "targetPct";
       }
       for (const k of Object.keys(next)) {
         if (!keys.has(k)) delete next[k];
@@ -959,7 +906,7 @@ function RebalancingOwner({
           targetPct,
           diffKrw,
           memberAdjustments: calcMemberAdjustments(g, diffKrw, memberSplits[g.groupKey], {
-            splitMode: memberSplitModes[g.groupKey] ?? "weight",
+            splitMode: memberSplitModes[g.groupKey] ?? "targetPct",
             allowTargetPct: true,
             totalKrwEffective: totalEff,
             groupTargetPct: targetPct,
@@ -988,7 +935,7 @@ function RebalancingOwner({
         targetPct,
         diffKrw,
         memberAdjustments: calcMemberAdjustments(g, diffKrw, memberSplits[g.groupKey], {
-          splitMode: memberSplitModes[g.groupKey] ?? "weight",
+          splitMode: memberSplitModes[g.groupKey] ?? "targetPct",
           allowTargetPct: false,
           totalKrwEffective: totalEff,
           groupTargetPct: targetPct,
@@ -1376,8 +1323,6 @@ function RebalancingOwner({
                   totalKrw={totalKrw}
                   memberSplitsForGroup={memberSplits[r.groupKey] ?? {}}
                   onMemberSplitChange={handleMemberSplitChange}
-                  memberSplitMode={memberSplitModes[r.groupKey] ?? "weight"}
-                  onMemberSplitModeChange={handleMemberSplitModeChange}
                   rebalanceMode={mode}
                   resolvedNameBySymbol={resolvedNameBySymbol}
                 />
