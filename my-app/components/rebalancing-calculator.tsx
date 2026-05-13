@@ -503,7 +503,7 @@ function RebalancingBarSortableRow({
               title="목표 비중 입력 — 계산기 전용 저장소에 자동 저장됩니다."
               aria-label={`${row.displayName || row.groupKey} 목표 비중 퍼센트`}
             />
-            <span className="text-[10px] text-muted-foreground">%</span>
+            <span className="text-xs text-muted-foreground">%</span>
           </div>
         </div>
 
@@ -551,10 +551,10 @@ function RebalancingBarSortableRow({
               role="status"
               aria-label="종목 목표 퍼센트 검증"
             >
-              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 shrink-0">
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-400 shrink-0">
                 검증
               </span>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] leading-snug tabular-nums text-slate-300">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs leading-snug tabular-nums text-slate-300 sm:text-sm">
                 <span>
                   그룹 목표{" "}
                   <span className="font-semibold text-slate-100">{groupTargetPct.toFixed(1)}%</span>
@@ -629,7 +629,7 @@ function RebalancingBarSortableRow({
                     현재 {portPct.toFixed(2)}% · {fmtKrw(m.valueKrw)}
                   </span>
                   <label className="ml-auto flex items-center gap-1.5 sm:ml-0">
-                    <span className="shrink-0 text-[11px] font-medium text-slate-400">목표%</span>
+                    <span className="shrink-0 text-xs font-medium text-slate-400">목표%</span>
                     <span className="sr-only">
                       {m.symbol} 포트폴리오 목표 비중 퍼센트
                     </span>
@@ -782,7 +782,6 @@ function RebalancingOwner({
 
   useEffect(() => {
     setMemberSplitModes((prev) => {
-      const saved = loadAllCalculatorMemberSplitModes()[ownerName] ?? {};
       const keys = new Set(groups.map((g) => g.groupKey));
       const next: Record<string, CalculatorMemberSplitMode> = {};
       for (const g of groups) {
@@ -795,11 +794,6 @@ function RebalancingOwner({
       return next;
     });
   }, [groups, ownerName]);
-
-  const handleMemberSplitModeChange = useCallback((groupKey: string, nextMode: CalculatorMemberSplitMode) => {
-    setMemberSplitModes((prev) => ({ ...prev, [groupKey]: nextMode }));
-    setMemberSplits((prev) => ({ ...prev, [groupKey]: {} }));
-  }, []);
 
   const [visualOrderKeys, setVisualOrderKeys] = useState<string[] | null>(null);
 
@@ -858,6 +852,9 @@ function RebalancingOwner({
   const [splitCountInput, setSplitCountInput] = useState("1");
   const [hideSmall, setHideSmall] = useState(false);
   const [saveToast, setSaveToast] = useState(false);
+  /** 상세 표 하단: 개별 종목 포트폴리오 목표 % → 필요 주수 참고 계산 */
+  const [stockTargetQuickKey, setStockTargetQuickKey] = useState("");
+  const [stockTargetPctQuickInput, setStockTargetPctQuickInput] = useState("");
 
   const newMoneyKrw = useMemo(() => parseKoreanIntDigits(newMoneyInput), [newMoneyInput]);
   const splitCount = useMemo(() => {
@@ -967,6 +964,84 @@ function RebalancingOwner({
         : rows,
     [rows, hideSmall],
   );
+
+  const effectivePortfolioKrw = useMemo(
+    () => (mode === "buy-only" ? totalKrw + Math.max(newMoneyKrw, 0) : totalKrw),
+    [mode, totalKrw, newMoneyKrw],
+  );
+
+  const stockQuickOptions = useMemo(() => {
+    const out: Array<{
+      key: string;
+      groupLabel: string;
+      symbol: string;
+      name: string;
+      valueKrw: number;
+      priceKrw: number;
+    }> = [];
+    for (const g of groups) {
+      if (isPinnedCashPortfolioGroup(g.groupKey)) continue;
+      for (const m of g.members) {
+        if (isUndecidedSlotMemberSymbol(m.symbol)) continue;
+        out.push({
+          key: `${g.groupKey}\u001f${m.symbol}`,
+          groupLabel: g.displayName || g.groupKey,
+          symbol: m.symbol,
+          name: m.name,
+          valueKrw: m.valueKrw,
+          priceKrw: m.priceKrw,
+        });
+      }
+    }
+    out.sort((a, b) =>
+      formatTickerLabel(a.symbol, a.name, resolvedNameBySymbol).localeCompare(
+        formatTickerLabel(b.symbol, b.name, resolvedNameBySymbol),
+        "ko",
+      ),
+    );
+    return out;
+  }, [groups, resolvedNameBySymbol]);
+
+  useEffect(() => {
+    if (stockQuickOptions.length === 0) {
+      setStockTargetQuickKey("");
+      return;
+    }
+    setStockTargetQuickKey((prev) =>
+      stockQuickOptions.some((o) => o.key === prev) ? prev : stockQuickOptions[0]!.key,
+    );
+  }, [stockQuickOptions]);
+
+  const stockQuickCalc = useMemo(() => {
+    if (stockQuickOptions.length === 0) return { kind: "empty" as const };
+    const sel =
+      stockQuickOptions.find((o) => o.key === stockTargetQuickKey) ?? stockQuickOptions[0]!;
+    const raw = stockTargetPctQuickInput.trim().replace(",", ".");
+    if (raw === "") return { kind: "need_input" as const, sel };
+    const pct = parseFloat(raw);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      return { kind: "invalid_pct" as const, sel };
+    }
+    const tot = effectivePortfolioKrw;
+    if (!(tot > 0)) return { kind: "no_total" as const, sel };
+    const targetKrw = (pct / 100) * tot;
+    const diffKrw = targetKrw - sel.valueKrw;
+    const currentPct = (sel.valueKrw / tot) * 100;
+    return {
+      kind: "ok" as const,
+      sel,
+      pct,
+      targetKrw,
+      diffKrw,
+      currentPct,
+      priceKrw: sel.priceKrw,
+    };
+  }, [
+    stockQuickOptions,
+    stockTargetQuickKey,
+    stockTargetPctQuickInput,
+    effectivePortfolioKrw,
+  ]);
 
   // ── 자동저장: 계산기 전용 키에만 저장, 대시보드 이벤트 미발행 ─────────────
   const [loadToast, setLoadToast] = useState(false);
@@ -1148,7 +1223,7 @@ function RebalancingOwner({
     const modesNext: Record<string, CalculatorMemberSplitMode> = {};
     for (const g of groups) {
       const m = modesSaved[g.groupKey];
-      modesNext[g.groupKey] = m === "targetPct" || m === "weight" ? m : "weight";
+      modesNext[g.groupKey] = m === "targetPct" ? m : "targetPct";
     }
     setMemberSplitModes(modesNext);
   }, [groups, ownerName]);
@@ -1158,7 +1233,7 @@ function RebalancingOwner({
       {/* ── 컨트롤 헤더 ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2">
         {/* 모드 토글 */}
-        <div className="flex overflow-hidden rounded-md border text-[11px] sm:text-xs">
+        <div className="flex overflow-hidden rounded-md border text-xs sm:text-sm">
           {(["buy-sell", "buy-only"] as Mode[]).map((m) => (
             <button
               key={m}
@@ -1192,7 +1267,7 @@ function RebalancingOwner({
             />
             <span className="text-muted-foreground shrink-0">₩</span>
             {newMoneyKrw > 0 && allocatedKrw > 0 && (
-              <span className="text-[11px] text-muted-foreground shrink-0">
+              <span className="text-xs text-muted-foreground shrink-0">
                 잔여{" "}
                 <span className="font-medium text-foreground">
                   {fmtKrw(Math.max(0, newMoneyKrw - allocatedKrw))}
@@ -1217,7 +1292,7 @@ function RebalancingOwner({
 
         {/* 우측 컨트롤 */}
         <div className="ml-auto flex items-center gap-2 flex-wrap">
-          <label className="flex cursor-pointer select-none items-center gap-1 text-[11px] text-muted-foreground">
+          <label className="flex cursor-pointer select-none items-center gap-1 text-xs text-muted-foreground">
             <input
               type="checkbox"
               checked={hideSmall}
@@ -1242,7 +1317,7 @@ function RebalancingOwner({
             type="button"
             onClick={handleLoad}
             title="대시보드에 설정된 목표 비중을 계산기로 불러옵니다 (대시보드는 변경되지 않습니다)"
-            className={`rounded border px-2 py-1 text-[11px] transition-all active:scale-95 ${
+            className={`rounded border px-2 py-1 text-xs transition-all active:scale-95 ${
               loadToast
                 ? "border-sky-500/60 bg-sky-500/10 text-sky-400"
                 : "hover:bg-muted text-muted-foreground"
@@ -1253,14 +1328,14 @@ function RebalancingOwner({
           <button
             type="button"
             onClick={handleReset}
-            className="rounded border px-2 py-1 text-[11px] transition-colors hover:bg-muted active:scale-95"
+            className="rounded border px-2 py-1 text-xs transition-colors hover:bg-muted active:scale-95"
           >
             초기화
           </button>
           <button
             type="button"
             onClick={handleSave}
-            className={`relative rounded border px-2 py-1 text-[11px] transition-all active:scale-95 ${
+            className={`relative rounded border px-2 py-1 text-xs transition-all active:scale-95 ${
               saveToast
                 ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400"
                 : "border-primary/50 bg-primary/10 text-primary hover:bg-primary/20"
@@ -1274,7 +1349,7 @@ function RebalancingOwner({
       {/* ── 바 차트 ─────────────────────────────────────────────────────────── */}
       <div>
         {/* 범례 */}
-        <div className="mb-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
+        <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-slate-300 sm:text-sm">
           <span className="flex items-center gap-1">
             <span className="inline-block h-2 w-3 rounded-sm bg-rose-500/80" />
             부족
@@ -1296,7 +1371,7 @@ function RebalancingOwner({
             <div className="w-36 shrink-0 sm:w-44" />
           </div>
           <div className="mx-1.5 flex-1">
-            <div className="flex justify-between text-[10px] tabular-nums text-slate-400">
+            <div className="flex justify-between text-xs tabular-nums text-slate-400 sm:text-sm">
               {[0, 0.25, 0.5, 0.75, 1].map((f) => (
                 <span key={f}>{(maxScale * f).toFixed(0)}%</span>
               ))}
@@ -1333,31 +1408,31 @@ function RebalancingOwner({
       </div>
 
       {mode === "buy-only" && newMoneyKrw === 0 && (
-        <p className="rounded-lg border border-slate-700/40 bg-slate-900/20 px-3 py-2 text-[11px] text-muted-foreground">
+        <p className="rounded-lg border border-slate-700/40 bg-slate-900/20 px-3 py-2 text-xs text-muted-foreground">
           투자할 금액을 입력하면 목표 비중에 맞게 매수 배분을 계산합니다.
         </p>
       )}
 
       {/* ── 상세 수치 테이블 (접기) ──────────────────────────────────────────── */}
       <details>
-        <summary className="cursor-pointer select-none py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground">
+        <summary className="cursor-pointer select-none py-1 text-xs text-muted-foreground transition-colors hover:text-foreground sm:text-sm">
           ▶ 상세 수치 보기
         </summary>
         <div className="mt-2 overflow-x-auto">
-          <table className="w-full text-[11px]">
+          <table className="w-full text-xs sm:text-sm">
             <thead>
               <tr className="border-b text-muted-foreground">
-                <th className="py-1.5 pr-2 text-left font-medium">그룹</th>
-                <th className="py-1.5 px-2 text-right font-medium">현재%</th>
-                <th className="py-1.5 px-2 text-right font-medium">현재액</th>
-                <th className="py-1.5 px-2 text-right font-medium">목표%</th>
-                <th className="py-1.5 px-2 text-right font-medium">목표액</th>
-                <th className="py-1.5 px-2 text-right font-medium">매수/매도</th>
-                <th className="py-1.5 px-2 text-right font-medium">회당</th>
-                <th className="py-1.5 px-2 text-right font-medium" title="시세 없으면 원화 차액만 표시">
+                <th className="py-2 pr-2 text-left font-medium">그룹</th>
+                <th className="py-2 px-2 text-right font-medium">현재%</th>
+                <th className="py-2 px-2 text-right font-medium">현재액</th>
+                <th className="py-2 px-2 text-right font-medium">목표%</th>
+                <th className="py-2 px-2 text-right font-medium">목표액</th>
+                <th className="py-2 px-2 text-right font-medium">매수/매도</th>
+                <th className="py-2 px-2 text-right font-medium">회당</th>
+                <th className="py-2 px-2 text-right font-medium" title="시세 없으면 원화 차액만 표시">
                   종목(주수·금액)
                 </th>
-                <th className="py-1.5 px-2 text-right font-medium" title="시세 없으면 원화 차액만 표시">
+                <th className="py-2 px-2 text-right font-medium" title="시세 없으면 원화 차액만 표시">
                   회당 주수·금액
                 </th>
               </tr>
@@ -1376,23 +1451,23 @@ function RebalancingOwner({
                     key={r.groupKey}
                     className="border-b last:border-0 hover:bg-muted/20"
                   >
-                    <td className="py-1.5 pr-2 font-medium">
+                    <td className="py-2 pr-2 font-medium">
                       {r.displayName || r.groupKey}
                     </td>
-                    <td className="py-1.5 px-2 text-right tabular-nums text-muted-foreground">
+                    <td className="py-2 px-2 text-right tabular-nums text-muted-foreground">
                       {r.currentPct.toFixed(1)}%
                     </td>
-                    <td className="py-1.5 px-2 text-right tabular-nums text-muted-foreground">
+                    <td className="py-2 px-2 text-right tabular-nums text-muted-foreground">
                       {fmtKrw(r.valueKrw)}
                     </td>
-                    <td className="py-1.5 px-2 text-right tabular-nums">
+                    <td className="py-2 px-2 text-right tabular-nums">
                       {r.targetPct.toFixed(1)}%
                     </td>
-                    <td className="py-1.5 px-2 text-right tabular-nums">
+                    <td className="py-2 px-2 text-right tabular-nums">
                       {fmtKrw(targetKrw)}
                     </td>
                     <td
-                      className={`py-1.5 px-2 text-right tabular-nums font-semibold ${
+                      className={`py-2 px-2 text-right tabular-nums font-semibold ${
                         !significant
                           ? "text-muted-foreground"
                           : r.diffKrw > 0
@@ -1405,7 +1480,7 @@ function RebalancingOwner({
                         : `${r.diffKrw > 0 ? "▲" : "▼"} ${fmtKrw(r.diffKrw)}`}
                     </td>
                     <td
-                      className={`py-1.5 px-2 text-right tabular-nums ${
+                      className={`py-2 px-2 text-right tabular-nums ${
                         !significant
                           ? "text-muted-foreground"
                           : r.diffKrw > 0
@@ -1419,7 +1494,7 @@ function RebalancingOwner({
                           ? `${r.diffKrw > 0 ? "▲" : "▼"} ${fmtKrw(r.diffKrw / splitCount)}`
                           : "—"}
                     </td>
-                    <td className="py-1.5 px-2 text-right">
+                    <td className="py-2 px-2 text-right">
                       {isCash ? (
                         <span className="text-muted-foreground">현금</span>
                       ) : !significant ? (
@@ -1451,7 +1526,7 @@ function RebalancingOwner({
                         </div>
                       )}
                     </td>
-                    <td className="py-1.5 px-2 text-right">
+                    <td className="py-2 px-2 text-right">
                       {isCash || !significant || splitCount <= 1 ? (
                         <span className="text-muted-foreground">—</span>
                       ) : r.members.length <= 1 && r.repPrice > 0 ? (
@@ -1487,13 +1562,13 @@ function RebalancingOwner({
             </tbody>
             <tfoot>
               <tr className="border-t font-semibold">
-                <td className="py-1.5 pr-2">합계</td>
-                <td className="py-1.5 px-2 text-right tabular-nums">
+                <td className="py-2 pr-2">합계</td>
+                <td className="py-2 px-2 text-right tabular-nums">
                   {groups.reduce((s, g) => s + g.currentPct, 0).toFixed(1)}%
                 </td>
-                <td className="py-1.5 px-2 text-right tabular-nums">{fmtKrw(totalKrw)}</td>
+                <td className="py-2 px-2 text-right tabular-nums">{fmtKrw(totalKrw)}</td>
                 <td
-                  className={`py-1.5 px-2 text-right tabular-nums ${
+                  className={`py-2 px-2 text-right tabular-nums ${
                     sumIsOver || sumIsUnder ? "text-amber-400" : "text-emerald-400"
                   }`}
                 >
@@ -1503,10 +1578,89 @@ function RebalancingOwner({
               </tr>
             </tfoot>
           </table>
+
+          <div className="mt-4 rounded-lg border border-slate-700/50 bg-slate-900/40 px-3 py-3 sm:px-4">
+            <p className="text-xs font-semibold text-slate-200 sm:text-sm">
+              개별 종목: 원하는 포트폴리오 비중 → 필요 주수
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-400">
+              전체 평가금 기준으로 이 종목이 포트폴리오의 몇 %가 되려면 주 몇 주를 사거나 팔아야 하는지 참고합니다.
+              {mode === "buy-only" ?
+                " 신규 투자금 모드에서는 (기존 평가금 + 입력한 투자금)을 전체로 사용합니다."
+              : null}
+            </p>
+            {stockQuickCalc.kind === "empty" ?
+              <p className="mt-3 text-xs text-slate-500">보유 종목이 없어 계산할 수 없습니다.</p>
+            : (
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                <label className="flex min-w-[12rem] flex-1 flex-col gap-1">
+                  <span className="text-xs font-medium text-slate-400">종목</span>
+                  <select
+                    className="rounded-md border border-slate-600/80 bg-background px-2 py-2 text-xs sm:text-sm"
+                    value={stockTargetQuickKey}
+                    onChange={(e) => setStockTargetQuickKey(e.target.value)}
+                    aria-label="주수 계산 대상 종목"
+                  >
+                    {stockQuickOptions.map((o) => (
+                      <option key={o.key} value={o.key}>
+                        {formatTickerLabel(o.symbol, o.name, resolvedNameBySymbol)} · {o.groupLabel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex w-full flex-col gap-1 sm:w-36">
+                  <span className="text-xs font-medium text-slate-400">목표 비중 (%)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    placeholder="예: 5"
+                    className="rounded-md border border-slate-600/80 bg-background px-2 py-2 text-right text-xs tabular-nums sm:text-sm"
+                    value={stockTargetPctQuickInput}
+                    onChange={(e) => setStockTargetPctQuickInput(e.target.value)}
+                    aria-label="포트폴리오에서 차지할 목표 퍼센트"
+                  />
+                </label>
+              </div>
+            )}
+            {stockQuickCalc.kind === "need_input" ?
+              <p className="mt-3 text-xs text-slate-500">목표 %를 입력하면 결과가 표시됩니다.</p>
+            : stockQuickCalc.kind === "invalid_pct" ?
+              <p className="mt-3 text-xs text-amber-400">목표 %는 0~100 사이 숫자로 입력해 주세요.</p>
+            : stockQuickCalc.kind === "no_total" ?
+              <p className="mt-3 text-xs text-slate-500">평가금 합계가 없어 계산할 수 없습니다.</p>
+            : stockQuickCalc.kind === "ok" ?
+              <div className="mt-3 space-y-1.5 text-xs tabular-nums text-slate-200 sm:text-sm">
+                <p>
+                  <span className="text-slate-400">현재</span>{" "}
+                  <span className="font-medium text-slate-100">{stockQuickCalc.currentPct.toFixed(2)}%</span>
+                  {" · "}
+                  <span className="text-slate-400">평가액</span> {fmtKrw(stockQuickCalc.sel.valueKrw)}
+                </p>
+                <p>
+                  <span className="text-slate-400">목표</span>{" "}
+                  <span className="font-medium text-slate-100">{stockQuickCalc.pct.toFixed(2)}%</span>
+                  {" → "}
+                  <span className="text-slate-400">목표 평가액</span> {fmtKrw(stockQuickCalc.targetKrw)}
+                </p>
+                <p className="font-semibold text-slate-50">
+                  참고 주수:{" "}
+                  <span
+                    className={
+                      stockQuickCalc.diffKrw >= 0 ? "text-rose-400" : "text-blue-400"
+                    }
+                  >
+                    {formatMemberSharesOrAmount(stockQuickCalc.diffKrw, stockQuickCalc.priceKrw)}
+                  </span>
+                </p>
+              </div>
+            : null}
+          </div>
         </div>
       </details>
 
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         * 주수는 현재가 기준 정수(floor) 참고용입니다. 실제 매매 시 수수료·가격 변동을 감안하세요.
         {mode === "buy-only" && " · 신규 투자금 모드에서는 매도 없이 배분됩니다."}
       </p>
