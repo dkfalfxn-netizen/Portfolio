@@ -221,7 +221,8 @@ function memberRatiosForGroup(g: GroupAllocation, splitInputs?: Record<string, s
   return weights.map((w) => (Number.isFinite(w) ? w / sum : 0));
 }
 
-/** 종목 줄에 포트 전체 기준 목표 % 입력(0~100). 모두 채우면 합을 그룹 목표%에 맞게 스케일해 목표액·차액 산출 */
+/** 종목 줄에 포트 전체 기준 목표 % 입력(0~100). 합을 그룹 목표%에 맞게 스케일해 목표액·차액 산출.
+ * 비워 둔 칸은 목표 0%로 간주(일부만 입력해도 적용). 입력 합이 0 이하면 평가금 비율 분배로 폴백. */
 function tryMemberAdjustmentsTargetPortfolioPct(
   g: GroupAllocation,
   splitInputs: Record<string, string> | undefined,
@@ -232,7 +233,10 @@ function tryMemberAdjustmentsTargetPortfolioPct(
   const pcts: number[] = [];
   for (const m of g.members) {
     const raw = (splitInputs[m.symbol] ?? "").trim().replace(",", ".");
-    if (raw === "") return null;
+    if (raw === "") {
+      pcts.push(0);
+      continue;
+    }
     const n = parseFloat(raw);
     if (!Number.isFinite(n) || n < 0 || n > 100) return null;
     pcts.push(n);
@@ -612,7 +616,9 @@ function RebalancingBarSortableRow({
                       (<span className="text-slate-200">{tgtPctFilledValidCount}</span>/
                       <span className="text-slate-200">{row.members.length}</span>줄)
                     </span>
-                    <span className="text-slate-400">모든 줄을 채우면 그룹 목표와 비교합니다.</span>
+                    <span className="text-slate-400">
+                      비운 칸은 계산 시 목표 0%로 봅니다. 합·그룹 목표 비교는 줄을 모두 채우면 표시됩니다.
+                    </span>
                   </>
                 : groupTargetPct <= 0 ?
                   <span className="text-slate-400">
@@ -689,7 +695,7 @@ function RebalancingBarSortableRow({
                       title={
                         memberSplitMode === "weight"
                           ? "상대 비율. 모든 종목 줄에 양수를 넣어야 적용. 비우면 평가금 비율."
-                          : "포트폴리오에서 이 종목이 차지할 목표 %. 모든 줄 입력 시 합을 그룹 목표에 맞게 스케일."
+                          : "포트폴리오 목표 %. 비운 칸은 0%. 입력 합이 그룹 목표에 맞게 스케일되어 상세 매매액에 반영됩니다."
                       }
                     />
                   </label>
