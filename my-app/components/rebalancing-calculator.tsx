@@ -2,6 +2,7 @@
 
 import {
   useState,
+  useRef,
   useMemo,
   useCallback,
   useEffect,
@@ -586,16 +587,28 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
     return () => ac.abort();
   }, [groups, resolvedNameBySymbol]);
 
+  /** handleLoad가 localStorage를 덮어쓰기 전에 취소할 수 있도록 ref로 타이머 ID 관리 */
+  const autosaveTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (autosaveTimerRef.current != null) window.clearTimeout(autosaveTimerRef.current);
     const id = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
       persistCalculatorTargets(ownerName, targets);
-    }, 420);
-    return () => window.clearTimeout(id);
+    }, 420) as unknown as number;
+    autosaveTimerRef.current = id;
+    return () => {
+      if (autosaveTimerRef.current != null) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
   }, [targets, ownerName]);
 
-  /** 대시보드 목표 비중 불러오기 — 계산기 키를 대시보드 값으로 교체(stale 키 제거 포함)
-   *  합계가 100% 초과면 비례 정규화(소수점 1자리)하여 100%로 맞춘다. */
+  /** 대시보드 목표 비중 불러오기 — 현재 groups 전체를 덮어씀.
+   *  대시보드에 있는 그룹은 대시보드 값, 없는 그룹은 명시적으로 "0"으로 세팅.
+   *  합계가 100% 초과면 비례 정규화(소수점 1자리) 후 적용. */
   const handleLoad = useCallback(() => {
     if (typeof window === "undefined") return;
     const saved = loadAllTargetStockWeights()[ownerName] ?? {};
@@ -608,8 +621,6 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
       const n = Number(v) || 0;
       normalized[k] = needsNorm ? Math.round((n / rawSum) * 1000) / 10 : n;
     }
-
-    // 정규화 후 부동소수점 오차 보정: 가장 큰 항목에 나머지를 더함
     if (needsNorm) {
       const normSum = Object.values(normalized).reduce((s, v) => s + v, 0);
       const diff = Math.round((100 - normSum) * 10) / 10;
@@ -619,22 +630,37 @@ function RebalancingOwner({ ownerName, groups, totalKrw, onDashboardLoaded }: Pr
       }
     }
 
-    // 계산기 키를 정규화된 값으로 완전 교체
+    // autosave 타이머를 먼저 취소해 구 targets 가 localStorage를 덮어쓰는 race 방지
+    if (autosaveTimerRef.current != null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+
+    // 계산기 localStorage를 정규화된 대시보드 값으로 완전 교체 (구 autosave 취소 후에 저장)
     const allCalc = loadAllCalculatorTargetWeights();
     allCalc[ownerName] = { ...normalized };
     try { window.localStorage.setItem(CALCULATOR_TARGET_STORAGE_KEY, JSON.stringify(allCalc)); } catch { /* ignore */ }
 
-    // targets state도 정규화된 값으로 교체
+    // targets를 현재 groups 기준으로 완전 재구성:
+    //   - 대시보드에 있는 그룹 → 대시보드 값
+    //   - 대시보드에 없는 현재 그룹 → 명시적으로 "0" (그룹 effect가 이전 값을 복원하지 못하도록)
+    //   - 대시보드에만 있고 holdings 없는 그룹 → 대시보드 값 유지 (ghost row용)
     const next: Record<string, string> = {};
+    for (const g of groups) {
+      const v = normalized[g.groupKey];
+      next[g.groupKey] = v != null && Number.isFinite(v) ? String(v) : "0";
+    }
     for (const [k, v] of Object.entries(normalized)) {
-      next[k] = Number.isFinite(v) ? String(v) : "0";
+      if (!(k in next) && Number(v) > 0) {
+        next[k] = String(v);
+      }
     }
     setTargets(next);
-    // 외부 래퍼에 ownerData 재계산 요청 (미보유 행 추가)
+    // 외부 래퍼에 ownerData 재계산 요청 (미보유 ghost 행 갱신)
     onDashboardLoaded?.();
     setLoadToast(true);
     setTimeout(() => setLoadToast(false), 2000);
-  }, [ownerName, onDashboardLoaded]);
+  }, [ownerName, groups, onDashboardLoaded]);
 
   const handleSave = useCallback(() => {
     persistCalculatorTargets(ownerName, targets);
