@@ -1185,6 +1185,9 @@ export default function Home() {
   const skipAddFormAutoNameRef = useRef(false);
   /** 차트 그룹 수동 입력 시 자동 채움 비활성 */
   const skipAddFormAutoChartGroupRef = useRef(false);
+  /** 보유 티커 커스텀 자동완성 패널 */
+  const [holdingsTickerSuggestOpen, setHoldingsTickerSuggestOpen] = useState(false);
+  const [holdingsTickerSuggestHl, setHoldingsTickerSuggestHl] = useState(0);
   /** 매입 USD/KRW를 직접 수정한 뒤에는 매입일 자동 환율이 덮어쓰지 않음 */
   const addFormFxManualRef = useRef(false);
   const [purchaseFxAutoBusy, setPurchaseFxAutoBusy] = useState(false);
@@ -1521,15 +1524,46 @@ export default function Home() {
     [usdKrw, eurKrw],
   );
 
-  /** 기존 보유에 나온 티커 목록 — 입력란 datalist 자동완성 */
-  const holdingsSuggestedTickers = useMemo(() => {
-    const u = new Set<string>();
+  /** 기존 보유 티커·종목명 — 커스텀 자동완성( datalist 대신 ) */
+  const holdingsTickerOptions = useMemo(() => {
+    const map = new Map<string, { symbol: string; name: string }>();
     for (const p of positions) {
-      const s = p.symbol?.trim();
-      if (s) u.add(s.toUpperCase());
+      const raw = p.symbol?.trim();
+      if (!raw) continue;
+      const key = raw.toUpperCase();
+      if (!map.has(key)) {
+        map.set(key, { symbol: raw, name: (p.name ?? "").trim() });
+      }
     }
-    return [...u].sort((a, b) => a.localeCompare(b, "en"));
+    return [...map.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "en"))
+      .map(([, v]) => v);
   }, [positions]);
+
+  const filteredHoldingsTickers = useMemo(() => {
+    const q = form.symbol.trim().toLowerCase();
+    if (holdingsTickerOptions.length === 0) return [];
+    if (!q) return holdingsTickerOptions.slice(0, 120);
+    return holdingsTickerOptions
+      .filter((o) => {
+        const s = o.symbol.toLowerCase();
+        const n = o.name.toLowerCase();
+        return s.startsWith(q) || s.includes(q) || n.includes(q);
+      })
+      .slice(0, 120);
+  }, [holdingsTickerOptions, form.symbol]);
+
+  useEffect(() => {
+    setHoldingsTickerSuggestHl(0);
+  }, [form.symbol]);
+
+  useEffect(() => {
+    setHoldingsTickerSuggestHl((h) =>
+      filteredHoldingsTickers.length === 0
+        ? 0
+        : Math.min(h, filteredHoldingsTickers.length - 1),
+    );
+  }, [filteredHoldingsTickers.length]);
 
   /** 티커·통화·담당자에 맞춰 종목명·차트 그룹 자동 입력 (보유 줄 우선; 종목명만 API 폴백) */
   useEffect(() => {
@@ -5166,20 +5200,76 @@ export default function Home() {
                   <option key={g} value={g} />
                 ))}
               </datalist>
-              <datalist id="holdings-ticker-suggestions">
-                {holdingsSuggestedTickers.map((t) => (
-                  <option key={t} value={t} />
-                ))}
-              </datalist>
-              <input
-                className="rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="티커 (예: NVDA, 005930)"
-                value={form.symbol}
-                onChange={(e) => handleAddSymbolInput(e.target.value)}
-                list="holdings-ticker-suggestions"
-                autoComplete="off"
-                required
-              />
+              <div className="relative min-w-0">
+                <input
+                  className="w-full rounded-md border bg-background px-2 py-1 text-sm leading-tight"
+                  placeholder="티커 (예: NVDA, 005930)"
+                  value={form.symbol}
+                  onChange={(e) => {
+                    handleAddSymbolInput(e.target.value);
+                    setHoldingsTickerSuggestOpen(true);
+                  }}
+                  onFocus={() => setHoldingsTickerSuggestOpen(true)}
+                  onBlur={() => {
+                    window.setTimeout(() => setHoldingsTickerSuggestOpen(false), 120);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!holdingsTickerSuggestOpen || filteredHoldingsTickers.length === 0) return;
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setHoldingsTickerSuggestHl((h) =>
+                        Math.min(filteredHoldingsTickers.length - 1, h + 1),
+                      );
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setHoldingsTickerSuggestHl((h) => Math.max(0, h - 1));
+                    } else if (e.key === "Enter") {
+                      e.preventDefault();
+                      const o = filteredHoldingsTickers[holdingsTickerSuggestHl];
+                      if (o) {
+                        handleAddSymbolInput(o.symbol);
+                        setHoldingsTickerSuggestOpen(false);
+                      }
+                    } else if (e.key === "Escape") {
+                      setHoldingsTickerSuggestOpen(false);
+                    }
+                  }}
+                  autoComplete="off"
+                  required
+                />
+                {holdingsTickerSuggestOpen && filteredHoldingsTickers.length > 0 ? (
+                  <ul
+                    role="listbox"
+                    className="absolute left-0 right-0 top-full z-[80] mt-0.5 max-h-36 overflow-y-auto rounded-md border border-border bg-popover py-0.5 text-popover-foreground shadow-md"
+                  >
+                    {filteredHoldingsTickers.map((o, i) => (
+                      <li key={o.symbol}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i === holdingsTickerSuggestHl}
+                          className={cn(
+                            "flex w-full min-w-0 items-center gap-1 truncate px-2 py-0.5 text-left text-[11px] leading-snug",
+                            i === holdingsTickerSuggestHl ? "bg-muted" : "hover:bg-muted/80",
+                          )}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleAddSymbolInput(o.symbol);
+                            setHoldingsTickerSuggestOpen(false);
+                          }}
+                        >
+                          <span className="shrink-0 font-medium tabular-nums">{o.symbol}</span>
+                          {o.name ? (
+                            <span className="min-w-0 truncate text-muted-foreground">
+                              ({o.name})
+                            </span>
+                          ) : null}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
               <input
                 className="rounded-md border bg-background px-3 py-2 text-sm"
                 placeholder="종목명"
