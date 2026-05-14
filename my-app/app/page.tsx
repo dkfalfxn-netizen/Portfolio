@@ -111,6 +111,23 @@ function chartGroupCompositionLabel(p: {
   return nm || sym;
 }
 
+/** 종목별 합산 표 — 보유자별 평가/손익 툴팁(네이티브 title) */
+function formatHoldingsAggOwnerValueTooltip(
+  lines: { owner: string; valueKrw: number }[],
+): string {
+  if (lines.length === 0) return "";
+  return lines.map((l) => `${l.owner}: 평가 ₩${fmtInt(l.valueKrw)}`).join("\n");
+}
+
+function formatHoldingsAggOwnerPnlTooltip(
+  lines: { owner: string; pnlKrw: number }[],
+): string {
+  if (lines.length === 0) return "";
+  return lines
+    .map((l) => `${l.owner}: ${l.pnlKrw >= 0 ? "+" : ""}₩${fmtInt(l.pnlKrw)}`)
+    .join("\n");
+}
+
 type OwnerName = string;
 type Position = {
   symbol: string;
@@ -1763,6 +1780,7 @@ export default function Home() {
       valueKrw: number;
       costKrw: number;
       owners: Set<string>;
+      byOwner: Map<string, { valueKrw: number; costKrw: number }>;
     };
     const map = new Map<string, Acc>();
     for (const p of enrichedPositions) {
@@ -1777,11 +1795,19 @@ export default function Home() {
           valueKrw: p.valueKrw,
           costKrw: p.costKrw,
           owners: new Set([p.owner]),
+          byOwner: new Map([[p.owner, { valueKrw: p.valueKrw, costKrw: p.costKrw }]]),
         });
       } else {
         cur.valueKrw += p.valueKrw;
         cur.costKrw += p.costKrw;
         cur.owners.add(p.owner);
+        const om = cur.byOwner.get(p.owner);
+        if (!om) {
+          cur.byOwner.set(p.owner, { valueKrw: p.valueKrw, costKrw: p.costKrw });
+        } else {
+          om.valueKrw += p.valueKrw;
+          om.costKrw += p.costKrw;
+        }
         const nm = (p.name ?? "").trim();
         if (nm.length > cur.displayName.length) cur.displayName = nm || cur.displayName;
       }
@@ -1791,6 +1817,14 @@ export default function Home() {
         const pnlKrw = r.valueKrw - r.costKrw;
         const pnlPct = r.costKrw > 0 ? (pnlKrw / r.costKrw) * 100 : null;
         const ownersSorted = [...r.owners].sort((a, b) => a.localeCompare(b, "ko"));
+        const ownerBreakdown = [...r.byOwner.entries()]
+          .map(([owner, v]) => ({
+            owner,
+            valueKrw: v.valueKrw,
+            costKrw: v.costKrw,
+            pnlKrw: v.valueKrw - v.costKrw,
+          }))
+          .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
         return {
           key: r.key,
           displaySymbol: r.displaySymbol,
@@ -1801,6 +1835,7 @@ export default function Home() {
           pnlPct,
           ownerCount: r.owners.size,
           ownersLabel: ownersSorted.join(", "),
+          ownerBreakdown,
         };
       })
   }, [enrichedPositions]);
@@ -1816,6 +1851,7 @@ export default function Home() {
       /** 티커 → 구성란 표시(해외=티커, 국내=종목명) */
       symbolLineLabel: Map<string, string>;
       bestName: string;
+      byOwner: Map<string, { valueKrw: number; costKrw: number }>;
     };
     const map = new Map<string, Acc>();
     for (const p of enrichedPositions) {
@@ -1836,6 +1872,7 @@ export default function Home() {
           owners: new Set([p.owner]),
           symbolLineLabel: new Map([[symDisplay, line]]),
           bestName: nm || symDisplay,
+          byOwner: new Map([[p.owner, { valueKrw: p.valueKrw, costKrw: p.costKrw }]]),
         });
       } else {
         cur.valueKrw += p.valueKrw;
@@ -1848,6 +1885,13 @@ export default function Home() {
           cur.symbolLineLabel.set(symDisplay, line);
         }
         if (nm.length > cur.bestName.length) cur.bestName = nm;
+        const om = cur.byOwner.get(p.owner);
+        if (!om) {
+          cur.byOwner.set(p.owner, { valueKrw: p.valueKrw, costKrw: p.costKrw });
+        } else {
+          om.valueKrw += p.valueKrw;
+          om.costKrw += p.costKrw;
+        }
       }
     }
     return [...map.values()].map((r) => {
@@ -1863,6 +1907,14 @@ export default function Home() {
           ? partsOrdered[0] ?? (r.bestName || r.displaySymbol)
           : `${partsOrdered.length}개 종목 · ${partsOrdered.slice(0, 5).join(", ")}${partsOrdered.length > 5 ? " …" : ""}`
         : r.bestName;
+      const ownerBreakdown = [...r.byOwner.entries()]
+        .map(([owner, v]) => ({
+          owner,
+          valueKrw: v.valueKrw,
+          costKrw: v.costKrw,
+          pnlKrw: v.valueKrw - v.costKrw,
+        }))
+        .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
       return {
         key: r.key,
         displaySymbol: r.displaySymbol,
@@ -1873,6 +1925,7 @@ export default function Home() {
         pnlPct,
         ownerCount: r.owners.size,
         ownersLabel: ownersSorted.join(", "),
+        ownerBreakdown,
       };
     });
   }, [enrichedPositions]);
@@ -5537,16 +5590,22 @@ export default function Home() {
                               <TableCell className="max-w-[180px] truncate px-3 py-2" title={row.displayName}>
                                 {row.displayName}
                               </TableCell>
-                              <TableCell className="px-3 py-2 text-right tabular-nums">
+                              <TableCell
+                                className="cursor-help px-3 py-2 text-right tabular-nums"
+                                title={formatHoldingsAggOwnerValueTooltip(
+                                  row.ownerBreakdown,
+                                )}
+                              >
                                 ₩{fmtInt(row.valueKrw)}
                               </TableCell>
                               <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                                 ₩{fmtInt(row.costKrw)}
                               </TableCell>
                               <TableCell
-                                className={`px-3 py-2 text-right tabular-nums font-semibold ${
+                                className={`cursor-help px-3 py-2 text-right tabular-nums font-semibold ${
                                   row.pnlKrw >= 0 ? "text-red-600" : "text-blue-600"
                                 }`}
+                                title={formatHoldingsAggOwnerPnlTooltip(row.ownerBreakdown)}
                               >
                                 {row.pnlKrw >= 0 ? "+" : ""}₩{fmtInt(row.pnlKrw)}
                               </TableCell>
@@ -5559,7 +5618,14 @@ export default function Home() {
                                   ? "—"
                                   : `${row.pnlPct >= 0 ? "+" : ""}${row.pnlPct.toFixed(2)}%`}
                               </TableCell>
-                              <TableCell className="px-3 py-2 text-center text-[11px] text-muted-foreground" title={row.ownersLabel}>
+                              <TableCell
+                                className="cursor-help px-3 py-2 text-center text-[11px] text-muted-foreground"
+                                title={
+                                  row.ownersLabel.trim().length > 0
+                                    ? `보유자: ${row.ownersLabel}`
+                                    : "보유자 정보 없음"
+                                }
+                              >
                                 {row.ownerCount}명
                               </TableCell>
                             </TableRow>
