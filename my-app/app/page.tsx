@@ -22,7 +22,6 @@ import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import { cn } from "@/lib/utils";
 import { holdingSymbolsEquivalent, inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
-import { etfCheckSearchKeyword, etfCheckSearchUrl, isLikelyEtfForEtfCheck } from "@/lib/etfcheck";
 import { fmtInt, fmtUsdNumber, MONEY_INT_LOCALE, parseKoreanIntDigits } from "@/lib/format-money";
 import {
   HAS_LOCAL_CHANGES_KEY,
@@ -1256,6 +1255,10 @@ export default function Home() {
   const [holdingsBySymbolSort, setHoldingsBySymbolSort] = useState<
     "name" | "valueKrw" | "pnlPct" | "pnlKrw" | "owners"
   >("valueKrw");
+  /** 종목별 합산: 티커 단위 vs 차트 그룹(같은 그룹명 합산) */
+  const [holdingsBySymbolView, setHoldingsBySymbolView] = useState<
+    "ticker" | "chartGroup"
+  >("ticker");
   const [holdingsMenuPos, setHoldingsMenuPos] = useState<{
     top: number;
     left: number;
@@ -1778,8 +1781,76 @@ export default function Home() {
       })
   }, [enrichedPositions]);
 
+  /** 동일 차트 그룹명끼리 합산(그룹 미입력 종목은 티커별로 동일 키 규칙) */
+  const holdingsAggregatedByChartGroup = useMemo(() => {
+    type Acc = {
+      key: string;
+      displaySymbol: string;
+      valueKrw: number;
+      costKrw: number;
+      owners: Set<string>;
+      symbols: Set<string>;
+      bestName: string;
+    };
+    const map = new Map<string, Acc>();
+    for (const p of enrichedPositions) {
+      if (!isStockRowForSymbolAggregate(p)) continue;
+      const symKey = aggregateSymbolKeyForHoldings(p.symbol);
+      const symDisplay = p.symbol.trim();
+      const nm = (p.name ?? "").trim();
+      const cg = (p.chartGroup ?? "").trim();
+      const bucketKey = cg ? `g:${cg}` : `s:${symKey}`;
+      const cur = map.get(bucketKey);
+      if (!cur) {
+        map.set(bucketKey, {
+          key: bucketKey,
+          displaySymbol: cg || symDisplay,
+          valueKrw: p.valueKrw,
+          costKrw: p.costKrw,
+          owners: new Set([p.owner]),
+          symbols: new Set([symDisplay]),
+          bestName: nm || symDisplay,
+        });
+      } else {
+        cur.valueKrw += p.valueKrw;
+        cur.costKrw += p.costKrw;
+        cur.owners.add(p.owner);
+        cur.symbols.add(symDisplay);
+        if (nm.length > cur.bestName.length) cur.bestName = nm;
+      }
+    }
+    return [...map.values()].map((r) => {
+      const pnlKrw = r.valueKrw - r.costKrw;
+      const pnlPct = r.costKrw > 0 ? (pnlKrw / r.costKrw) * 100 : null;
+      const ownersSorted = [...r.owners].sort((a, b) => a.localeCompare(b, "ko"));
+      const listed = [...r.symbols].sort((a, b) => a.localeCompare(b, "en"));
+      const groupKind = r.key.startsWith("g:");
+      const displayName = groupKind
+        ? listed.length <= 1
+          ? r.bestName || listed[0] || r.displaySymbol
+          : `${listed.length}개 티커 · ${listed.slice(0, 5).join(", ")}${listed.length > 5 ? " …" : ""}`
+        : r.bestName;
+      return {
+        key: r.key,
+        displaySymbol: r.displaySymbol,
+        displayName,
+        valueKrw: r.valueKrw,
+        costKrw: r.costKrw,
+        pnlKrw,
+        pnlPct,
+        ownerCount: r.owners.size,
+        ownersLabel: ownersSorted.join(", "),
+      };
+    });
+  }, [enrichedPositions]);
+
+  const holdingsAggSource =
+    holdingsBySymbolView === "chartGroup"
+      ? holdingsAggregatedByChartGroup
+      : holdingsAggregatedBySymbol;
+
   const holdingsAggregatedBySymbolSorted = useMemo(() => {
-    const rows = holdingsAggregatedBySymbol.slice();
+    const rows = holdingsAggSource.slice();
     const cmpPctDesc = (a: number | null, b: number | null) => {
       if (a === null && b === null) return 0;
       if (a === null) return 1;
@@ -1817,7 +1888,7 @@ export default function Home() {
         break;
     }
     return rows;
-  }, [holdingsAggregatedBySymbol, holdingsBySymbolSort]);
+  }, [holdingsAggSource, holdingsBySymbolSort]);
 
   const holdingsSymbolGrandTotals = useMemo(() => {
     const v = holdingsAggregatedBySymbol.reduce((s, r) => s + r.valueKrw, 0);
@@ -3629,6 +3700,14 @@ export default function Home() {
                 USD/KRW {usdKrw.toLocaleString(MONEY_INT_LOCALE)} · EUR/KRW{" "}
                 {eurKrw.toLocaleString(MONEY_INT_LOCALE)}
               </span>
+              <a
+                href="https://www.etfcheck.co.kr"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-slate-600/80 bg-slate-900/40 px-2 py-0.5 text-[10px] font-medium text-sky-400 hover:bg-slate-800/80 hover:text-sky-300 sm:text-[11px]"
+              >
+                ETF CHECK
+              </a>
             </div>
             <div
               role="status"
@@ -4361,23 +4440,7 @@ export default function Home() {
                                 <p className="text-sm font-semibold leading-snug text-foreground">
                                   {position.name}
                                 </p>
-                                <p className="text-[11px] text-muted-foreground">
-                                  {isLikelyEtfForEtfCheck(position.symbol, position.name ?? "") ? (
-                                    <a
-                                      href={etfCheckSearchUrl(
-                                        etfCheckSearchKeyword(position.symbol, position.name ?? ""),
-                                      )}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-sky-400 hover:underline"
-                                      title="ETF CHECK에서 검색"
-                                    >
-                                      {position.symbol}
-                                    </a>
-                                  ) : (
-                                    position.symbol
-                                  )}
-                                </p>
+                                <p className="text-[11px] text-muted-foreground">{position.symbol}</p>
                               </>
                             )}
                               </div>
@@ -5306,6 +5369,33 @@ export default function Home() {
                   </p>
                 </div>
                 <div className="flex flex-col gap-3 p-4 pt-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-medium text-slate-500">합산 기준</span>
+                    <button
+                      type="button"
+                      onClick={() => setHoldingsBySymbolView("ticker")}
+                      className={cn(
+                        "rounded-md border px-2 py-1 text-[11px] transition-colors",
+                        holdingsBySymbolView === "ticker"
+                          ? "border-sky-500 bg-sky-500/25 text-sky-100"
+                          : "border-slate-600 bg-slate-900/50 text-slate-300 hover:bg-slate-800/80",
+                      )}
+                    >
+                      티커별
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHoldingsBySymbolView("chartGroup")}
+                      className={cn(
+                        "rounded-md border px-2 py-1 text-[11px] transition-colors",
+                        holdingsBySymbolView === "chartGroup"
+                          ? "border-sky-500 bg-sky-500/25 text-sky-100"
+                          : "border-slate-600 bg-slate-900/50 text-slate-300 hover:bg-slate-800/80",
+                      )}
+                    >
+                      차트 그룹별
+                    </button>
+                  </div>
                   <div className="flex flex-wrap gap-1.5">
                     {(
                       [
@@ -5336,8 +5426,12 @@ export default function Home() {
                   <Table className="min-w-[640px] text-xs">
                     <TableHeader className="bg-muted/40">
                       <TableRow>
-                        <TableHead className="px-3 py-2">티커</TableHead>
-                        <TableHead className="px-3 py-2">종목명</TableHead>
+                        <TableHead className="px-3 py-2">
+                          {holdingsBySymbolView === "chartGroup" ? "그룹" : "티커"}
+                        </TableHead>
+                        <TableHead className="px-3 py-2">
+                          {holdingsBySymbolView === "chartGroup" ? "구성 · 종목명" : "종목명"}
+                        </TableHead>
                         <TableHead className="px-3 py-2 text-right tabular-nums">평가액</TableHead>
                         <TableHead className="px-3 py-2 text-right tabular-nums">매입원가</TableHead>
                         <TableHead className="px-3 py-2 text-right tabular-nums">평가손익</TableHead>
@@ -5346,7 +5440,7 @@ export default function Home() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {holdingsAggregatedBySymbol.length === 0 ? (
+                      {holdingsAggSource.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
                             합산할 주식 보유가 없습니다.
@@ -5356,22 +5450,15 @@ export default function Home() {
                         <>
                           {holdingsAggregatedBySymbolSorted.map((row) => (
                             <TableRow key={row.key}>
-                              <TableCell className="px-3 py-2 font-mono text-[11px]">
-                                {isLikelyEtfForEtfCheck(row.displaySymbol, row.displayName) ? (
-                                  <a
-                                    href={etfCheckSearchUrl(
-                                      etfCheckSearchKeyword(row.displaySymbol, row.displayName),
-                                    )}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-sky-400 hover:underline"
-                                    title="ETF CHECK에서 검색"
-                                  >
-                                    {row.displaySymbol}
-                                  </a>
-                                ) : (
-                                  row.displaySymbol
+                              <TableCell
+                                className={cn(
+                                  "px-3 py-2 text-[11px]",
+                                  holdingsBySymbolView === "chartGroup"
+                                    ? "font-medium text-slate-200"
+                                    : "font-mono",
                                 )}
+                              >
+                                {row.displaySymbol}
                               </TableCell>
                               <TableCell className="max-w-[180px] truncate px-3 py-2" title={row.displayName}>
                                 {row.displayName}
