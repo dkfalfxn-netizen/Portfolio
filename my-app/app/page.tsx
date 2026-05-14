@@ -5,6 +5,7 @@ import {
   ChangeEvent,
   Fragment,
   FormEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -126,6 +127,51 @@ function formatHoldingsAggOwnerPnlTooltip(
   return lines
     .map((l) => `${l.owner}: ${fmtInt(l.pnlKrw)}원`)
     .join("\n");
+}
+
+/** 네이티브 title 툴팁은 Windows에서 시스템 폰트로 그려져 한글이 ? 로만 보일 수 있음 — DOM 오버레이로 표시 */
+function OverlayTitleTooltip({
+  text,
+  className,
+  children,
+}: {
+  text: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+  if (text.trim().length === 0) {
+    return <span className={className}>{children}</span>;
+  }
+  return (
+    <>
+      <span
+        className={className}
+        onMouseEnter={(e) => {
+          setOpen(true);
+          setCoords({ x: e.clientX, y: e.clientY });
+        }}
+        onMouseMove={(e) => {
+          if (open) setCoords({ x: e.clientX, y: e.clientY });
+        }}
+        onMouseLeave={() => setOpen(false)}
+      >
+        {children}
+      </span>
+      {open &&
+        createPortal(
+          <div
+            role="tooltip"
+            className="pointer-events-none fixed z-[300] max-w-[min(90vw,20rem)] whitespace-pre-line rounded border bg-popover px-2 py-1.5 text-left text-xs leading-snug text-popover-foreground shadow-md"
+            style={{ left: coords.x + 12, top: coords.y + 12 }}
+          >
+            {text}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
 }
 
 type OwnerName = string;
@@ -5587,16 +5633,23 @@ export default function Home() {
                               >
                                 {row.displaySymbol}
                               </TableCell>
-                              <TableCell className="max-w-[180px] truncate px-3 py-2" title={row.displayName}>
-                                {row.displayName}
+                              <TableCell className="max-w-[180px] px-3 py-2">
+                                <OverlayTitleTooltip
+                                  text={row.displayName}
+                                  className="block max-w-full truncate"
+                                >
+                                  {row.displayName}
+                                </OverlayTitleTooltip>
                               </TableCell>
-                              <TableCell
-                                className="cursor-help px-3 py-2 text-right tabular-nums"
-                                title={formatHoldingsAggOwnerValueTooltip(
-                                  row.ownerBreakdown,
-                                )}
-                              >
-                                ₩{fmtInt(row.valueKrw)}
+                              <TableCell className="cursor-help px-3 py-2 text-right tabular-nums">
+                                <OverlayTitleTooltip
+                                  text={formatHoldingsAggOwnerValueTooltip(
+                                    row.ownerBreakdown,
+                                  )}
+                                  className="block"
+                                >
+                                  ₩{fmtInt(row.valueKrw)}
+                                </OverlayTitleTooltip>
                               </TableCell>
                               <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                                 ₩{fmtInt(row.costKrw)}
@@ -5605,9 +5658,13 @@ export default function Home() {
                                 className={`cursor-help px-3 py-2 text-right tabular-nums font-semibold ${
                                   row.pnlKrw >= 0 ? "text-red-600" : "text-blue-600"
                                 }`}
-                                title={formatHoldingsAggOwnerPnlTooltip(row.ownerBreakdown)}
                               >
-                                {row.pnlKrw >= 0 ? "+" : ""}₩{fmtInt(row.pnlKrw)}
+                                <OverlayTitleTooltip
+                                  text={formatHoldingsAggOwnerPnlTooltip(row.ownerBreakdown)}
+                                  className="block"
+                                >
+                                  {row.pnlKrw >= 0 ? "+" : ""}₩{fmtInt(row.pnlKrw)}
+                                </OverlayTitleTooltip>
                               </TableCell>
                               <TableCell
                                 className={`px-3 py-2 text-right tabular-nums ${
@@ -5620,13 +5677,17 @@ export default function Home() {
                               </TableCell>
                               <TableCell
                                 className="cursor-help px-3 py-2 text-center text-[11px] text-muted-foreground"
-                                title={
-                                  row.ownersLabel.trim().length > 0
-                                    ? `보유자: ${row.ownersLabel}`
-                                    : "보유자 정보 없음"
-                                }
                               >
-                                {row.ownerCount}명
+                                <OverlayTitleTooltip
+                                  text={
+                                    row.ownersLabel.trim().length > 0
+                                      ? `보유자: ${row.ownersLabel}`
+                                      : "보유자 정보 없음"
+                                  }
+                                  className="inline-block"
+                                >
+                                  {row.ownerCount}명
+                                </OverlayTitleTooltip>
                               </TableCell>
                             </TableRow>
                           ))}
