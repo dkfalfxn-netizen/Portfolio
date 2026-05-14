@@ -162,24 +162,43 @@ async function fetchVix(): Promise<number | null> {
   }
 }
 
-/** CNN Fear & Greed와 유사 지표 — alternative.me 공개 API */
+const CNN_FEAR_GREED_HEADERS = {
+  Accept: "application/json, text/plain, */*",
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  Referer: "https://edition.cnn.com/markets/fear-and-greed",
+} as const;
+
+/** CNN 페이지와 동일 출처 — rating 소문자 → UI/한글 매핑용 라벨 */
+function cnnFearGreedRatingToLabel(rating: string): string {
+  const u = rating.trim().toLowerCase();
+  if (u === "extreme fear") return "Extreme Fear";
+  if (u === "fear") return "Fear";
+  if (u === "neutral") return "Neutral";
+  if (u === "greed") return "Greed";
+  if (u === "extreme greed") return "Extreme Greed";
+  if (!rating) return "—";
+  return rating.charAt(0).toUpperCase() + rating.slice(1).toLowerCase();
+}
+
 async function fetchFearGreed(): Promise<{ score: number; label: string } | null> {
   try {
-    const res = await fetch("https://api.alternative.me/fng/?limit=1", {
-      method: "GET",
-      cache: "no-store",
-      headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
-    });
+    const res = await fetch(
+      "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+      {
+        method: "GET",
+        cache: "no-store",
+        headers: CNN_FEAR_GREED_HEADERS,
+      },
+    );
     if (!res.ok) return null;
     const j = (await res.json()) as {
-      data?: Array<{ value?: string; value_classification?: string }>;
+      fear_and_greed?: { score?: number; rating?: string };
     };
-    const row = j.data?.[0];
-    if (!row) return null;
-    const score = Number(row.value);
-    if (!Number.isFinite(score)) return null;
-    const label = (row.value_classification ?? "").trim() || "—";
-    return { score, label };
+    const fg = j.fear_and_greed;
+    if (!fg || typeof fg.score !== "number" || !Number.isFinite(fg.score)) return null;
+    const label = cnnFearGreedRatingToLabel(fg.rating ?? "");
+    return { score: Math.round(fg.score), label };
   } catch {
     return null;
   }

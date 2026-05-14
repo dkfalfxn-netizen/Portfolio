@@ -158,7 +158,7 @@ type MarketResponse = {
   eurKrw: number | null;
   /** Yahoo ^VIX */
   vix: number | null;
-  /** Fear & Greed (alternative.me, 0–100) */
+  /** Fear & Greed — CNN Dataviz (edition.cnn.com 과 동일 소스) */
   fearGreed: { score: number; label: string } | null;
   fetchedAt: number;
 };
@@ -3788,7 +3788,7 @@ export default function Home() {
               </span>
               <span
                 className="rounded-md border border-slate-600/80 bg-slate-900/40 px-2 py-0.5 text-[10px] tabular-nums text-slate-300 sm:text-[11px]"
-                title="CNN Fear & Greed 유사 지표 (alternative.me)"
+                title="CNN Fear & Greed Index (CNN Dataviz API)"
               >
                 F&amp;G{" "}
                 {marketQuery.data?.fearGreed ? (
