@@ -1252,6 +1252,10 @@ export default function Home() {
   const holdingsNavRef = useRef<HTMLDivElement>(null);
   const holdingsMenuRef = useRef<HTMLDivElement>(null);
   const [holdingsNavOpen, setHoldingsNavOpen] = useState(false);
+  /** 종목별 합산 표 정렬 */
+  const [holdingsBySymbolSort, setHoldingsBySymbolSort] = useState<
+    "name" | "valueKrw" | "pnlPct" | "pnlKrw" | "owners"
+  >("valueKrw");
   const [holdingsMenuPos, setHoldingsMenuPos] = useState<{
     top: number;
     left: number;
@@ -1723,7 +1727,7 @@ export default function Home() {
     });
   }, [positions, marketQuery.data, usdKrw, eurKrw]);
 
-  /** 보유자·계좌 무관 동일 티커 합산 — 평가·원가·손익·원화 기준 수익률 (표시: 평가액 내림차순) */
+  /** 보유자·계좌 무관 동일 티커 합산 — 평가·원가·손익·원화 기준 수익률 (표 정렬은 holdingsAggregatedBySymbolSorted) */
   const holdingsAggregatedBySymbol = useMemo(() => {
     type Acc = {
       key: string;
@@ -1772,12 +1776,48 @@ export default function Home() {
           ownersLabel: ownersSorted.join(", "),
         };
       })
-      .sort((a, b) => {
-        const dv = b.valueKrw - a.valueKrw;
-        if (dv !== 0) return dv;
-        return a.key.localeCompare(b.key, "en");
-      });
   }, [enrichedPositions]);
+
+  const holdingsAggregatedBySymbolSorted = useMemo(() => {
+    const rows = holdingsAggregatedBySymbol.slice();
+    const cmpPctDesc = (a: number | null, b: number | null) => {
+      if (a === null && b === null) return 0;
+      if (a === null) return 1;
+      if (b === null) return -1;
+      return b - a;
+    };
+    switch (holdingsBySymbolSort) {
+      case "name":
+        rows.sort((a, b) =>
+          a.displayName.localeCompare(b.displayName, "ko", { sensitivity: "base" }),
+        );
+        break;
+      case "valueKrw":
+        rows.sort(
+          (a, b) =>
+            b.valueKrw - a.valueKrw || a.displaySymbol.localeCompare(b.displaySymbol, "en"),
+        );
+        break;
+      case "pnlPct":
+        rows.sort(
+          (a, b) =>
+            cmpPctDesc(a.pnlPct, b.pnlPct) || b.valueKrw - a.valueKrw,
+        );
+        break;
+      case "pnlKrw":
+        rows.sort((a, b) => b.pnlKrw - a.pnlKrw || b.valueKrw - a.valueKrw);
+        break;
+      case "owners":
+        rows.sort(
+          (a, b) =>
+            b.ownerCount - a.ownerCount || b.valueKrw - a.valueKrw,
+        );
+        break;
+      default:
+        break;
+    }
+    return rows;
+  }, [holdingsAggregatedBySymbol, holdingsBySymbolSort]);
 
   const holdingsSymbolGrandTotals = useMemo(() => {
     const v = holdingsAggregatedBySymbol.reduce((s, r) => s + r.valueKrw, 0);
@@ -5265,7 +5305,34 @@ export default function Home() {
                     모든 보유자·계좌의 같은 종목을 합산한 평가액, 매입원가, 평가손익, 수익률(원화 기준)입니다.
                   </p>
                 </div>
-                <div className="overflow-x-auto p-4">
+                <div className="flex flex-col gap-3 p-4 pt-0">
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      [
+                        { key: "name" as const, label: "종목명순" },
+                        { key: "valueKrw" as const, label: "평가액순" },
+                        { key: "pnlPct" as const, label: "수익률순" },
+                        { key: "pnlKrw" as const, label: "평가손익순" },
+                        { key: "owners" as const, label: "보유자순" },
+                      ] as const
+                    ).map(({ key, label }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setHoldingsBySymbolSort(key)}
+                        className={cn(
+                          "rounded-md border px-2 py-1 text-[11px] transition-colors",
+                          holdingsBySymbolSort === key
+                            ? "border-sky-500 bg-sky-500/25 text-sky-100"
+                            : "border-slate-600 bg-slate-900/50 text-slate-300 hover:bg-slate-800/80",
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="overflow-x-auto px-4 pb-4">
                   <Table className="min-w-[640px] text-xs">
                     <TableHeader className="bg-muted/40">
                       <TableRow>
@@ -5287,7 +5354,7 @@ export default function Home() {
                         </TableRow>
                       ) : (
                         <>
-                          {holdingsAggregatedBySymbol.map((row) => (
+                          {holdingsAggregatedBySymbolSorted.map((row) => (
                             <TableRow key={row.key}>
                               <TableCell className="px-3 py-2 font-mono text-[11px]">
                                 {isLikelyEtfForEtfCheck(row.displaySymbol, row.displayName) ? (

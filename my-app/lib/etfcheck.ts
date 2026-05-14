@@ -1,10 +1,14 @@
-const BASE = "https://www.etfcheck.co.kr/mobile/search";
+const ROOT = "https://www.etfcheck.co.kr";
 
-/** ETF CHECK 모바일 검색 URL (keyword= 검색어 — 서버가 /?redirect 경유) */
+/**
+ * 직접 `/mobile/search?keyword=` 접속 시 리다이렉트로 `keyword` 가 누락되는 경우가 있음.
+ * `/?redirect=`에 경로+쿼리를 한 번에 넣으면 SPA가 검색창까지 복구함.
+ */
 export function etfCheckSearchUrl(keyword: string): string {
   const q = keyword.trim();
-  if (!q) return BASE;
-  return `${BASE}?keyword=${encodeURIComponent(q)}`;
+  if (!q) return `${ROOT}/mobile/search`;
+  const pathWithQuery = `/mobile/search?keyword=${encodeURIComponent(q)}`;
+  return `${ROOT}/?redirect=${encodeURIComponent(pathWithQuery)}`;
 }
 
 /**
