@@ -682,6 +682,17 @@ function TargetWeightSortableBarRow({
         className="relative h-[13px] flex-1 overflow-hidden rounded-sm"
         style={{ background: "rgba(255,255,255,0.04)" }}
       >
+        {/* 0~100% 달성도 축 기준 33%·66% (상단 눈금 25·50·75와 같은 좌표계; 목표선=100%와 겹치지 않음) */}
+        {[33, 66].map((pct) => (
+          <div
+            key={pct}
+            className="pointer-events-none absolute top-0 z-[5] h-full w-px"
+            style={{
+              left: `${(pct / 100) * TARGET_AT * 100}%`,
+              borderRight: "1px dashed rgba(161,161,170,0.32)",
+            }}
+          />
+        ))}
         <div
           className="pointer-events-none absolute top-0 z-10 h-full w-px"
           style={{
