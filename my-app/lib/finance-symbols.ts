@@ -26,6 +26,22 @@ export function toYahooSymbol(symbol: string): string {
 }
 
 /**
+ * 보유/입력 티커가 같은 종목을 가리키는지(대소문·KRX:/KQ: 접두 허용)
+ */
+export function holdingSymbolsEquivalent(a: string, b: string): boolean {
+  const strip = (s: string) => {
+    const u = s.trim().toUpperCase();
+    if (u.startsWith("KRX:")) return u.slice(4);
+    if (u.startsWith("KQ:")) return u.slice(3);
+    return u;
+  };
+  const A = strip(a);
+  const B = strip(b);
+  if (A === B) return true;
+  return false;
+}
+
+/**
  * 종목 추가 시 티커만으로 거래 통화 추정 (명확할 때만).
  * - 미완성 입력(예: "06")에서는 null → 통화 유지
  */

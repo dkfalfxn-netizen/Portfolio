@@ -21,7 +21,7 @@ import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import { cn } from "@/lib/utils";
-import { inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
+import { holdingSymbolsEquivalent, inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
 import { fmtInt, fmtUsdNumber, MONEY_INT_LOCALE, parseKoreanIntDigits } from "@/lib/format-money";
 import {
   HAS_LOCAL_CHANGES_KEY,
@@ -1181,6 +1181,10 @@ export default function Home() {
     /** 종목 추가 시 한 번에 넣을 담당자(복수) */
     selectedOwners: ["김승주"] as OwnerName[],
   });
+  /** 종목명 수동 입력 시 자동 채움 비활성 (티커·통화·담당자 바꾸면 해제) */
+  const skipAddFormAutoNameRef = useRef(false);
+  /** 차트 그룹 수동 입력 시 자동 채움 비활성 */
+  const skipAddFormAutoChartGroupRef = useRef(false);
   /** 매입 USD/KRW를 직접 수정한 뒤에는 매입일 자동 환율이 덮어쓰지 않음 */
   const addFormFxManualRef = useRef(false);
   const [purchaseFxAutoBusy, setPurchaseFxAutoBusy] = useState(false);
@@ -1491,6 +1495,8 @@ export default function Home() {
 
   const handleAddSymbolInput = useCallback(
     (value: string) => {
+      skipAddFormAutoNameRef.current = false;
+      skipAddFormAutoChartGroupRef.current = false;
       setForm((prev) => {
         const next = { ...prev, symbol: value };
         const inferred = inferTradingCurrencyFromTicker(value);
@@ -1514,6 +1520,85 @@ export default function Home() {
     },
     [usdKrw, eurKrw],
   );
+
+  /** 기존 보유에 나온 티커 목록 — 입력란 datalist 자동완성 */
+  const holdingsSuggestedTickers = useMemo(() => {
+    const u = new Set<string>();
+    for (const p of positions) {
+      const s = p.symbol?.trim();
+      if (s) u.add(s.toUpperCase());
+    }
+    return [...u].sort((a, b) => a.localeCompare(b, "en"));
+  }, [positions]);
+
+  /** 티커·통화·담당자에 맞춰 종목명·차트 그룹 자동 입력 (보유 줄 우선; 종목명만 API 폴백) */
+  useEffect(() => {
+    const raw = form.symbol.trim();
+    if (!raw) return;
+
+    const ac = new AbortController();
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const symU = raw.toUpperCase();
+        const ownersOrdered = ownerNames.filter((o) => form.selectedOwners.includes(o));
+
+        for (const own of ownersOrdered) {
+          const p = positions.find(
+            (x) =>
+              x.owner === own &&
+              x.currency === form.currency &&
+              holdingSymbolsEquivalent(symU, x.symbol),
+          );
+          if (!p) continue;
+
+          if (!ac.signal.aborted) {
+            setForm((prev) => {
+              const next = { ...prev };
+              if (!skipAddFormAutoNameRef.current && p.name?.trim()) {
+                next.name = p.name.trim();
+              }
+              if (!skipAddFormAutoChartGroupRef.current && p.chartGroup?.trim()) {
+                next.chartGroup = p.chartGroup.trim();
+              }
+              return next;
+            });
+          }
+          return;
+        }
+
+        if (skipAddFormAutoNameRef.current) return;
+
+        try {
+          const r = await fetch(
+            `/api/symbol-name?symbols=${encodeURIComponent(raw)}`,
+            { signal: ac.signal },
+          );
+          if (!r.ok) return;
+          const j = (await r.json()) as { names?: Record<string, string> };
+          const names = j.names ?? {};
+          let resolved: string | undefined;
+          for (const [k, v] of Object.entries(names)) {
+            if (k.trim().toUpperCase() === symU && typeof v === "string" && v.trim()) {
+              resolved = v.trim();
+              break;
+            }
+          }
+          if (resolved) {
+            if (!ac.signal.aborted) {
+              setForm((prev) => ({ ...prev, name: resolved }));
+            }
+          }
+        } catch {
+          /* AbortError 등 무시 */
+        }
+      })();
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timer);
+      ac.abort();
+    };
+  }, [form.symbol, form.currency, form.selectedOwners, positions, ownerNames]);
 
   const totalCashKrw = useMemo(() => {
     return ownerNames.reduce((sum, owner) => {
@@ -5081,18 +5166,29 @@ export default function Home() {
                   <option key={g} value={g} />
                 ))}
               </datalist>
+              <datalist id="holdings-ticker-suggestions">
+                {holdingsSuggestedTickers.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
               <input
                 className="rounded-md border bg-background px-3 py-2 text-sm"
                 placeholder="티커 (예: NVDA, 005930)"
                 value={form.symbol}
                 onChange={(e) => handleAddSymbolInput(e.target.value)}
+                list="holdings-ticker-suggestions"
+                autoComplete="off"
                 required
               />
               <input
                 className="rounded-md border bg-background px-3 py-2 text-sm"
                 placeholder="종목명"
                 value={form.name}
-                onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  skipAddFormAutoNameRef.current = v.trim() !== "";
+                  setForm((prev) => ({ ...prev, name: v }));
+                }}
                 required
               />
               <input
@@ -5175,6 +5271,8 @@ export default function Home() {
                 value={form.currency}
                 onChange={(e) => {
                   const c = e.target.value as "USD" | "EUR" | "KRW";
+                  skipAddFormAutoNameRef.current = false;
+                  skipAddFormAutoChartGroupRef.current = false;
                   addFormFxManualRef.current = false;
                   setForm((prev) => ({
                     ...prev,
@@ -5194,7 +5292,11 @@ export default function Home() {
                 className="col-span-2 rounded-md border bg-background px-3 py-2 text-sm sm:col-span-3 md:col-span-6"
                 placeholder="차트 그룹 (선택 · 예: 현금, MMF 등 현금성 자산)"
                 value={form.chartGroup}
-                onChange={(e) => setForm((prev) => ({ ...prev, chartGroup: e.target.value }))}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  skipAddFormAutoChartGroupRef.current = v.trim() !== "";
+                  setForm((prev) => ({ ...prev, chartGroup: v }));
+                }}
                 list="holdings-chart-group-presets"
                 autoComplete="off"
               />
@@ -5212,6 +5314,8 @@ export default function Home() {
                         checked={form.selectedOwners.includes(name)}
                         onChange={(e) => {
                           const checked = e.target.checked;
+                          skipAddFormAutoNameRef.current = false;
+                          skipAddFormAutoChartGroupRef.current = false;
                           setForm((prev) => {
                             const next = checked
                               ? ownerNames.filter(
