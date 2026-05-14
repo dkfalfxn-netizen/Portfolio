@@ -144,6 +144,47 @@ async function fetchNaverPrice(code: string): Promise<ChartQuote> {
   return emptyQuote();
 }
 
+async function fetchVix(): Promise<number | null> {
+  try {
+    const chartUrl =
+      "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1m&range=1d";
+    const response = await fetch(chartUrl, {
+      method: "GET",
+      cache: "no-store",
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const meta = data?.chart?.result?.[0]?.meta;
+    return readChartHeadlinePrice(meta);
+  } catch {
+    return null;
+  }
+}
+
+/** CNN Fear & Greed와 유사 지표 — alternative.me 공개 API */
+async function fetchFearGreed(): Promise<{ score: number; label: string } | null> {
+  try {
+    const res = await fetch("https://api.alternative.me/fng/?limit=1", {
+      method: "GET",
+      cache: "no-store",
+      headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as {
+      data?: Array<{ value?: string; value_classification?: string }>;
+    };
+    const row = j.data?.[0];
+    if (!row) return null;
+    const score = Number(row.value);
+    if (!Number.isFinite(score)) return null;
+    const label = (row.value_classification ?? "").trim() || "—";
+    return { score, label };
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const symbolsParam = req.nextUrl.searchParams.get("symbols") ?? "";
   const rawSymbols = symbolsParam
@@ -188,12 +229,19 @@ export async function GET(req: NextRequest) {
   }
 
   if (rawSymbols.length === 0) {
-    const [usdKrw, eurKrw] = await Promise.all([fetchUsdKrwOnly(), fetchEurKrwOnly()]);
+    const [usdKrw, eurKrw, vix, fearGreed] = await Promise.all([
+      fetchUsdKrwOnly(),
+      fetchEurKrwOnly(),
+      fetchVix(),
+      fetchFearGreed(),
+    ]);
     return NextResponse.json({
       quotes: {},
       intraday: {},
       usdKrw,
       eurKrw,
+      vix,
+      fearGreed,
       fetchedAt: Date.now(),
     });
   }
@@ -209,6 +257,7 @@ export async function GET(req: NextRequest) {
   const yahooSymbols = [...new Set([...mapping.map((m) => m.yahoo), "KRW=X", "EURKRW=X"])];
 
   try {
+    const macroPromise = Promise.all([fetchVix(), fetchFearGreed()]);
     const [quoteEntries, commodityResults] = await Promise.all([
       Promise.all(
         yahooSymbols.map(async (symbol) => {
@@ -293,11 +342,15 @@ export async function GET(req: NextRequest) {
     const eurFx = byYahooSymbol.get("EURKRW=X");
     const eurKrw = typeof eurFx?.price === "number" ? eurFx.price : null;
 
+    const [vix, fearGreed] = await macroPromise;
+
     return NextResponse.json({
       quotes,
       intraday,
       usdKrw,
       eurKrw,
+      vix,
+      fearGreed,
       fetchedAt: Date.now(),
     });
   } catch {

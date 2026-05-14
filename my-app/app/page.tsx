@@ -99,6 +99,18 @@ function isStockRowForSymbolAggregate(p: { symbol: string; name: string }): bool
   return true;
 }
 
+/** 차트 그룹 구성란: 해외(USD/EUR)=티커, 국내(KRW)=종목명 */
+function chartGroupCompositionLabel(p: {
+  symbol: string;
+  name: string;
+  currency: "USD" | "EUR" | "KRW";
+}): string {
+  const sym = p.symbol.trim();
+  if (p.currency === "USD" || p.currency === "EUR") return sym;
+  const nm = (p.name ?? "").trim();
+  return nm || sym;
+}
+
 type OwnerName = string;
 type Position = {
   symbol: string;
@@ -127,7 +139,19 @@ type MarketResponse = {
   intraday?: Record<string, number[]>;
   usdKrw: number | null;
   eurKrw: number | null;
+  /** Yahoo ^VIX */
+  vix: number | null;
+  /** Fear & Greed (alternative.me, 0–100) */
+  fearGreed: { score: number; label: string } | null;
   fetchedAt: number;
+};
+
+const FEAR_GREED_LABEL_KO: Record<string, string> = {
+  "Extreme Fear": "극공포",
+  Fear: "공포",
+  Neutral: "중립",
+  Greed: "탐욕",
+  "Extreme Greed": "극탐욕",
 };
 
 type HistoryResponse = {
@@ -1789,7 +1813,8 @@ export default function Home() {
       valueKrw: number;
       costKrw: number;
       owners: Set<string>;
-      symbols: Set<string>;
+      /** 티커 → 구성란 표시(해외=티커, 국내=종목명) */
+      symbolLineLabel: Map<string, string>;
       bestName: string;
     };
     const map = new Map<string, Acc>();
@@ -1801,6 +1826,7 @@ export default function Home() {
       const cg = (p.chartGroup ?? "").trim();
       const bucketKey = cg ? `g:${cg}` : `s:${symKey}`;
       const cur = map.get(bucketKey);
+      const line = chartGroupCompositionLabel(p);
       if (!cur) {
         map.set(bucketKey, {
           key: bucketKey,
@@ -1808,14 +1834,19 @@ export default function Home() {
           valueKrw: p.valueKrw,
           costKrw: p.costKrw,
           owners: new Set([p.owner]),
-          symbols: new Set([symDisplay]),
+          symbolLineLabel: new Map([[symDisplay, line]]),
           bestName: nm || symDisplay,
         });
       } else {
         cur.valueKrw += p.valueKrw;
         cur.costKrw += p.costKrw;
         cur.owners.add(p.owner);
-        cur.symbols.add(symDisplay);
+        const prevLine = cur.symbolLineLabel.get(symDisplay);
+        if (prevLine === undefined) {
+          cur.symbolLineLabel.set(symDisplay, line);
+        } else if (p.currency !== "USD" && p.currency !== "EUR" && line.length > prevLine.length) {
+          cur.symbolLineLabel.set(symDisplay, line);
+        }
         if (nm.length > cur.bestName.length) cur.bestName = nm;
       }
     }
@@ -1823,12 +1854,14 @@ export default function Home() {
       const pnlKrw = r.valueKrw - r.costKrw;
       const pnlPct = r.costKrw > 0 ? (pnlKrw / r.costKrw) * 100 : null;
       const ownersSorted = [...r.owners].sort((a, b) => a.localeCompare(b, "ko"));
-      const listed = [...r.symbols].sort((a, b) => a.localeCompare(b, "en"));
+      const partsOrdered = [...r.symbolLineLabel.entries()]
+        .sort(([a], [b]) => a.localeCompare(b, "en"))
+        .map(([, lab]) => lab);
       const groupKind = r.key.startsWith("g:");
       const displayName = groupKind
-        ? listed.length <= 1
-          ? r.bestName || listed[0] || r.displaySymbol
-          : `${listed.length}개 티커 · ${listed.slice(0, 5).join(", ")}${listed.length > 5 ? " …" : ""}`
+        ? partsOrdered.length <= 1
+          ? partsOrdered[0] ?? (r.bestName || r.displaySymbol)
+          : `${partsOrdered.length}개 종목 · ${partsOrdered.slice(0, 5).join(", ")}${partsOrdered.length > 5 ? " …" : ""}`
         : r.bestName;
       return {
         key: r.key,
@@ -3700,6 +3733,39 @@ export default function Home() {
                 USD/KRW {usdKrw.toLocaleString(MONEY_INT_LOCALE)} · EUR/KRW{" "}
                 {eurKrw.toLocaleString(MONEY_INT_LOCALE)}
               </span>
+              <span
+                className="rounded-md border border-slate-600/80 bg-slate-900/40 px-2 py-0.5 text-[10px] tabular-nums text-slate-300 sm:text-[11px]"
+                title="CNN Fear & Greed 유사 지표 (alternative.me)"
+              >
+                F&amp;G{" "}
+                {marketQuery.data?.fearGreed ? (
+                  <>
+                    <span className="font-semibold text-amber-300">
+                      {Math.round(marketQuery.data.fearGreed.score)}
+                    </span>
+                    <span className="text-slate-500">
+                      {" "}
+                      {FEAR_GREED_LABEL_KO[marketQuery.data.fearGreed.label] ??
+                        marketQuery.data.fearGreed.label}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )}
+              </span>
+              <span
+                className="rounded-md border border-slate-600/80 bg-slate-900/40 px-2 py-0.5 text-[10px] tabular-nums text-slate-300 sm:text-[11px]"
+                title="CBOE 변동성 지수 (^VIX, Yahoo)"
+              >
+                VIX{" "}
+                {typeof marketQuery.data?.vix === "number" ? (
+                  <span className="font-semibold text-violet-300">
+                    {marketQuery.data.vix.toFixed(2)}
+                  </span>
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )}
+              </span>
               <a
                 href="https://www.etfcheck.co.kr"
                 target="_blank"
@@ -3707,6 +3773,14 @@ export default function Home() {
                 className="rounded-md border border-slate-600/80 bg-slate-900/40 px-2 py-0.5 text-[10px] font-medium text-sky-400 hover:bg-slate-800/80 hover:text-sky-300 sm:text-[11px]"
               >
                 ETF CHECK
+              </a>
+              <a
+                href="https://finance.yahoo.com/sectors/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-slate-600/80 bg-slate-900/40 px-2 py-0.5 text-[10px] font-medium text-violet-400 hover:bg-slate-800/80 hover:text-violet-300 sm:text-[11px]"
+              >
+                Yahoo Sectors
               </a>
             </div>
             <div
