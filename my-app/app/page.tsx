@@ -190,22 +190,32 @@ function HoldingsAggRichTooltip({
             ) : null}
             <table className="w-full border-separate border-spacing-y-1 text-[11px]">
               <thead>
-                <tr className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                  <th className="pb-1 pr-2 text-left font-medium">
-                    {showPctColumn ? "코드" : "보유자"}
-                  </th>
-                  <th
-                    className={cn(
-                      "pb-1 text-left font-medium",
-                      showPctColumn ? "px-1" : "pl-1",
-                    )}
-                  >
-                    {showPctColumn ? "이름" : twoColAmountPct ? "금액 · 비중" : ""}
-                  </th>
-                  {showPctColumn ? (
-                    <th className="pb-1 pl-2 text-right font-medium">{pctHeader}</th>
-                  ) : null}
-                </tr>
+                {twoColAmountPct ? (
+                  <tr className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                    <th className="pb-1 pr-2 text-left font-medium">보유자</th>
+                    <th className="pb-1 px-1 text-right font-medium">금액</th>
+                    <th className="w-[4.5rem] min-w-[4.5rem] pb-1 pl-1 text-right font-medium tabular-nums">
+                      비중
+                    </th>
+                  </tr>
+                ) : (
+                  <tr className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                    <th className="pb-1 pr-2 text-left font-medium">
+                      {showPctColumn ? "코드" : "보유자"}
+                    </th>
+                    <th
+                      className={cn(
+                        "pb-1 text-left font-medium",
+                        showPctColumn ? "px-1" : "pl-1",
+                      )}
+                    >
+                      {showPctColumn ? "이름" : ""}
+                    </th>
+                    {showPctColumn ? (
+                      <th className="pb-1 pl-2 text-right font-medium">{pctHeader}</th>
+                    ) : null}
+                  </tr>
+                )}
               </thead>
               <tbody>
                 {rows.map((r, i) => (
@@ -221,42 +231,42 @@ function HoldingsAggRichTooltip({
                     >
                       {r.code}
                     </td>
-                    <td
-                      className={cn(
-                        "truncate align-top text-slate-300",
-                        showPctColumn ? "max-w-[9rem] px-1" : "pl-1 text-slate-500",
-                        twoColAmountPct && "max-w-none whitespace-normal text-slate-300",
-                      )}
-                      title={showPctColumn ? r.name : undefined}
-                    >
-                      {showPctColumn ? (
-                        r.name || "—"
-                      ) : twoColAmountPct ? (
-                        <>
-                          <span className="tabular-nums text-slate-200">{r.name}</span>
-                          <span className="text-slate-600"> · </span>
-                          <span className="tabular-nums font-medium text-slate-400">
-                            {fmtHoldingsAggSharePct(r.pct)}
-                          </span>
-                        </>
-                      ) : (
-                        ""
-                      )}
-                    </td>
-                    {showPctColumn ? (
-                      <td
-                        className={cn(
-                          "pl-2 text-right tabular-nums align-top font-medium",
-                          r.pct === null || !Number.isFinite(r.pct)
-                            ? "text-slate-500"
-                            : r.pct >= 0
-                              ? "text-rose-400"
-                              : "text-sky-400",
-                        )}
-                      >
-                        {fmtHoldingsAggTipPct(r.pct)}
-                      </td>
-                    ) : null}
+                    {twoColAmountPct ? (
+                      <>
+                        <td className="max-w-[10rem] truncate px-1 text-right align-top tabular-nums text-slate-200">
+                          {r.name}
+                        </td>
+                        <td className="w-[4.5rem] min-w-[4.5rem] truncate pl-1 text-right align-top tabular-nums font-medium text-slate-400">
+                          {fmtHoldingsAggSharePct(r.pct)}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td
+                          className={cn(
+                            "truncate align-top text-slate-300",
+                            showPctColumn ? "max-w-[9rem] px-1" : "pl-1 text-slate-500",
+                          )}
+                          title={showPctColumn ? r.name : undefined}
+                        >
+                          {showPctColumn ? r.name || "—" : ""}
+                        </td>
+                        {showPctColumn ? (
+                          <td
+                            className={cn(
+                              "pl-2 text-right tabular-nums align-top font-medium",
+                              r.pct === null || !Number.isFinite(r.pct)
+                                ? "text-slate-500"
+                                : r.pct >= 0
+                                  ? "text-rose-400"
+                                  : "text-sky-400",
+                            )}
+                          >
+                            {fmtHoldingsAggTipPct(r.pct)}
+                          </td>
+                        ) : null}
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>
