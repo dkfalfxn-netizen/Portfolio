@@ -22,6 +22,7 @@ import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import { cn } from "@/lib/utils";
 import { holdingSymbolsEquivalent, inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
+import { etfCheckSearchKeyword, etfCheckSearchUrl, isLikelyEtfForEtfCheck } from "@/lib/etfcheck";
 import { fmtInt, fmtUsdNumber, MONEY_INT_LOCALE, parseKoreanIntDigits } from "@/lib/format-money";
 import {
   HAS_LOCAL_CHANGES_KEY,
@@ -1722,7 +1723,7 @@ export default function Home() {
     });
   }, [positions, marketQuery.data, usdKrw, eurKrw]);
 
-  /** 보유자·계좌 무관 동일 티커 합산 — 평가·원가·손익·원화 기준 수익률 */
+  /** 보유자·계좌 무관 동일 티커 합산 — 평가·원가·손익·원화 기준 수익률 (표시: 평가액 내림차순) */
   const holdingsAggregatedBySymbol = useMemo(() => {
     type Acc = {
       key: string;
@@ -1771,7 +1772,11 @@ export default function Home() {
           ownersLabel: ownersSorted.join(", "),
         };
       })
-      .sort((a, b) => b.valueKrw - a.valueKrw);
+      .sort((a, b) => {
+        const dv = b.valueKrw - a.valueKrw;
+        if (dv !== 0) return dv;
+        return a.key.localeCompare(b.key, "en");
+      });
   }, [enrichedPositions]);
 
   const holdingsSymbolGrandTotals = useMemo(() => {
@@ -3689,14 +3694,6 @@ export default function Home() {
                         >
                           보유·전체
                         </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="w-full px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-800/80"
-                          onClick={() => goDashboardSection("section-holdings-by-symbol")}
-                        >
-                          종목별 합산
-                        </button>
                         {ownerNames.map((name) => (
                           <button
                             key={name}
@@ -3708,6 +3705,14 @@ export default function Home() {
                             {name}
                           </button>
                         ))}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="w-full px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-800/80"
+                          onClick={() => goDashboardSection("section-holdings-by-symbol")}
+                        >
+                          종목별 합산
+                        </button>
                       </div>,
                       document.body,
                     )
@@ -4316,7 +4321,23 @@ export default function Home() {
                                 <p className="text-sm font-semibold leading-snug text-foreground">
                                   {position.name}
                                 </p>
-                                <p className="text-[11px] text-muted-foreground">{position.symbol}</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {isLikelyEtfForEtfCheck(position.symbol, position.name ?? "") ? (
+                                    <a
+                                      href={etfCheckSearchUrl(
+                                        etfCheckSearchKeyword(position.symbol, position.name ?? ""),
+                                      )}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-sky-400 hover:underline"
+                                      title="ETF CHECK에서 검색"
+                                    >
+                                      {position.symbol}
+                                    </a>
+                                  ) : (
+                                    position.symbol
+                                  )}
+                                </p>
                               </>
                             )}
                               </div>
@@ -5269,7 +5290,21 @@ export default function Home() {
                           {holdingsAggregatedBySymbol.map((row) => (
                             <TableRow key={row.key}>
                               <TableCell className="px-3 py-2 font-mono text-[11px]">
-                                {row.displaySymbol}
+                                {isLikelyEtfForEtfCheck(row.displaySymbol, row.displayName) ? (
+                                  <a
+                                    href={etfCheckSearchUrl(
+                                      etfCheckSearchKeyword(row.displaySymbol, row.displayName),
+                                    )}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-sky-400 hover:underline"
+                                    title="ETF CHECK에서 검색"
+                                  >
+                                    {row.displaySymbol}
+                                  </a>
+                                ) : (
+                                  row.displaySymbol
+                                )}
                               </TableCell>
                               <TableCell className="max-w-[180px] truncate px-3 py-2" title={row.displayName}>
                                 {row.displayName}
