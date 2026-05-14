@@ -124,12 +124,20 @@ function fmtHoldingsAggTipPct(p: number | null): string {
   return `${sign}${p.toFixed(1)}%`;
 }
 
+/** 행 합계 대비 지분(등락률과 구분 — 부호 없이 소수 한 자리) */
+function fmtHoldingsAggSharePct(p: number | null): string {
+  if (p === null || !Number.isFinite(p)) return "—";
+  return `${p.toFixed(1)}%`;
+}
+
 /** 종목별 합산 표 — 네이티브 title 대신 DOM 오버레이(한글·₩ 깨짐 방지), 표 형식 툴팁 */
 function HoldingsAggRichTooltip({
   header,
   rows,
   pctHeader = "등락",
   showPctColumn = true,
+  /** 보유자별 평가/손익: 금액 뒤에 행 합계 대비 지분(%)을 같은 칸에 표시 — 3열 대신 2열 */
+  mergePctIntoName = false,
   codeMono = true,
   className,
   children,
@@ -140,6 +148,7 @@ function HoldingsAggRichTooltip({
   pctHeader?: string;
   /** 보유자 목록 등 % 열이 의미 없을 때 숨김 */
   showPctColumn?: boolean;
+  mergePctIntoName?: boolean;
   /** 첫 열을 티커용 고정폭(모노)으로 — 보유자 이름은 false */
   codeMono?: boolean;
   className?: string;
@@ -151,6 +160,7 @@ function HoldingsAggRichTooltip({
     return <span className={className}>{children}</span>;
   }
   const hdr = header.trim();
+  const twoColAmountPct = !showPctColumn && mergePctIntoName;
   return (
     <>
       <span
@@ -190,7 +200,7 @@ function HoldingsAggRichTooltip({
                       showPctColumn ? "px-1" : "pl-1",
                     )}
                   >
-                    {showPctColumn ? "이름" : ""}
+                    {showPctColumn ? "이름" : twoColAmountPct ? "금액 · 비중" : ""}
                   </th>
                   {showPctColumn ? (
                     <th className="pb-1 pl-2 text-right font-medium">{pctHeader}</th>
@@ -215,10 +225,23 @@ function HoldingsAggRichTooltip({
                       className={cn(
                         "truncate align-top text-slate-300",
                         showPctColumn ? "max-w-[9rem] px-1" : "pl-1 text-slate-500",
+                        twoColAmountPct && "max-w-none whitespace-normal text-slate-300",
                       )}
                       title={showPctColumn ? r.name : undefined}
                     >
-                      {showPctColumn ? r.name || "—" : ""}
+                      {showPctColumn ? (
+                        r.name || "—"
+                      ) : twoColAmountPct ? (
+                        <>
+                          <span className="tabular-nums text-slate-200">{r.name}</span>
+                          <span className="text-slate-600"> · </span>
+                          <span className="tabular-nums font-medium text-slate-400">
+                            {fmtHoldingsAggSharePct(r.pct)}
+                          </span>
+                        </>
+                      ) : (
+                        ""
+                      )}
                     </td>
                     {showPctColumn ? (
                       <td
@@ -1961,13 +1984,14 @@ export default function Home() {
         ];
         const tooltipOwnerValueRows: HoldingsAggTipRow[] = ownerBreakdown.map((o) => ({
           code: o.owner,
-          name: `평가 ${fmtInt(o.valueKrw)}원`,
-          pct: o.costKrw > 0 ? ((o.valueKrw - o.costKrw) / o.costKrw) * 100 : null,
+          name: `${fmtInt(o.valueKrw)}원`,
+          pct: r.valueKrw > 0 ? (o.valueKrw / r.valueKrw) * 100 : null,
         }));
         const tooltipOwnerPnlRows: HoldingsAggTipRow[] = ownerBreakdown.map((o) => ({
           code: o.owner,
-          name: `손익 ${fmtInt(o.pnlKrw)}원`,
-          pct: o.costKrw > 0 ? ((o.valueKrw - o.costKrw) / o.costKrw) * 100 : null,
+          name: `${fmtInt(o.pnlKrw)}원`,
+          pct:
+            Math.abs(pnlKrw) > 1e-9 ? (o.pnlKrw / pnlKrw) * 100 : null,
         }));
         const tooltipOwnersListRows: HoldingsAggTipRow[] =
           ownersSorted.length > 0
@@ -2089,13 +2113,13 @@ export default function Home() {
       const tooltipHeader = r.displaySymbol.trim().toUpperCase();
       const tooltipOwnerValueRows: HoldingsAggTipRow[] = ownerBreakdown.map((o) => ({
         code: o.owner,
-        name: `평가 ${fmtInt(o.valueKrw)}원`,
-        pct: o.costKrw > 0 ? ((o.valueKrw - o.costKrw) / o.costKrw) * 100 : null,
+        name: `${fmtInt(o.valueKrw)}원`,
+        pct: r.valueKrw > 0 ? (o.valueKrw / r.valueKrw) * 100 : null,
       }));
       const tooltipOwnerPnlRows: HoldingsAggTipRow[] = ownerBreakdown.map((o) => ({
         code: o.owner,
-        name: `손익 ${fmtInt(o.pnlKrw)}원`,
-        pct: o.costKrw > 0 ? ((o.valueKrw - o.costKrw) / o.costKrw) * 100 : null,
+        name: `${fmtInt(o.pnlKrw)}원`,
+        pct: Math.abs(pnlKrw) > 1e-9 ? (o.pnlKrw / pnlKrw) * 100 : null,
       }));
       const tooltipOwnersListRows: HoldingsAggTipRow[] =
         ownersSorted.length > 0
@@ -5795,7 +5819,8 @@ export default function Home() {
                                 <HoldingsAggRichTooltip
                                   header={row.tooltipHeader}
                                   rows={row.tooltipOwnerValueRows}
-                                  pctHeader="수익률"
+                                  showPctColumn={false}
+                                  mergePctIntoName
                                   codeMono={false}
                                   className="block"
                                 >
@@ -5813,7 +5838,8 @@ export default function Home() {
                                 <HoldingsAggRichTooltip
                                   header={row.tooltipHeader}
                                   rows={row.tooltipOwnerPnlRows}
-                                  pctHeader="수익률"
+                                  showPctColumn={false}
+                                  mergePctIntoName
                                   codeMono={false}
                                   className="block"
                                 >
