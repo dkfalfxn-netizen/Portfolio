@@ -31,7 +31,7 @@ import {
   persistVisualOrderForOwner,
   REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
 } from "@/lib/rebalance-visual-order";
-import { type SplitAmountMode, approxPortfolioPctAfterDelta, perSplitKrwCore } from "@/lib/rebalance-split-amount";
+import { type SplitAmountMode, approxPortfolioPctAfterDelta, perSplitKrwCore, proportionalAllocateWithCaps } from "@/lib/rebalance-split-amount";
 import {
   allocationTickerMatches,
   allowedCalculatorStubTickerKeysUpper,
@@ -242,6 +242,66 @@ function tryMemberAdjustmentsTargetPortfolioPct(
   });
 }
 
+function memberPolicyWeights(
+  g: GroupAllocation,
+  splitInputs: Record<string, string> | undefined,
+  splitMode: CalculatorMemberSplitMode,
+): number[] {
+  if (g.members.length === 0) return [];
+  if (splitMode === "targetPct" && splitInputs) {
+    const pcts = g.members.map((m) => {
+      if (isUndecidedSlotMemberSymbol(m.symbol)) return 0;
+      const raw = (splitInputs[m.symbol] ?? "").trim().replace(",", ".");
+      if (raw === "") return 0;
+      const n = parseFloat(raw);
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    });
+    const sumPct = pcts.reduce((a, b) => a + b, 0);
+    if (sumPct > 0) return pcts.map((p) => p / sumPct);
+  }
+  const rawRatios = memberRatiosForGroup(g, splitInputs);
+  const masked = g.members.map((m, i) =>
+    isUndecidedSlotMemberSymbol(m.symbol) ? 0 : Math.max(0, rawRatios[i] ?? 0),
+  );
+  let sumR = masked.reduce((a, b) => a + b, 0);
+  if (sumR <= 0) {
+    const vb = valueBasedMemberRatios(g);
+    const m2 = g.members.map((m, i) =>
+      isUndecidedSlotMemberSymbol(m.symbol) ? 0 : Math.max(0, vb[i] ?? 0),
+    );
+    sumR = m2.reduce((a, b) => a + b, 0);
+    return sumR > 0 ? m2.map((r) => r / sumR) : masked;
+  }
+  return masked.map((r) => r / sumR);
+}
+
+/** 회당 그룹 금액을 종목별로 배분 — 설정 비율을 따르되, 남은 목표 매매액을 넘지 않게 하고 포화 시 나머지 종목에 비율대로 재분배 */
+function memberTrancheKrwBySymbol(
+  row: ComputedRow,
+  perSplitRowKrwSigned: number,
+  splitInputs: Record<string, string> | undefined,
+  splitMode: CalculatorMemberSplitMode,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const absTranche = Math.abs(perSplitRowKrwSigned);
+  if (absTranche < 1e-9 || row.memberAdjustments.length === 0) return out;
+
+  const weights = memberPolicyWeights(row, splitInputs, splitMode);
+  const caps = row.memberAdjustments.map((adj) => {
+    if (isUndecidedSlotMemberSymbol(adj.symbol)) return 0;
+    if (row.diffKrw > 0) return Math.max(0, adj.diffKrw);
+    return Math.max(0, -adj.diffKrw);
+  });
+
+  const alloc = proportionalAllocateWithCaps(absTranche, weights, caps);
+  const sign = perSplitRowKrwSigned >= 0 ? 1 : -1;
+  for (let i = 0; i < row.memberAdjustments.length; i++) {
+    const sym = row.memberAdjustments[i]!.symbol;
+    out.set(sym, sign * (alloc[i] ?? 0));
+  }
+  return out;
+}
+
 function calcMemberAdjustments(
   g: GroupAllocation,
   diffKrw: number,
@@ -301,12 +361,6 @@ function calcMemberAdjustments(
       shares: m.priceKrw > 0 ? memberDiffKrw / m.priceKrw : null,
     };
   });
-}
-
-function memberSplitKrw(row: ComputedRow, m: MemberAdj, perSplitRowKrw: number): number {
-  const d = row.diffKrw;
-  if (Math.abs(d) < 1e-9) return 0;
-  return perSplitRowKrw * (m.diffKrw / d);
 }
 
 /** 차트 리밸런싱 위젯과 동일: 현금 행 목표·현재 비중(%p) 편차 */
@@ -1517,6 +1571,9 @@ function RebalancingOwner({
           <strong className="text-foreground/80"> 목표÷n 단계별</strong>은 이번 회에 목표평가의{" "}
           <span className="tabular-nums">k/n</span>까지 맞추는 금액으로, 아래에서{" "}
           <span className="tabular-nums">k</span>를 고릅니다.
+          {" "}
+          <strong className="text-foreground/80">회당 종목(주수·금액)</strong> 열은 그룹 안에서 정한 비율(가중·목표%)대로 나누되,
+          한 종목이 이번 회 금액만으로 목표치에 먼저 도달하면 남은 금액은 아직 부족한 종목들만 대상으로 같은 비율로 다시 배분합니다.
         </p>
 
         <div className="overflow-x-auto">
@@ -1565,6 +1622,16 @@ function RebalancingOwner({
                 const rowPctAfterSplit =
                   significant && splitCount > 1 && effectiveTotalKrw > 0 ?
                     approxPortfolioPctAfterDelta(r.valueKrw, perSplitRowKrw, effectiveTotalKrw)
+                  : null;
+
+                const trancheBySymbol =
+                  significant && splitCount > 1 && !isCash ?
+                    memberTrancheKrwBySymbol(
+                      r,
+                      perSplitRowKrw,
+                      memberSplits[r.groupKey],
+                      memberSplitModes[r.groupKey] ?? "targetPct",
+                    )
                   : null;
 
                 return (
@@ -1706,7 +1773,7 @@ function RebalancingOwner({
                           {r.memberAdjustments
                             .filter((m) => Math.abs(m.diffKrw) >= 10000)
                             .map((m) => {
-                              const mPer = memberSplitKrw(r, m, perSplitRowKrw);
+                              const mPer = trancheBySymbol?.get(m.symbol) ?? 0;
                               const mPctAfter =
                                 approxPortfolioPctAfterDelta(m.valueKrw, mPer, effectiveTotalKrw);
                               return (

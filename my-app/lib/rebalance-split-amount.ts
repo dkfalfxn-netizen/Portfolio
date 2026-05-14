@@ -54,3 +54,45 @@ export function perSplitKrwCore(
   }
   return row.diffKrw / n;
 }
+
+/**
+ * 양수 예산 `total`을 가중치 `weights` 비율로 나누되, 각 i는 `caps[i]`를 넘지 않음.
+ * 한 종목이 캡에 도달하면 남은 예산을 **아직 여유가 있는 종목들**에게 동일 비율(재정규화)로 돌려줌.
+ */
+export function proportionalAllocateWithCaps(
+  total: number,
+  weights: number[],
+  caps: number[],
+): number[] {
+  const EPS = 1e-6;
+  const n = weights.length;
+  if (n === 0 || !(total > EPS) || caps.length !== n) return new Array(Math.max(n, 0)).fill(0);
+  const out = new Array(n).fill(0);
+  let remCap = caps.map((c) => Math.max(0, c));
+  let budget = total;
+
+  while (budget > EPS) {
+    const activeIdx: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if (remCap[i] > EPS && weights[i] > EPS) activeIdx.push(i);
+    }
+    if (activeIdx.length === 0) break;
+    const wsum = activeIdx.reduce((s, i) => s + weights[i], 0);
+    if (wsum < EPS) break;
+
+    let distributed = 0;
+    let hitCap = false;
+    for (const i of activeIdx) {
+      const ideal = budget * (weights[i] / wsum);
+      const take = Math.min(remCap[i], ideal);
+      if (take + EPS < ideal) hitCap = true;
+      out[i] += take;
+      remCap[i] -= take;
+      distributed += take;
+    }
+    budget -= distributed;
+    if (!hitCap) break;
+    if (distributed < EPS) break;
+  }
+  return out;
+}
