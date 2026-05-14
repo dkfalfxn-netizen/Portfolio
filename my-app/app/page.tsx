@@ -111,12 +111,12 @@ function chartGroupCompositionLabel(p: {
   return nm || sym;
 }
 
-/** 종목별 합산 표 — 보유자별 평가/손익 툴팁(네이티브 title) */
+/** 종목별 합산 표 — 보유자별 평가/손익 툴팁(네이티브 title, ₩ 기호는 툴팁 폰트에서 ? 로 깨질 수 있어 '원' 사용) */
 function formatHoldingsAggOwnerValueTooltip(
   lines: { owner: string; valueKrw: number }[],
 ): string {
   if (lines.length === 0) return "";
-  return lines.map((l) => `${l.owner}: 평가 ₩${fmtInt(l.valueKrw)}`).join("\n");
+  return lines.map((l) => `${l.owner}: 평가 ${fmtInt(l.valueKrw)}원`).join("\n");
 }
 
 function formatHoldingsAggOwnerPnlTooltip(
@@ -124,7 +124,7 @@ function formatHoldingsAggOwnerPnlTooltip(
 ): string {
   if (lines.length === 0) return "";
   return lines
-    .map((l) => `${l.owner}: ${l.pnlKrw >= 0 ? "+" : ""}₩${fmtInt(l.pnlKrw)}`)
+    .map((l) => `${l.owner}: ${fmtInt(l.pnlKrw)}원`)
     .join("\n");
 }
 
