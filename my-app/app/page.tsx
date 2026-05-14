@@ -112,38 +112,45 @@ function chartGroupCompositionLabel(p: {
   return nm || sym;
 }
 
-/** 종목별 합산 표 — 보유자별 평가/손익 툴팁(네이티브 title, ₩ 기호는 툴팁 폰트에서 ? 로 깨질 수 있어 '원' 사용) */
-function formatHoldingsAggOwnerValueTooltip(
-  lines: { owner: string; valueKrw: number }[],
-): string {
-  if (lines.length === 0) return "";
-  return lines.map((l) => `${l.owner}: 평가 ${fmtInt(l.valueKrw)}원`).join("\n");
+type HoldingsAggTipRow = {
+  code: string;
+  name: string;
+  pct: number | null;
+};
+
+function fmtHoldingsAggTipPct(p: number | null): string {
+  if (p === null || !Number.isFinite(p)) return "—";
+  const sign = p >= 0 ? "+" : "";
+  return `${sign}${p.toFixed(1)}%`;
 }
 
-function formatHoldingsAggOwnerPnlTooltip(
-  lines: { owner: string; pnlKrw: number }[],
-): string {
-  if (lines.length === 0) return "";
-  return lines
-    .map((l) => `${l.owner}: ${fmtInt(l.pnlKrw)}원`)
-    .join("\n");
-}
-
-/** 네이티브 title 툴팁은 Windows에서 시스템 폰트로 그려져 한글이 ? 로만 보일 수 있음 — DOM 오버레이로 표시 */
-function OverlayTitleTooltip({
-  text,
+/** 종목별 합산 표 — 네이티브 title 대신 DOM 오버레이(한글·₩ 깨짐 방지), 표 형식 툴팁 */
+function HoldingsAggRichTooltip({
+  header,
+  rows,
+  pctHeader = "등락",
+  showPctColumn = true,
+  codeMono = true,
   className,
   children,
 }: {
-  text: string;
+  header: string;
+  rows: HoldingsAggTipRow[];
+  /** 보유자별 수익률 열일 때 열 제목 */
+  pctHeader?: string;
+  /** 보유자 목록 등 % 열이 의미 없을 때 숨김 */
+  showPctColumn?: boolean;
+  /** 첫 열을 티커용 고정폭(모노)으로 — 보유자 이름은 false */
+  codeMono?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState({ x: 0, y: 0 });
-  if (text.trim().length === 0) {
+  if (rows.length === 0) {
     return <span className={className}>{children}</span>;
   }
+  const hdr = header.trim();
   return (
     <>
       <span
@@ -163,10 +170,74 @@ function OverlayTitleTooltip({
         createPortal(
           <div
             role="tooltip"
-            className="pointer-events-none fixed z-[300] max-w-[min(90vw,20rem)] whitespace-pre-line rounded border bg-popover px-2 py-1.5 text-left text-xs leading-snug text-popover-foreground shadow-md"
+            className="pointer-events-none fixed z-[300] w-[min(92vw,22rem)] rounded-lg border border-slate-600/90 bg-slate-950 px-3 py-2.5 text-left shadow-xl ring-1 ring-white/5"
             style={{ left: coords.x + 12, top: coords.y + 12 }}
           >
-            {text}
+            {hdr.length > 0 ? (
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-100">
+                {hdr}
+              </p>
+            ) : null}
+            <table className="w-full border-separate border-spacing-y-1 text-[11px]">
+              <thead>
+                <tr className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                  <th className="pb-1 pr-2 text-left font-medium">
+                    {showPctColumn ? "코드" : "보유자"}
+                  </th>
+                  <th
+                    className={cn(
+                      "pb-1 text-left font-medium",
+                      showPctColumn ? "px-1" : "pl-1",
+                    )}
+                  >
+                    {showPctColumn ? "이름" : ""}
+                  </th>
+                  {showPctColumn ? (
+                    <th className="pb-1 pl-2 text-right font-medium">{pctHeader}</th>
+                  ) : null}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={`${r.code}-${i}`}>
+                    <td
+                      className={cn(
+                        "max-w-[5.5rem] truncate pr-2 align-top text-slate-200",
+                        codeMono && "font-mono",
+                        !showPctColumn && "max-w-none",
+                        !codeMono && "font-sans",
+                      )}
+                      title={!showPctColumn ? r.code : undefined}
+                    >
+                      {r.code}
+                    </td>
+                    <td
+                      className={cn(
+                        "truncate align-top text-slate-300",
+                        showPctColumn ? "max-w-[9rem] px-1" : "pl-1 text-slate-500",
+                      )}
+                      title={showPctColumn ? r.name : undefined}
+                    >
+                      {showPctColumn ? r.name || "—" : ""}
+                    </td>
+                    {showPctColumn ? (
+                      <td
+                        className={cn(
+                          "pl-2 text-right tabular-nums align-top font-medium",
+                          r.pct === null || !Number.isFinite(r.pct)
+                            ? "text-slate-500"
+                            : r.pct >= 0
+                              ? "text-rose-400"
+                              : "text-sky-400",
+                        )}
+                      >
+                        {fmtHoldingsAggTipPct(r.pct)}
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>,
           document.body,
         )}
@@ -1871,6 +1942,41 @@ export default function Home() {
             pnlKrw: v.valueKrw - v.costKrw,
           }))
           .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
+        const epForDaily = enrichedPositions.find(
+          (e) =>
+            isStockRowForSymbolAggregate(e) &&
+            aggregateSymbolKeyForHoldings(e.symbol) === r.key,
+        );
+        const dailyPct =
+          epForDaily &&
+          epForDaily.previousClose !== null &&
+          epForDaily.previousClose > 0
+            ? ((epForDaily.currentPrice - epForDaily.previousClose) /
+                epForDaily.previousClose) *
+              100
+            : null;
+        const tooltipHeader = r.displaySymbol.trim().toUpperCase();
+        const tooltipCompositionRows: HoldingsAggTipRow[] = [
+          { code: r.displaySymbol.trim(), name: r.displayName, pct: dailyPct },
+        ];
+        const tooltipOwnerValueRows: HoldingsAggTipRow[] = ownerBreakdown.map((o) => ({
+          code: o.owner,
+          name: `평가 ${fmtInt(o.valueKrw)}원`,
+          pct: o.costKrw > 0 ? ((o.valueKrw - o.costKrw) / o.costKrw) * 100 : null,
+        }));
+        const tooltipOwnerPnlRows: HoldingsAggTipRow[] = ownerBreakdown.map((o) => ({
+          code: o.owner,
+          name: `손익 ${fmtInt(o.pnlKrw)}원`,
+          pct: o.costKrw > 0 ? ((o.valueKrw - o.costKrw) / o.costKrw) * 100 : null,
+        }));
+        const tooltipOwnersListRows: HoldingsAggTipRow[] =
+          ownersSorted.length > 0
+            ? ownersSorted.map((o) => ({
+                code: o,
+                name: "",
+                pct: null,
+              }))
+            : [{ code: "보유자 정보 없음", name: "", pct: null }];
         return {
           key: r.key,
           displaySymbol: r.displaySymbol,
@@ -1882,6 +1988,11 @@ export default function Home() {
           ownerCount: r.owners.size,
           ownersLabel: ownersSorted.join(", "),
           ownerBreakdown,
+          tooltipHeader,
+          tooltipCompositionRows,
+          tooltipOwnerValueRows,
+          tooltipOwnerPnlRows,
+          tooltipOwnersListRows,
         };
       })
   }, [enrichedPositions]);
@@ -1961,6 +2072,39 @@ export default function Home() {
           pnlKrw: v.valueKrw - v.costKrw,
         }))
         .sort((a, b) => a.owner.localeCompare(b.owner, "ko"));
+      const dailyPctForSym = (symDisplay: string): number | null => {
+        const ep = enrichedPositions.find(
+          (e) => isStockRowForSymbolAggregate(e) && e.symbol.trim() === symDisplay,
+        );
+        if (!ep || ep.previousClose === null || ep.previousClose <= 0) return null;
+        return ((ep.currentPrice - ep.previousClose) / ep.previousClose) * 100;
+      };
+      const tooltipCompositionRows: HoldingsAggTipRow[] = [...r.symbolLineLabel.entries()]
+        .sort(([a], [b]) => a.localeCompare(b, "en"))
+        .map(([sym, line]) => ({
+          code: sym,
+          name: line,
+          pct: dailyPctForSym(sym),
+        }));
+      const tooltipHeader = r.displaySymbol.trim().toUpperCase();
+      const tooltipOwnerValueRows: HoldingsAggTipRow[] = ownerBreakdown.map((o) => ({
+        code: o.owner,
+        name: `평가 ${fmtInt(o.valueKrw)}원`,
+        pct: o.costKrw > 0 ? ((o.valueKrw - o.costKrw) / o.costKrw) * 100 : null,
+      }));
+      const tooltipOwnerPnlRows: HoldingsAggTipRow[] = ownerBreakdown.map((o) => ({
+        code: o.owner,
+        name: `손익 ${fmtInt(o.pnlKrw)}원`,
+        pct: o.costKrw > 0 ? ((o.valueKrw - o.costKrw) / o.costKrw) * 100 : null,
+      }));
+      const tooltipOwnersListRows: HoldingsAggTipRow[] =
+        ownersSorted.length > 0
+          ? ownersSorted.map((o) => ({
+              code: o,
+              name: "",
+              pct: null,
+            }))
+          : [{ code: "보유자 정보 없음", name: "", pct: null }];
       return {
         key: r.key,
         displaySymbol: r.displaySymbol,
@@ -1972,6 +2116,11 @@ export default function Home() {
         ownerCount: r.owners.size,
         ownersLabel: ownersSorted.join(", "),
         ownerBreakdown,
+        tooltipHeader,
+        tooltipCompositionRows,
+        tooltipOwnerValueRows,
+        tooltipOwnerPnlRows,
+        tooltipOwnersListRows,
       };
     });
   }, [enrichedPositions]);
@@ -5634,22 +5783,24 @@ export default function Home() {
                                 {row.displaySymbol}
                               </TableCell>
                               <TableCell className="max-w-[180px] px-3 py-2">
-                                <OverlayTitleTooltip
-                                  text={row.displayName}
+                                <HoldingsAggRichTooltip
+                                  header={row.tooltipHeader}
+                                  rows={row.tooltipCompositionRows}
                                   className="block max-w-full truncate"
                                 >
                                   {row.displayName}
-                                </OverlayTitleTooltip>
+                                </HoldingsAggRichTooltip>
                               </TableCell>
                               <TableCell className="cursor-help px-3 py-2 text-right tabular-nums">
-                                <OverlayTitleTooltip
-                                  text={formatHoldingsAggOwnerValueTooltip(
-                                    row.ownerBreakdown,
-                                  )}
+                                <HoldingsAggRichTooltip
+                                  header={row.tooltipHeader}
+                                  rows={row.tooltipOwnerValueRows}
+                                  pctHeader="수익률"
+                                  codeMono={false}
                                   className="block"
                                 >
                                   ₩{fmtInt(row.valueKrw)}
-                                </OverlayTitleTooltip>
+                                </HoldingsAggRichTooltip>
                               </TableCell>
                               <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                                 ₩{fmtInt(row.costKrw)}
@@ -5659,12 +5810,15 @@ export default function Home() {
                                   row.pnlKrw >= 0 ? "text-red-600" : "text-blue-600"
                                 }`}
                               >
-                                <OverlayTitleTooltip
-                                  text={formatHoldingsAggOwnerPnlTooltip(row.ownerBreakdown)}
+                                <HoldingsAggRichTooltip
+                                  header={row.tooltipHeader}
+                                  rows={row.tooltipOwnerPnlRows}
+                                  pctHeader="수익률"
+                                  codeMono={false}
                                   className="block"
                                 >
                                   {row.pnlKrw >= 0 ? "+" : ""}₩{fmtInt(row.pnlKrw)}
-                                </OverlayTitleTooltip>
+                                </HoldingsAggRichTooltip>
                               </TableCell>
                               <TableCell
                                 className={`px-3 py-2 text-right tabular-nums ${
@@ -5678,16 +5832,15 @@ export default function Home() {
                               <TableCell
                                 className="cursor-help px-3 py-2 text-center text-[11px] text-muted-foreground"
                               >
-                                <OverlayTitleTooltip
-                                  text={
-                                    row.ownersLabel.trim().length > 0
-                                      ? `보유자: ${row.ownersLabel}`
-                                      : "보유자 정보 없음"
-                                  }
+                                <HoldingsAggRichTooltip
+                                  header={row.tooltipHeader}
+                                  rows={row.tooltipOwnersListRows}
+                                  showPctColumn={false}
+                                  codeMono={false}
                                   className="inline-block"
                                 >
                                   {row.ownerCount}명
-                                </OverlayTitleTooltip>
+                                </HoldingsAggRichTooltip>
                               </TableCell>
                             </TableRow>
                           ))}
