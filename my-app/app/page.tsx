@@ -82,6 +82,23 @@ function sortPortfolioGridRows<T extends { ownerName: string }>(
   }
   return out;
 }
+
+/** 보유자 전체 합산용 티커 키 — KRX:/KQ: 생략 형태를 동일 종목으로 묶음 */
+function aggregateSymbolKeyForHoldings(symbol: string): string {
+  const u = symbol.trim().toUpperCase();
+  if (u.startsWith("KRX:")) return u.slice(4);
+  if (u.startsWith("KQ:")) return u.slice(3);
+  return u;
+}
+
+function isStockRowForSymbolAggregate(p: { symbol: string; name: string }): boolean {
+  const sym = p.symbol?.trim() ?? "";
+  if (!sym) return false;
+  const nm = p.name?.trim() ?? "";
+  if (nm === "USD 현금" || nm === "KRW 현금") return false;
+  return true;
+}
+
 type OwnerName = string;
 type Position = {
   symbol: string;
@@ -1565,7 +1582,7 @@ export default function Home() {
     );
   }, [filteredHoldingsTickers.length]);
 
-  /** 티커·통화·담당자에 맞춰 종목명·차트 그룹 자동 입력 (보유 줄 우선; 종목명만 API 폴백) */
+  /** 티커·담당자에 맞춰 종목명·차트 그룹 자동 입력 (보유 줄 우선: 우선 같은 통화 줄, 없으면 동일 티커 다른 통화 줄을 쓰고 폼 통화를 그에 맞춤) */
   useEffect(() => {
     const raw = form.symbol.trim();
     if (!raw) return;
@@ -1577,17 +1594,29 @@ export default function Home() {
         const ownersOrdered = ownerNames.filter((o) => form.selectedOwners.includes(o));
 
         for (const own of ownersOrdered) {
-          const p = positions.find(
-            (x) =>
-              x.owner === own &&
-              x.currency === form.currency &&
-              holdingSymbolsEquivalent(symU, x.symbol),
+          const sameSymbol = positions.filter(
+            (x) => x.owner === own && holdingSymbolsEquivalent(symU, x.symbol),
           );
-          if (!p) continue;
+          if (sameSymbol.length === 0) continue;
+
+          const withCur = sameSymbol.filter((x) => x.currency === form.currency);
+          const pool = withCur.length > 0 ? withCur : sameSymbol;
+          const p =
+            pool.find((x) => (x.chartGroup ?? "").trim() !== "") ??
+            pool[0];
 
           if (!ac.signal.aborted) {
             setForm((prev) => {
               const next = { ...prev };
+              const cur = p.currency;
+              if (prev.currency !== cur) {
+                addFormFxManualRef.current = false;
+                next.currency = cur;
+                next.accountType = cur === "KRW" ? "국내주식" : "해외주식";
+                next.purchaseUsdKrw = cur === "USD" ? prev.purchaseUsdKrw : "";
+                next.purchaseEurKrw = cur === "EUR" ? prev.purchaseEurKrw : "";
+                next.purchaseDateForFx = cur === "USD" ? prev.purchaseDateForFx : "";
+              }
               if (!skipAddFormAutoNameRef.current && p.name?.trim()) {
                 next.name = p.name.trim();
               }
@@ -1692,6 +1721,66 @@ export default function Home() {
       };
     });
   }, [positions, marketQuery.data, usdKrw, eurKrw]);
+
+  /** 보유자·계좌 무관 동일 티커 합산 — 평가·원가·손익·원화 기준 수익률 */
+  const holdingsAggregatedBySymbol = useMemo(() => {
+    type Acc = {
+      key: string;
+      displaySymbol: string;
+      displayName: string;
+      valueKrw: number;
+      costKrw: number;
+      owners: Set<string>;
+    };
+    const map = new Map<string, Acc>();
+    for (const p of enrichedPositions) {
+      if (!isStockRowForSymbolAggregate(p)) continue;
+      const key = aggregateSymbolKeyForHoldings(p.symbol);
+      const cur = map.get(key);
+      if (!cur) {
+        map.set(key, {
+          key,
+          displaySymbol: p.symbol.trim(),
+          displayName: (p.name ?? "").trim() || p.symbol.trim(),
+          valueKrw: p.valueKrw,
+          costKrw: p.costKrw,
+          owners: new Set([p.owner]),
+        });
+      } else {
+        cur.valueKrw += p.valueKrw;
+        cur.costKrw += p.costKrw;
+        cur.owners.add(p.owner);
+        const nm = (p.name ?? "").trim();
+        if (nm.length > cur.displayName.length) cur.displayName = nm || cur.displayName;
+      }
+    }
+    return [...map.values()]
+      .map((r) => {
+        const pnlKrw = r.valueKrw - r.costKrw;
+        const pnlPct = r.costKrw > 0 ? (pnlKrw / r.costKrw) * 100 : null;
+        const ownersSorted = [...r.owners].sort((a, b) => a.localeCompare(b, "ko"));
+        return {
+          key: r.key,
+          displaySymbol: r.displaySymbol,
+          displayName: r.displayName,
+          valueKrw: r.valueKrw,
+          costKrw: r.costKrw,
+          pnlKrw,
+          pnlPct,
+          ownerCount: r.owners.size,
+          ownersLabel: ownersSorted.join(", "),
+        };
+      })
+      .sort((a, b) => b.valueKrw - a.valueKrw);
+  }, [enrichedPositions]);
+
+  const holdingsSymbolGrandTotals = useMemo(() => {
+    const v = holdingsAggregatedBySymbol.reduce((s, r) => s + r.valueKrw, 0);
+    const c = holdingsAggregatedBySymbol.reduce((s, r) => s + r.costKrw, 0);
+    const pnl = v - c;
+    const pct = c > 0 ? (pnl / c) * 100 : null;
+    return { valueKrw: v, costKrw: c, pnlKrw: pnl, pnlPct: pct };
+  }, [holdingsAggregatedBySymbol]);
 
   const summaryCards = useMemo(() => {
     const stockValue = enrichedPositions.reduce((sum, position) => sum + position.valueKrw, 0);
@@ -3567,7 +3656,9 @@ export default function Home() {
                   onClick={() => setHoldingsNavOpen((o) => !o)}
                   className={cn(
                     "relative flex w-full min-w-0 items-center gap-0.5 rounded-t-md px-2.5 py-1.5 text-left text-xs font-medium transition-colors sm:px-3 sm:text-sm",
-                    activeTopNav === "section-holdings" || activeTopNav.startsWith("owner-")
+                    activeTopNav === "section-holdings" ||
+                    activeTopNav === "section-holdings-by-symbol" ||
+                    activeTopNav.startsWith("owner-")
                       ? "text-white after:absolute after:bottom-0 after:left-1.5 after:right-1.5 after:h-[3px] after:rounded-sm after:bg-sky-500"
                       : "text-slate-400 hover:text-slate-200",
                   )}
@@ -3597,6 +3688,14 @@ export default function Home() {
                           onClick={() => goDashboardSection("section-holdings")}
                         >
                           보유·전체
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="w-full px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-800/80"
+                          onClick={() => goDashboardSection("section-holdings-by-symbol")}
+                        >
+                          종목별 합산
                         </button>
                         {ownerNames.map((name) => (
                           <button
@@ -3901,15 +4000,22 @@ export default function Home() {
 
           <div
             className={cn(
-              activeTopNav === "section-holdings" || activeTopNav.startsWith("owner-")
+              activeTopNav === "section-holdings" ||
+                activeTopNav === "section-holdings-by-symbol" ||
+                activeTopNav.startsWith("owner-")
                 ? "block"
                 : "hidden",
               "space-y-4 sm:space-y-6",
             )}
             aria-hidden={
-              !(activeTopNav === "section-holdings" || activeTopNav.startsWith("owner-"))
+              !(
+                activeTopNav === "section-holdings" ||
+                activeTopNav === "section-holdings-by-symbol" ||
+                activeTopNav.startsWith("owner-")
+              )
             }
           >
+          {(activeTopNav === "section-holdings" || activeTopNav.startsWith("owner-")) ? (
           <div id="section-holdings" className="flex flex-col gap-4">
           <section className="min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-sm">
             <div className="border-b border-slate-700/60 px-4 py-3">
@@ -5126,7 +5232,114 @@ export default function Home() {
             </div>
           </section>
 
-          </div>{/* section-holdings */}
+          </div>
+          ) : null}
+
+          {activeTopNav === "section-holdings-by-symbol" ? (
+            <div id="section-holdings-by-symbol" className="flex flex-col gap-4">
+              <section className="min-w-0 overflow-hidden rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-sm">
+                <div className="border-b border-slate-700/60 px-4 py-3">
+                  <h2 className="font-semibold text-slate-100">종목별 합산</h2>
+                  <p className="mt-1 text-xs text-slate-400">
+                    모든 보유자·계좌의 같은 종목을 합산한 평가액, 매입원가, 평가손익, 수익률(원화 기준)입니다.
+                  </p>
+                </div>
+                <div className="overflow-x-auto p-4">
+                  <Table className="min-w-[640px] text-xs">
+                    <TableHeader className="bg-muted/40">
+                      <TableRow>
+                        <TableHead className="px-3 py-2">티커</TableHead>
+                        <TableHead className="px-3 py-2">종목명</TableHead>
+                        <TableHead className="px-3 py-2 text-right tabular-nums">평가액</TableHead>
+                        <TableHead className="px-3 py-2 text-right tabular-nums">매입원가</TableHead>
+                        <TableHead className="px-3 py-2 text-right tabular-nums">평가손익</TableHead>
+                        <TableHead className="px-3 py-2 text-right tabular-nums">수익률</TableHead>
+                        <TableHead className="px-3 py-2 text-center">보유자</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {holdingsAggregatedBySymbol.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                            합산할 주식 보유가 없습니다.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        <>
+                          {holdingsAggregatedBySymbol.map((row) => (
+                            <TableRow key={row.key}>
+                              <TableCell className="px-3 py-2 font-mono text-[11px]">
+                                {row.displaySymbol}
+                              </TableCell>
+                              <TableCell className="max-w-[180px] truncate px-3 py-2" title={row.displayName}>
+                                {row.displayName}
+                              </TableCell>
+                              <TableCell className="px-3 py-2 text-right tabular-nums">
+                                ₩{fmtInt(row.valueKrw)}
+                              </TableCell>
+                              <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                                ₩{fmtInt(row.costKrw)}
+                              </TableCell>
+                              <TableCell
+                                className={`px-3 py-2 text-right tabular-nums font-semibold ${
+                                  row.pnlKrw >= 0 ? "text-red-600" : "text-blue-600"
+                                }`}
+                              >
+                                {row.pnlKrw >= 0 ? "+" : ""}₩{fmtInt(row.pnlKrw)}
+                              </TableCell>
+                              <TableCell
+                                className={`px-3 py-2 text-right tabular-nums ${
+                                  row.pnlPct !== null && row.pnlPct >= 0 ? "text-red-600" : "text-blue-600"
+                                }`}
+                              >
+                                {row.pnlPct === null
+                                  ? "—"
+                                  : `${row.pnlPct >= 0 ? "+" : ""}${row.pnlPct.toFixed(2)}%`}
+                              </TableCell>
+                              <TableCell className="px-3 py-2 text-center text-[11px] text-muted-foreground" title={row.ownersLabel}>
+                                {row.ownerCount}명
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          <TableRow className="border-t-2 border-border bg-muted/30 font-semibold">
+                            <TableCell colSpan={2} className="px-3 py-2.5">
+                              합계 (주식만)
+                            </TableCell>
+                            <TableCell className="px-3 py-2.5 text-right tabular-nums">
+                              ₩{fmtInt(holdingsSymbolGrandTotals.valueKrw)}
+                            </TableCell>
+                            <TableCell className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+                              ₩{fmtInt(holdingsSymbolGrandTotals.costKrw)}
+                            </TableCell>
+                            <TableCell
+                              className={`px-3 py-2.5 text-right tabular-nums ${
+                                holdingsSymbolGrandTotals.pnlKrw >= 0 ? "text-red-600" : "text-blue-600"
+                              }`}
+                            >
+                              {holdingsSymbolGrandTotals.pnlKrw >= 0 ? "+" : ""}₩
+                              {fmtInt(holdingsSymbolGrandTotals.pnlKrw)}
+                            </TableCell>
+                            <TableCell
+                              className={`px-3 py-2.5 text-right tabular-nums ${
+                                holdingsSymbolGrandTotals.pnlPct !== null && holdingsSymbolGrandTotals.pnlPct >= 0
+                                  ? "text-red-600"
+                                  : "text-blue-600"
+                              }`}
+                            >
+                              {holdingsSymbolGrandTotals.pnlPct === null
+                                ? "—"
+                                : `${holdingsSymbolGrandTotals.pnlPct >= 0 ? "+" : ""}${holdingsSymbolGrandTotals.pnlPct.toFixed(2)}%`}
+                            </TableCell>
+                            <TableCell className="px-3 py-2.5 text-center text-muted-foreground">—</TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </section>
+            </div>
+          ) : null}
 
           </div>
 
@@ -5200,6 +5413,38 @@ export default function Home() {
                   <option key={g} value={g} />
                 ))}
               </datalist>
+              <div className="col-span-2 flex flex-col gap-2 sm:col-span-3 md:col-span-6">
+                <span className="text-[11px] font-medium text-muted-foreground">담당자 (복수 선택)</span>
+                <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+                  {ownerNames.map((name) => (
+                    <label
+                      key={name}
+                      className="flex cursor-pointer items-center gap-1.5 text-sm select-none"
+                    >
+                      <input
+                        type="checkbox"
+                        className="cursor-pointer accent-primary"
+                        checked={form.selectedOwners.includes(name)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          skipAddFormAutoNameRef.current = false;
+                          skipAddFormAutoChartGroupRef.current = false;
+                          setForm((prev) => {
+                            const next = checked
+                              ? ownerNames.filter(
+                                  (o) => prev.selectedOwners.includes(o) || o === name,
+                                )
+                              : prev.selectedOwners.filter((o) => o !== name);
+                            if (next.length === 0) return prev;
+                            return { ...prev, selectedOwners: next };
+                          });
+                        }}
+                      />
+                      {name}
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div className="relative min-w-0">
                 <input
                   className="w-full rounded-md border bg-background px-2 py-1 text-sm leading-tight"
@@ -5390,38 +5635,6 @@ export default function Home() {
                 list="holdings-chart-group-presets"
                 autoComplete="off"
               />
-              <div className="col-span-2 flex flex-col gap-2 sm:col-span-3 md:col-span-6">
-                <span className="text-[11px] font-medium text-muted-foreground">담당자 (복수 선택)</span>
-                <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-                  {ownerNames.map((name) => (
-                    <label
-                      key={name}
-                      className="flex cursor-pointer items-center gap-1.5 text-sm select-none"
-                    >
-                      <input
-                        type="checkbox"
-                        className="cursor-pointer accent-primary"
-                        checked={form.selectedOwners.includes(name)}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          skipAddFormAutoNameRef.current = false;
-                          skipAddFormAutoChartGroupRef.current = false;
-                          setForm((prev) => {
-                            const next = checked
-                              ? ownerNames.filter(
-                                  (o) => prev.selectedOwners.includes(o) || o === name,
-                                )
-                              : prev.selectedOwners.filter((o) => o !== name);
-                            if (next.length === 0) return prev;
-                            return { ...prev, selectedOwners: next };
-                          });
-                        }}
-                      />
-                      {name}
-                    </label>
-                  ))}
-                </div>
-              </div>
               {addPositionError ? (
                 <p
                   role="alert"
