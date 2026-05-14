@@ -141,6 +141,11 @@ function fmtKrw(n: number) {
   return `₩${fmtInt(Math.abs(n))}`;
 }
 
+/** 전체 평가금 대비 해당 종목(슬라이스) 현재 비중 % */
+function currentPortfolioPctOfMember(memberValueKrw: number, portfolioTotalKrw: number): number {
+  return portfolioTotalKrw > 0 ? (memberValueKrw / portfolioTotalKrw) * 100 : 0;
+}
+
 function normalizeTickerKey(symbol: string): string {
   return symbol.trim().toUpperCase();
 }
@@ -662,7 +667,7 @@ function RebalancingBarSortableRow({
               </div>
               <div className="divide-y divide-slate-700/55 rounded-md border border-slate-700/35 bg-slate-900/20 px-2 sm:px-2.5">
               {row.members.map((m) => {
-                const portPct = totalKrw > 0 ? (m.valueKrw / totalKrw) * 100 : 0;
+                const portPct = currentPortfolioPctOfMember(m.valueKrw, totalKrw);
                 return (
                   <div
                     key={`${row.groupKey}:${m.symbol}`}
@@ -1627,12 +1632,34 @@ function RebalancingOwner({
                       {isCash ? (
                         <span className="text-muted-foreground">현금</span>
                       ) : !significant ? (
-                        <span className="text-muted-foreground">—</span>
+                        (() => {
+                          const holdings = r.members.filter(
+                            (m) => !isUndecidedSlotMemberSymbol(m.symbol),
+                          );
+                          if (!holdings.length) {
+                            return <span className="text-muted-foreground">—</span>;
+                          }
+                          return (
+                            <div className="space-y-0.5">
+                              {holdings.map((m) => (
+                                <p key={m.symbol} className="tabular-nums">
+                                  <span className="text-muted-foreground">
+                                    {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}{" "}
+                                    <span className="tabular-nums">{`현재 ${currentPortfolioPctOfMember(m.valueKrw, totalKrw).toFixed(2)}%`}</span>
+                                  </span>
+                                </p>
+                              ))}
+                            </div>
+                          );
+                        })()
                       ) : r.members.length <= 1 && r.repPrice > 0 ? (
                         <span
                           className={r.diffKrw > 0 ? "tabular-nums text-rose-400" : "tabular-nums text-blue-400"}
                         >
-                          {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
+                          <span className="text-muted-foreground">
+                            {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
+                            <span className="tabular-nums">{`현재 ${currentPortfolioPctOfMember(r.valueKrw, totalKrw).toFixed(2)}%`}</span>
+                          </span>{" "}
                           {formatMemberSharesOrAmount(r.diffKrw, r.repPrice)}
                         </span>
                       ) : (
@@ -1641,7 +1668,10 @@ function RebalancingOwner({
                             .filter((m) => Math.abs(m.diffKrw) >= 10000)
                             .map((m) => (
                               <p key={m.symbol} className="tabular-nums">
-                                <span className="text-muted-foreground">{allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}</span>{" "}
+                                <span className="text-muted-foreground">
+                                  {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}{" "}
+                                  <span className="tabular-nums">{`현재 ${currentPortfolioPctOfMember(m.valueKrw, totalKrw).toFixed(2)}%`}</span>
+                                </span>{" "}
                                 <span
                                   title={m.priceKrw <= 0 ? "종목 시세 없음 · 매매 차액만 표시" : undefined}
                                   className={
@@ -1662,7 +1692,10 @@ function RebalancingOwner({
                         <span
                           className={r.diffKrw > 0 ? "tabular-nums text-rose-400" : "tabular-nums text-blue-400"}
                         >
-                          {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
+                          <span className="text-muted-foreground">
+                            {formatTickerLabel(r.repSymbol, r.repName, resolvedNameBySymbol)}{" "}
+                            <span className="tabular-nums">{`현재 ${currentPortfolioPctOfMember(r.valueKrw, totalKrw).toFixed(2)}%`}</span>
+                          </span>{" "}
                           {formatMemberSharesOrAmount(perSplitRowKrw, r.repPrice)}
                           {rowPctAfterSplit != null ?
                             <span className="text-muted-foreground">{` (→ ${rowPctAfterSplit.toFixed(2)}%)`}</span>
@@ -1679,7 +1712,8 @@ function RebalancingOwner({
                               return (
                                 <p key={`${m.symbol}-per-split`} className="tabular-nums">
                                   <span className="text-muted-foreground">
-                                    {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
+                                    {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}{" "}
+                                    <span className="tabular-nums">{`현재 ${currentPortfolioPctOfMember(m.valueKrw, totalKrw).toFixed(2)}%`}</span>
                                   </span>{" "}
                                   <span
                                     title={
