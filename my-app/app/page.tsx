@@ -44,6 +44,7 @@ import {
   getAlertThresholdsForSync,
   loadAlertThresholdsFromStorage,
   mergeAlertThresholdsFromServer,
+  mergeAlertThresholdsOnPull,
   positionAlertKey,
   positionReturnPctForAlert,
   type AlertRule,
@@ -1420,6 +1421,59 @@ export default function Home() {
       return next;
     });
   }, []);
+
+  /**
+   * 기준선 행 저장 버튼: localStorage 즉시 저장 + 서버 push.
+   * autoSync/debounce 와 별개로 버튼 클릭 시 즉시 push.
+   */
+  const [savingAlertKey, setSavingAlertKey] = useState<string | null>(null);
+  const saveAlertThresholdRow = useCallback(
+    async (positionKey: string) => {
+      const key = cloudSyncKey.trim();
+      if (key.length < 8) {
+        setSyncMessage("동기화 키를 먼저 설정해야 서버에 저장할 수 있습니다.");
+        return;
+      }
+      setSavingAlertKey(positionKey);
+      try {
+        const thresholds = (() => {
+          const raw = window.localStorage.getItem(ALERT_THRESHOLDS_STORAGE_KEY);
+          try { return raw ? (JSON.parse(raw) as AlertThresholdsByKey) : {}; } catch { return {}; }
+        })();
+        const r = await fetch("/api/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "push",
+            key,
+            positions,
+            cashByOwner,
+            holdingsSortByOwner,
+            sellLogByOwner: sellLog,
+            ownerNames,
+            targetStockWeightByOwner: loadAllTargetStockWeights(),
+            ownerScratchpadByOwner: loadAllOwnerScratchpads(),
+            rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+            alertThresholdsByPosition: thresholds,
+          }),
+        });
+        if (r.ok) {
+          const j = (await r.json().catch(() => ({}))) as { updated_at?: string };
+          const ts = j.updated_at ?? new Date().toISOString();
+          safeSetItem(LAST_SYNC_TS_KEY, ts);
+          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+          setLastSyncedAt(ts);
+          setSyncMessage("기준선을 서버에 저장했습니다.");
+        } else {
+          const j = (await r.json().catch(() => ({}))) as { error?: string };
+          setSyncMessage(j.error ?? "서버 저장 실패");
+        }
+      } finally {
+        setSavingAlertKey(null);
+      }
+    },
+    [cloudSyncKey, positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames],
+  );
 
   const [form, setForm] = useState({
     symbol: "",
@@ -2845,10 +2899,25 @@ export default function Home() {
           mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
           mergeAndPersistOwnerScratchpadsFromServer(j.owner_scratchpad_by_owner);
           mergeAndPersistRebalanceCalculatorFromServer(j.rebalance_calculator_by_owner);
-          const mergedAlerts = mergeAlertThresholdsFromServer(j.alert_thresholds_by_position, pulledOwners);
+          const localAlerts = loadAlertThresholdsFromStorage();
+          const fromServerAlerts = mergeAlertThresholdsFromServer(
+            j.alert_thresholds_by_position,
+            pulledOwners,
+          );
+          const mergedAlerts = mergeAlertThresholdsOnPull(
+            localAlerts,
+            j.alert_thresholds_by_position,
+            pulledOwners,
+          );
           setAlertThresholdsByKey(mergedAlerts);
           safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(mergedAlerts));
           skipAlertThresholdsHydrateRef.current = 1;
+          if (
+            Object.keys(fromServerAlerts).length === 0 &&
+            Object.keys(mergedAlerts).length > 0
+          ) {
+            safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+          }
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
           // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
@@ -3270,10 +3339,25 @@ export default function Home() {
         mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
         mergeAndPersistOwnerScratchpadsFromServer(j.owner_scratchpad_by_owner);
         mergeAndPersistRebalanceCalculatorFromServer(j.rebalance_calculator_by_owner);
-        const mergedPullAlerts = mergeAlertThresholdsFromServer(j.alert_thresholds_by_position, pulledOwners);
+        const localAlertsPull = loadAlertThresholdsFromStorage();
+        const fromServerPull = mergeAlertThresholdsFromServer(
+          j.alert_thresholds_by_position,
+          pulledOwners,
+        );
+        const mergedPullAlerts = mergeAlertThresholdsOnPull(
+          localAlertsPull,
+          j.alert_thresholds_by_position,
+          pulledOwners,
+        );
         setAlertThresholdsByKey(mergedPullAlerts);
         safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(mergedPullAlerts));
         skipAlertThresholdsHydrateRef.current = 1;
+        if (
+          Object.keys(fromServerPull).length === 0 &&
+          Object.keys(mergedPullAlerts).length > 0
+        ) {
+          safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+        }
       } else {
         setSyncMessage("서버에 아직 데이터가 없습니다. 먼저 이 기기에서 올리기를 해 보세요.");
       }
@@ -5190,6 +5274,15 @@ export default function Home() {
                                       patchAlertThreshold(alertPk, "stopLossReturnPct", parseNum(e.target.value))
                                     }
                                   />
+                                  <span />
+                                  <button
+                                    type="button"
+                                    disabled={savingAlertKey === alertPk}
+                                    onClick={() => void saveAlertThresholdRow(alertPk)}
+                                    className="mt-0.5 w-full rounded border border-primary bg-primary/10 px-1 py-0.5 text-[9px] font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+                                  >
+                                    {savingAlertKey === alertPk ? "저장 중…" : "저장"}
+                                  </button>
                                 </div>
                               );
                             })()}

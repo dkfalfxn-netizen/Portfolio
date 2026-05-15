@@ -75,6 +75,30 @@ export function mergeAlertThresholdsFromServer(
   return filterAlertThresholdsForOwners(parsed, new Set(ownerNames));
 }
 
+/**
+ * pull 시: 서버에 기준선이 비어 있으면 로컬(브라우저) 값을 유지.
+ * 서버·로컬 둘 다 있으면 같은 키는 로컬(최근 입력) 우선, 서버에만 있는 키는 서버 값 유지.
+ */
+export function mergeAlertThresholdsOnPull(
+  localRaw: AlertThresholdsByKey,
+  serverRaw: unknown,
+  ownerNames: string[],
+): AlertThresholdsByKey {
+  const allowed = new Set(ownerNames);
+  const local = filterAlertThresholdsForOwners(localRaw, allowed);
+  const fromServer = mergeAlertThresholdsFromServer(serverRaw, ownerNames);
+  if (Object.keys(fromServer).length === 0) {
+    return local;
+  }
+  const out: AlertThresholdsByKey = { ...fromServer };
+  for (const [k, rule] of Object.entries(local)) {
+    if (rule && Object.keys(rule).length > 0) {
+      out[k] = rule;
+    }
+  }
+  return out;
+}
+
 export function loadAlertThresholdsFromStorage(): AlertThresholdsByKey {
   if (typeof window === "undefined") return {};
   try {
