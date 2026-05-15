@@ -4,6 +4,11 @@ import {
   sanitizeRebalanceCalculatorForOwners,
   type RebalanceCalculatorByOwnerWire,
 } from "@/lib/portfolio-target-weights";
+import {
+  filterAlertThresholdsForOwners,
+  sanitizeAlertThresholdsMap,
+  type AlertThresholdsByKey,
+} from "@/lib/alert-thresholds";
 
 const MIN_KEY_LEN = 8;
 
@@ -19,6 +24,15 @@ function friendlyDbError(message: string): string {
 function isNetworkLayerError(message: string): boolean {
   const m = message.toLowerCase();
   return m.includes("fetch failed") || m.includes("econnrefused") || m.includes("enotfound") || m.includes("getaddrinfo");
+}
+
+/** Supabase가 알 수 없는 컬럼(마이그레이션 전) 오류인지 대략 판별 */
+function isLikelyMissingColumnError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    (m.includes("column") && (m.includes("does not exist") || m.includes("unknown"))) ||
+    m.includes("alert_thresholds")
+  );
 }
 
 /** 배포 후 브라우저에서 GET /api/sync 로 Supabase·테이블 연결 여부 확인 */
@@ -81,6 +95,8 @@ type PushBody = {
   targetStockWeightByOwner?: unknown;
   ownerScratchpadByOwner?: unknown;
   rebalanceCalculatorByOwner?: unknown;
+  /** 키: `보유자::티커`(대문자) */
+  alertThresholdsByPosition?: unknown;
 };
 
 type SellLogCurrency = "USD" | "EUR" | "KRW";
@@ -317,13 +333,29 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "pull") {
-    const withSellLog = await admin
+    let withSellLog = await admin
       .from("portfolio_snapshots")
       .select(
-        "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, rebalance_calculator_by_owner, updated_at",
+        "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, rebalance_calculator_by_owner, alert_thresholds_by_position, updated_at",
       )
       .eq("sync_key", key)
       .maybeSingle();
+
+    if (withSellLog.error) {
+      const msg = (withSellLog.error.message ?? "").toLowerCase();
+      const maybeMissingAlertCol =
+        msg.includes("alert_thresholds") || (msg.includes("column") && msg.includes("does not exist"));
+      if (maybeMissingAlertCol) {
+        withSellLog = await admin
+          .from("portfolio_snapshots")
+          .select(
+            "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, rebalance_calculator_by_owner, updated_at",
+          )
+          .eq("sync_key", key)
+          .maybeSingle();
+      }
+    }
+
     // 1차 fallback: target_stock_weight_by_owner·owner_scratchpad_by_owner 컬럼 마이그레이션 미적용 시
     const withoutWeightCols = withSellLog.error
       ? await admin
@@ -354,6 +386,7 @@ export async function POST(req: NextRequest) {
           target_stock_weight_by_owner?: unknown;
           owner_scratchpad_by_owner?: unknown;
           rebalance_calculator_by_owner?: unknown;
+          alert_thresholds_by_position?: unknown;
           updated_at?: string | null;
         }
       | null;
@@ -373,6 +406,7 @@ export async function POST(req: NextRequest) {
         target_stock_weight_by_owner: {},
         owner_scratchpad_by_owner: {},
         rebalance_calculator_by_owner: {},
+        alert_thresholds_by_position: {},
         updated_at: null,
       });
     }
@@ -399,6 +433,11 @@ export async function POST(req: NextRequest) {
         memberSplitModes: {},
       };
     }
+    const alertThresholdsRaw = (data as { alert_thresholds_by_position?: unknown }).alert_thresholds_by_position;
+    const alert_thresholds_by_position = filterAlertThresholdsForOwners(
+      sanitizeAlertThresholdsMap(alertThresholdsRaw),
+      allowed,
+    );
     return NextResponse.json({
       found: true,
       positions: sanitizePositionsForOwners(data.positions, allowed),
@@ -412,6 +451,7 @@ export async function POST(req: NextRequest) {
         allowed,
       ),
       rebalance_calculator_by_owner,
+      alert_thresholds_by_position,
       updated_at: data.updated_at,
     });
   }
@@ -559,6 +599,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let alertThresholdsOut: AlertThresholdsByKey;
+    if (Object.prototype.hasOwnProperty.call(b, "alertThresholdsByPosition")) {
+      const raw = (b as PushBody).alertThresholdsByPosition;
+      alertThresholdsOut =
+        raw == null ? {} : filterAlertThresholdsForOwners(sanitizeAlertThresholdsMap(raw), allowed);
+    } else {
+      const res = await admin
+        .from("portfolio_snapshots")
+        .select("alert_thresholds_by_position")
+        .eq("sync_key", key)
+        .maybeSingle();
+      alertThresholdsOut = res.error
+        ? {}
+        : filterAlertThresholdsForOwners(
+            sanitizeAlertThresholdsMap(
+              (res.data as { alert_thresholds_by_position?: unknown } | null)?.alert_thresholds_by_position,
+            ),
+            allowed,
+          );
+    }
+
     const updatedAt = new Date().toISOString();
     const payload = {
       sync_key: key,
@@ -570,11 +631,18 @@ export async function POST(req: NextRequest) {
       target_stock_weight_by_owner: targetWeightsOut,
       owner_scratchpad_by_owner: scratchPadsOut,
       rebalance_calculator_by_owner: rebalanceCalculatorOut,
+      alert_thresholds_by_position: alertThresholdsOut,
       updated_at: updatedAt,
     };
-    const withOwnerNames = await admin
+    let withOwnerNames = await admin
       .from("portfolio_snapshots")
       .upsert(payload, { onConflict: "sync_key" });
+    if (withOwnerNames.error && isLikelyMissingColumnError(withOwnerNames.error.message)) {
+      const { alert_thresholds_by_position: _drop, ...rest } = payload;
+      withOwnerNames = await admin
+        .from("portfolio_snapshots")
+        .upsert(rest, { onConflict: "sync_key" });
+    }
     const error = withOwnerNames.error
       ? (
           await admin
@@ -588,6 +656,7 @@ export async function POST(req: NextRequest) {
                 target_stock_weight_by_owner: targetWeightsOut,
                 owner_scratchpad_by_owner: scratchPadsOut,
                 rebalance_calculator_by_owner: rebalanceCalculatorOut,
+                alert_thresholds_by_position: alertThresholdsOut,
                 updated_at: updatedAt,
               },
               { onConflict: "sync_key" },
@@ -595,8 +664,29 @@ export async function POST(req: NextRequest) {
         ).error
       : null;
 
-    if (error) {
-      return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });
+    let resolvedError = error;
+    if (resolvedError && isLikelyMissingColumnError(resolvedError.message)) {
+      resolvedError = (
+        await admin
+          .from("portfolio_snapshots")
+          .upsert(
+            {
+              sync_key: key,
+              positions: positionsOut,
+              cash_by_owner: cashOut,
+              holdings_sort_by_owner: holdingsSortOut,
+              target_stock_weight_by_owner: targetWeightsOut,
+              owner_scratchpad_by_owner: scratchPadsOut,
+              rebalance_calculator_by_owner: rebalanceCalculatorOut,
+              updated_at: updatedAt,
+            },
+            { onConflict: "sync_key" },
+          )
+      ).error;
+    }
+
+    if (resolvedError) {
+      return NextResponse.json({ error: friendlyDbError(resolvedError.message) }, { status: 500 });
     }
     return NextResponse.json({ ok: true, updated_at: updatedAt });
   }

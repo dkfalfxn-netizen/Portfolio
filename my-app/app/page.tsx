@@ -32,6 +32,17 @@ import {
   mergeAndPersistTargetStockWeightsFromServer,
 } from "@/lib/portfolio-target-weights";
 import { mergeAndPersistOwnerScratchpadsFromServer, loadAllOwnerScratchpads } from "@/lib/portfolio-owner-scratchpad";
+import {
+  ALERT_THRESHOLDS_STORAGE_KEY,
+  evaluateAlertRule,
+  getAlertThresholdsForSync,
+  loadAlertThresholdsFromStorage,
+  mergeAlertThresholdsFromServer,
+  positionAlertKey,
+  positionReturnPctForAlert,
+  type AlertRule,
+  type AlertThresholdsByKey,
+} from "@/lib/alert-thresholds";
 import { todayKST, yesterdayKST } from "@/lib/date-utils";
 import {
   calculateBollingerSignal,
@@ -1345,6 +1356,7 @@ export default function Home() {
    * - setPositions + setCashByOwner를 한 번 호출할 때마다 2를 설정.
    */
   const skipMarkLocalChangedRef = useRef(0);
+  const skipAlertThresholdsHydrateRef = useRef(0);
   const skipOwnerLocalChangedRef = useRef(0);
   const skipSellLogLocalChangedRef = useRef(0);
   const [holdingsSortByOwner, setHoldingsSortByOwner] =
@@ -1372,6 +1384,32 @@ export default function Home() {
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [watchlistMessage, setWatchlistMessage] = useState("");
+
+  /** 보유자::티커 → 익절·손절 가격 및 수익률 % 기준 */
+  const [alertThresholdsByKey, setAlertThresholdsByKey] = useState<AlertThresholdsByKey>({});
+
+  const patchAlertThreshold = useCallback((positionKey: string, field: keyof AlertRule, value: number | undefined) => {
+    setAlertThresholdsByKey((prev) => {
+      const next = { ...prev };
+      const cur: AlertRule = { ...(next[positionKey] ?? {}) };
+      if (value === undefined || !Number.isFinite(value)) {
+        delete (cur as Record<string, unknown>)[field];
+      } else {
+        (cur as Record<string, number>)[field] = value;
+      }
+      const empty =
+        cur.takeProfitPrice === undefined &&
+        cur.stopLossPrice === undefined &&
+        cur.takeProfitReturnPct === undefined &&
+        cur.stopLossReturnPct === undefined;
+      if (empty) {
+        delete next[positionKey];
+      } else {
+        next[positionKey] = cur;
+      }
+      return next;
+    });
+  }, []);
 
   const [form, setForm] = useState({
     symbol: "",
@@ -2213,6 +2251,40 @@ export default function Home() {
     return { valueKrw: v, costKrw: c, pnlKrw: pnl, pnlPct: pct };
   }, [holdingsAggregatedBySymbol]);
 
+  const alertLineHits = useMemo(() => {
+    const out: Array<{
+      key: string;
+      owner: string;
+      symbol: string;
+      name: string;
+      reasons: string[];
+      currentPrice: number;
+      returnPct: number | null;
+    }> = [];
+    for (const p of enrichedPositions) {
+      const alertKey = positionAlertKey(p.owner, p.symbol);
+      const rule = alertThresholdsByKey[alertKey];
+      if (!rule) continue;
+      const returnPct = positionReturnPctForAlert(p);
+      const { hit, reasons } = evaluateAlertRule(rule, {
+        price: typeof p.currentPrice === "number" && Number.isFinite(p.currentPrice) ? p.currentPrice : null,
+        returnPct,
+      });
+      if (hit) {
+        out.push({
+          key: alertKey,
+          owner: p.owner,
+          symbol: p.symbol,
+          name: p.name,
+          reasons,
+          currentPrice: p.currentPrice,
+          returnPct,
+        });
+      }
+    }
+    return out;
+  }, [enrichedPositions, alertThresholdsByKey]);
+
   const summaryCards = useMemo(() => {
     const stockValue = enrichedPositions.reduce((sum, position) => sum + position.valueKrw, 0);
     const stockCost = enrichedPositions.reduce((sum, position) => sum + position.costKrw, 0);
@@ -2716,6 +2788,7 @@ export default function Home() {
         target_stock_weight_by_owner?: unknown;
         owner_scratchpad_by_owner?: unknown;
         rebalance_calculator_by_owner?: unknown;
+        alert_thresholds_by_position?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -2762,6 +2835,10 @@ export default function Home() {
           mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
           mergeAndPersistOwnerScratchpadsFromServer(j.owner_scratchpad_by_owner);
           mergeAndPersistRebalanceCalculatorFromServer(j.rebalance_calculator_by_owner);
+          const mergedAlerts = mergeAlertThresholdsFromServer(j.alert_thresholds_by_position, pulledOwners);
+          setAlertThresholdsByKey(mergedAlerts);
+          safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(mergedAlerts));
+          skipAlertThresholdsHydrateRef.current = 1;
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
           // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
@@ -2779,6 +2856,7 @@ export default function Home() {
               targetStockWeightByOwner: loadAllTargetStockWeights(),
               ownerScratchpadByOwner: loadAllOwnerScratchpads(),
               rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+              alertThresholdsByPosition: getAlertThresholdsForSync(),
             }),
           });
           const jPush = (await rPush.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -2825,6 +2903,7 @@ export default function Home() {
             targetStockWeightByOwner: loadAllTargetStockWeights(),
             ownerScratchpadByOwner: loadAllOwnerScratchpads(),
             rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+            alertThresholdsByPosition: getAlertThresholdsForSync(),
           }),
         });
         const j2 = (await r2.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -2872,6 +2951,9 @@ export default function Home() {
     setCashByOwner(cash);
     setBuyJournal(buyJ);
     setSellLog(log);
+    const loadedAlerts = loadAlertThresholdsFromStorage();
+    skipAlertThresholdsHydrateRef.current = 1;
+    setAlertThresholdsByKey(loadedAlerts);
     // URL ?key=... 파라미터가 있으면 localStorage보다 우선 적용 (북마크 복원용)
     const urlKey = (() => {
       try {
@@ -2940,6 +3022,16 @@ export default function Home() {
       safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
     }
   }, [cashByOwner, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(alertThresholdsByKey));
+    if (skipAlertThresholdsHydrateRef.current > 0) {
+      skipAlertThresholdsHydrateRef.current -= 1;
+    } else {
+      safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+    }
+  }, [alertThresholdsByKey, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -3072,6 +3164,7 @@ export default function Home() {
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
           rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+          alertThresholdsByPosition: getAlertThresholdsForSync(),
         }),
       }).then(async (r) => {
         if (r.ok) {
@@ -3094,7 +3187,7 @@ export default function Home() {
     return () => {
       if (pushDebounceRef.current) clearTimeout(pushDebounceRef.current);
     };
-  }, [positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames, isHydrated, syncReady, autoSync, cloudSyncKey]);
+  }, [positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames, alertThresholdsByKey, isHydrated, syncReady, autoSync, cloudSyncKey]);
 
   async function handlePullCloud() {
     const key = cloudSyncKey.trim();
@@ -3120,6 +3213,7 @@ export default function Home() {
         target_stock_weight_by_owner?: unknown;
         owner_scratchpad_by_owner?: unknown;
         rebalance_calculator_by_owner?: unknown;
+        alert_thresholds_by_position?: unknown;
         updated_at?: string | null;
       };
       if (!r.ok) {
@@ -3154,6 +3248,10 @@ export default function Home() {
         mergeAndPersistTargetStockWeightsFromServer(j.target_stock_weight_by_owner);
         mergeAndPersistOwnerScratchpadsFromServer(j.owner_scratchpad_by_owner);
         mergeAndPersistRebalanceCalculatorFromServer(j.rebalance_calculator_by_owner);
+        const mergedPullAlerts = mergeAlertThresholdsFromServer(j.alert_thresholds_by_position, pulledOwners);
+        setAlertThresholdsByKey(mergedPullAlerts);
+        safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(mergedPullAlerts));
+        skipAlertThresholdsHydrateRef.current = 1;
       } else {
         setSyncMessage("서버에 아직 데이터가 없습니다. 먼저 이 기기에서 올리기를 해 보세요.");
       }
@@ -3186,6 +3284,7 @@ export default function Home() {
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
           rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+          alertThresholdsByPosition: getAlertThresholdsForSync(),
         }),
       });
       const j = (await r.json()) as { error?: string };
@@ -3442,6 +3541,9 @@ export default function Home() {
             : {}),
           ...("rebalance_calculator_by_owner" in s && s.rebalance_calculator_by_owner != null
             ? { rebalanceCalculatorByOwner: s.rebalance_calculator_by_owner }
+            : {}),
+          ...("alert_thresholds_by_position" in s && s.alert_thresholds_by_position != null
+            ? { alertThresholdsByPosition: s.alert_thresholds_by_position }
             : {}),
         }),
       });
@@ -4295,6 +4397,159 @@ export default function Home() {
                 </div>
               ))}
             </section>
+
+            <section
+              className="rounded-lg border border-amber-500/35 bg-amber-950/20 px-3 py-3 sm:px-4"
+              aria-label="기준선 도달 종목"
+            >
+              <h2 className="text-sm font-semibold text-amber-100 sm:text-base">기준선 도달 종목</h2>
+              <p className="mt-1 text-[10px] text-amber-200/70 sm:text-[11px]">
+                아래에서 설정한 가격·수익률 조건 중 <span className="font-medium text-amber-100">현재 만족</span>하는
+                보유 종목만 표시합니다. 시세는 약 30초 주기로 갱신됩니다.
+              </p>
+              {alertLineHits.length === 0 ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  조건을 만족하는 종목이 없습니다. (기준을 입력하지 않았거나, 아직 도달하지 않은 경우)
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-2 text-xs sm:text-sm">
+                  {alertLineHits.map((h) => (
+                    <li
+                      key={h.key}
+                      className="rounded-md border border-amber-500/25 bg-slate-950/40 px-2 py-2 sm:px-3"
+                    >
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <span className="font-semibold text-slate-100">{h.name}</span>
+                        <span className="text-[11px] text-slate-500">{h.symbol}</span>
+                        <span className="text-[11px] text-slate-400">· {h.owner}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-amber-100/90">
+                        {h.reasons.join(" · ")}
+                      </p>
+                      <p className="mt-0.5 text-[10px] tabular-nums text-slate-500">
+                        현재가 {h.currentPrice.toLocaleString(MONEY_INT_LOCALE, { maximumFractionDigits: 6 })}
+                        {h.returnPct != null ? (
+                          <span> · 수익률 {h.returnPct >= 0 ? "+" : ""}{h.returnPct.toFixed(2)}%</span>
+                        ) : (
+                          <span> · 수익률 계산 불가</span>
+                        )}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <details className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2 sm:px-4">
+              <summary className="cursor-pointer select-none text-sm font-medium text-slate-200">
+                기준선 입력 (익절가·손절가 / 익절·손절 수익률 %)
+              </summary>
+              <p className="mt-2 text-[10px] text-slate-500 sm:text-[11px]">
+                가격은 종목 통화(원·달러 등)로, 보유 표 현재가와 같은 단위입니다. 수익률(%)은 보유 표「수익률」과 같게
+                맞췄습니다(해외 주식은 원화 매입 대비). 비워 두면 해당 조건은 사용하지 않습니다.
+              </p>
+              <div className="mt-3 max-h-[min(50vh,420px)] overflow-auto rounded-md border border-slate-700/50">
+                <Table className="min-w-[720px] text-xs">
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="px-2 py-1.5">담당</TableHead>
+                      <TableHead className="px-2 py-1.5">종목</TableHead>
+                      <TableHead className="px-2 py-1.5 text-right">익절가</TableHead>
+                      <TableHead className="px-2 py-1.5 text-right">손절가</TableHead>
+                      <TableHead className="px-2 py-1.5 text-right">익절 %</TableHead>
+                      <TableHead className="px-2 py-1.5 text-right">손절 %</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {enrichedPositions.map((p) => {
+                      const pk = positionAlertKey(p.owner, p.symbol);
+                      const rule = alertThresholdsByKey[pk] ?? {};
+                      return (
+                        <TableRow key={`${pk}-${p.sourceIndex}`}>
+                          <TableCell className="px-2 py-1.5 text-slate-300">{p.owner}</TableCell>
+                          <TableCell className="px-2 py-1.5">
+                            <span className="font-medium text-slate-100">{p.name}</span>
+                            <span className="ml-1 text-[10px] text-slate-500">{p.symbol}</span>
+                          </TableCell>
+                          <TableCell className="px-1 py-1">
+                            <input
+                              type="number"
+                              step="any"
+                              className="w-full min-w-0 rounded border border-slate-600 bg-slate-950/60 px-1.5 py-1 text-right tabular-nums text-slate-100"
+                              placeholder="—"
+                              value={rule.takeProfitPrice ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value.trim();
+                                if (v === "") {
+                                  patchAlertThreshold(pk, "takeProfitPrice", undefined);
+                                  return;
+                                }
+                                const n = parseFloat(v.replace(/,/g, ""));
+                                patchAlertThreshold(pk, "takeProfitPrice", Number.isFinite(n) ? n : undefined);
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell className="px-1 py-1">
+                            <input
+                              type="number"
+                              step="any"
+                              className="w-full min-w-0 rounded border border-slate-600 bg-slate-950/60 px-1.5 py-1 text-right tabular-nums text-slate-100"
+                              placeholder="—"
+                              value={rule.stopLossPrice ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value.trim();
+                                if (v === "") {
+                                  patchAlertThreshold(pk, "stopLossPrice", undefined);
+                                  return;
+                                }
+                                const n = parseFloat(v.replace(/,/g, ""));
+                                patchAlertThreshold(pk, "stopLossPrice", Number.isFinite(n) ? n : undefined);
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell className="px-1 py-1">
+                            <input
+                              type="number"
+                              step="any"
+                              className="w-full min-w-0 rounded border border-slate-600 bg-slate-950/60 px-1.5 py-1 text-right tabular-nums text-slate-100"
+                              placeholder="—"
+                              value={rule.takeProfitReturnPct ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value.trim();
+                                if (v === "") {
+                                  patchAlertThreshold(pk, "takeProfitReturnPct", undefined);
+                                  return;
+                                }
+                                const n = parseFloat(v.replace(/,/g, ""));
+                                patchAlertThreshold(pk, "takeProfitReturnPct", Number.isFinite(n) ? n : undefined);
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell className="px-1 py-1">
+                            <input
+                              type="number"
+                              step="any"
+                              className="w-full min-w-0 rounded border border-slate-600 bg-slate-950/60 px-1.5 py-1 text-right tabular-nums text-slate-100"
+                              placeholder="—"
+                              value={rule.stopLossReturnPct ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value.trim();
+                                if (v === "") {
+                                  patchAlertThreshold(pk, "stopLossReturnPct", undefined);
+                                  return;
+                                }
+                                const n = parseFloat(v.replace(/,/g, ""));
+                                patchAlertThreshold(pk, "stopLossReturnPct", Number.isFinite(n) ? n : undefined);
+                              }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </details>
           </div>
 
           <section className="space-y-4">
