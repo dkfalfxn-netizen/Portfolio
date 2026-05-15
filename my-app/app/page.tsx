@@ -4404,8 +4404,9 @@ export default function Home() {
             >
               <h2 className="text-sm font-semibold text-amber-100 sm:text-base">기준선 도달 종목</h2>
               <p className="mt-1 text-[10px] text-amber-200/70 sm:text-[11px]">
-                아래에서 설정한 가격·수익률 조건 중 <span className="font-medium text-amber-100">현재 만족</span>하는
-                보유 종목만 표시합니다. 시세는 약 30초 주기로 갱신됩니다.
+                「보유 종목」표의 <span className="font-medium text-amber-100">기준선</span> 열에 넣은 가격·수익률
+                조건 중 <span className="font-medium text-amber-100">현재 만족</span>하는 종목만 여기 모읍니다. 시세는
+                약 30초 주기로 갱신됩니다.
               </p>
               {alertLineHits.length === 0 ? (
                 <p className="mt-2 text-xs text-slate-500">
@@ -4439,117 +4440,6 @@ export default function Home() {
                 </ul>
               )}
             </section>
-
-            <details className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2 sm:px-4">
-              <summary className="cursor-pointer select-none text-sm font-medium text-slate-200">
-                기준선 입력 (익절가·손절가 / 익절·손절 수익률 %)
-              </summary>
-              <p className="mt-2 text-[10px] text-slate-500 sm:text-[11px]">
-                가격은 종목 통화(원·달러 등)로, 보유 표 현재가와 같은 단위입니다. 수익률(%)은 보유 표「수익률」과 같게
-                맞췄습니다(해외 주식은 원화 매입 대비). 비워 두면 해당 조건은 사용하지 않습니다.
-              </p>
-              <div className="mt-3 max-h-[min(50vh,420px)] overflow-auto rounded-md border border-slate-700/50">
-                <Table className="min-w-[720px] text-xs">
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="px-2 py-1.5">담당</TableHead>
-                      <TableHead className="px-2 py-1.5">종목</TableHead>
-                      <TableHead className="px-2 py-1.5 text-right">익절가</TableHead>
-                      <TableHead className="px-2 py-1.5 text-right">손절가</TableHead>
-                      <TableHead className="px-2 py-1.5 text-right">익절 %</TableHead>
-                      <TableHead className="px-2 py-1.5 text-right">손절 %</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {enrichedPositions.map((p) => {
-                      const pk = positionAlertKey(p.owner, p.symbol);
-                      const rule = alertThresholdsByKey[pk] ?? {};
-                      return (
-                        <TableRow key={`${pk}-${p.sourceIndex}`}>
-                          <TableCell className="px-2 py-1.5 text-slate-300">{p.owner}</TableCell>
-                          <TableCell className="px-2 py-1.5">
-                            <span className="font-medium text-slate-100">{p.name}</span>
-                            <span className="ml-1 text-[10px] text-slate-500">{p.symbol}</span>
-                          </TableCell>
-                          <TableCell className="px-1 py-1">
-                            <input
-                              type="number"
-                              step="any"
-                              className="w-full min-w-0 rounded border border-slate-600 bg-slate-950/60 px-1.5 py-1 text-right tabular-nums text-slate-100"
-                              placeholder="—"
-                              value={rule.takeProfitPrice ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value.trim();
-                                if (v === "") {
-                                  patchAlertThreshold(pk, "takeProfitPrice", undefined);
-                                  return;
-                                }
-                                const n = parseFloat(v.replace(/,/g, ""));
-                                patchAlertThreshold(pk, "takeProfitPrice", Number.isFinite(n) ? n : undefined);
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell className="px-1 py-1">
-                            <input
-                              type="number"
-                              step="any"
-                              className="w-full min-w-0 rounded border border-slate-600 bg-slate-950/60 px-1.5 py-1 text-right tabular-nums text-slate-100"
-                              placeholder="—"
-                              value={rule.stopLossPrice ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value.trim();
-                                if (v === "") {
-                                  patchAlertThreshold(pk, "stopLossPrice", undefined);
-                                  return;
-                                }
-                                const n = parseFloat(v.replace(/,/g, ""));
-                                patchAlertThreshold(pk, "stopLossPrice", Number.isFinite(n) ? n : undefined);
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell className="px-1 py-1">
-                            <input
-                              type="number"
-                              step="any"
-                              className="w-full min-w-0 rounded border border-slate-600 bg-slate-950/60 px-1.5 py-1 text-right tabular-nums text-slate-100"
-                              placeholder="—"
-                              value={rule.takeProfitReturnPct ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value.trim();
-                                if (v === "") {
-                                  patchAlertThreshold(pk, "takeProfitReturnPct", undefined);
-                                  return;
-                                }
-                                const n = parseFloat(v.replace(/,/g, ""));
-                                patchAlertThreshold(pk, "takeProfitReturnPct", Number.isFinite(n) ? n : undefined);
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell className="px-1 py-1">
-                            <input
-                              type="number"
-                              step="any"
-                              className="w-full min-w-0 rounded border border-slate-600 bg-slate-950/60 px-1.5 py-1 text-right tabular-nums text-slate-100"
-                              placeholder="—"
-                              value={rule.stopLossReturnPct ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value.trim();
-                                if (v === "") {
-                                  patchAlertThreshold(pk, "stopLossReturnPct", undefined);
-                                  return;
-                                }
-                                const n = parseFloat(v.replace(/,/g, ""));
-                                patchAlertThreshold(pk, "stopLossReturnPct", Number.isFinite(n) ? n : undefined);
-                              }}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </details>
           </div>
 
           <section className="space-y-4">
@@ -4802,7 +4692,10 @@ export default function Home() {
                       </div>
                       <p className="text-[10px] text-muted-foreground">
                         입력 순은 ⋮ 드래그 또는 ▲▼로 저장됩니다. 다른 정렬일 때는 순서 변경이 비활성화됩니다. 표는
-                        차트 그룹(미입력 시 티커)별로 묶여 보입니다.
+                        차트 그룹(미입력 시 티커)별로 묶여 보입니다.{" "}
+                        <span className="text-muted-foreground/90">
+                          「기준선」열: 익절·손절 가격(현재가와 같은 통화)과 % — 여러 칸은 OR, 비우면 미사용.
+                        </span>
                       </p>
                     </div>
                     <div className="max-w-md space-y-1 text-right text-sm">
@@ -4911,6 +4804,12 @@ export default function Home() {
                         <TableHead className="px-3 py-1.5 text-right">현재가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">수량</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">수익률</TableHead>
+                        <TableHead
+                          className="w-[5.75rem] min-w-[5.75rem] max-w-[6.5rem] px-1 py-1.5 text-center align-bottom text-[9px] font-normal leading-tight text-muted-foreground sm:w-[6.25rem] sm:min-w-[6.25rem]"
+                          title="익절·손절 가격(현재가와 같은 통화) 및 수익률 %. 비우면 미사용. 여러 칸은 OR."
+                        >
+                          기준선
+                        </TableHead>
                         <TableHead className="px-3 py-1.5 text-center">시그널</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">평단가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">매입환율</TableHead>
@@ -4921,7 +4820,7 @@ export default function Home() {
                       {displayItems.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={10}
+                            colSpan={11}
                             className="px-3 py-4 text-center text-xs text-muted-foreground"
                           >
                             등록된 종목이 없습니다.
@@ -4957,7 +4856,7 @@ export default function Home() {
                           return (
                           <Fragment key={`${group.ownerName}-${block.label}`}>
                             <TableRow className="border-y border-border hover:bg-transparent">
-                              <TableCell colSpan={10} className="px-0 py-0">
+                              <TableCell colSpan={11} className="px-0 py-0">
                                 <div className="flex flex-wrap items-center justify-between gap-2 border-l-4 border-primary/70 bg-primary/[0.07] px-3 py-2">
                                   <span className="text-base font-bold tracking-wide text-foreground">
                                     {block.label}
@@ -5151,6 +5050,79 @@ export default function Home() {
                                 </span>
                               </div>
                             )}
+                          </TableCell>
+                          <TableCell
+                            className="min-w-[5.5rem] max-w-[6.75rem] px-1 py-1 align-top"
+                            title="가격=현재가와 같은 통화. %는 이 행 수익률과 동일(해외=원화 매입 대비). 여러 칸은 OR."
+                          >
+                            {(() => {
+                              const alertPk = positionAlertKey(position.owner, position.symbol);
+                              const ar = alertThresholdsByKey[alertPk] ?? {};
+                              const inp =
+                                "h-6 w-full min-w-0 rounded border border-border bg-background px-1 text-right text-[10px] tabular-nums text-foreground placeholder:text-muted-foreground/50";
+                              const parseNum = (raw: string) => {
+                                const v = raw.trim();
+                                if (v === "") return undefined;
+                                const n = parseFloat(v.replace(/,/g, ""));
+                                return Number.isFinite(n) ? n : undefined;
+                              };
+                              return (
+                                <div className="grid grid-cols-[1rem_minmax(0,1fr)] items-center gap-x-0.5 gap-y-0.5 text-[9px] leading-tight">
+                                  <span className="text-muted-foreground">익가</span>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    inputMode="decimal"
+                                    aria-label={`${position.name} 익절가`}
+                                    className={inp}
+                                    placeholder="·"
+                                    value={ar.takeProfitPrice ?? ""}
+                                    onChange={(e) =>
+                                      patchAlertThreshold(alertPk, "takeProfitPrice", parseNum(e.target.value))
+                                    }
+                                  />
+                                  <span className="text-muted-foreground">손가</span>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    inputMode="decimal"
+                                    aria-label={`${position.name} 손절가`}
+                                    className={inp}
+                                    placeholder="·"
+                                    value={ar.stopLossPrice ?? ""}
+                                    onChange={(e) =>
+                                      patchAlertThreshold(alertPk, "stopLossPrice", parseNum(e.target.value))
+                                    }
+                                  />
+                                  <span className="text-muted-foreground">익%</span>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    inputMode="decimal"
+                                    aria-label={`${position.name} 익절 수익률 퍼센트`}
+                                    className={inp}
+                                    placeholder="·"
+                                    value={ar.takeProfitReturnPct ?? ""}
+                                    onChange={(e) =>
+                                      patchAlertThreshold(alertPk, "takeProfitReturnPct", parseNum(e.target.value))
+                                    }
+                                  />
+                                  <span className="text-muted-foreground">손%</span>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    inputMode="decimal"
+                                    aria-label={`${position.name} 손절 수익률 퍼센트`}
+                                    className={inp}
+                                    placeholder="·"
+                                    value={ar.stopLossReturnPct ?? ""}
+                                    onChange={(e) =>
+                                      patchAlertThreshold(alertPk, "stopLossReturnPct", parseNum(e.target.value))
+                                    }
+                                  />
+                                </div>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell className="px-3 py-1.5 text-center">
                             {group.ownerName === "김승주" ? (
