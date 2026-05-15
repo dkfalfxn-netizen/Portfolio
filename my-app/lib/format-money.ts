@@ -5,6 +5,13 @@
 
 export const MONEY_INT_LOCALE = "ko-KR" as const;
 
+/** 수익 + 빨강, 손실 - 파랑 (달러·원화·%·금액 각각 적용) */
+export function signedPnlTextClass(value: number): string {
+  if (value > 0) return "text-red-500";
+  if (value < 0) return "text-blue-500";
+  return "text-muted-foreground";
+}
+
 /** 정수 원화·환율 등 (콤마) */
 export function fmtInt(n: number): string {
   if (!Number.isFinite(n)) return "—";

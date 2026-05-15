@@ -23,7 +23,13 @@ import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import { cn } from "@/lib/utils";
 import { holdingSymbolsEquivalent, inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
-import { fmtInt, fmtUsdNumber, MONEY_INT_LOCALE, parseKoreanIntDigits } from "@/lib/format-money";
+import {
+  fmtInt,
+  fmtUsdNumber,
+  MONEY_INT_LOCALE,
+  parseKoreanIntDigits,
+  signedPnlTextClass,
+} from "@/lib/format-money";
 import {
   HAS_LOCAL_CHANGES_KEY,
   buildRebalanceCalculatorByOwnerFromLocal,
@@ -4446,7 +4452,11 @@ export default function Home() {
                       <p className="mt-0.5 text-[10px] tabular-nums text-slate-500">
                         현재가 {h.currentPrice.toLocaleString(MONEY_INT_LOCALE, { maximumFractionDigits: 6 })}
                         {h.returnPct != null ? (
-                          <span> · 수익률 {h.returnPct >= 0 ? "+" : ""}{h.returnPct.toFixed(2)}%</span>
+                          <span className={signedPnlTextClass(h.returnPct)}>
+                            {" "}
+                            · 수익률 {h.returnPct >= 0 ? "+" : ""}
+                            {h.returnPct.toFixed(2)}%
+                          </span>
                         ) : (
                           <span> · 수익률 계산 불가</span>
                         )}
@@ -5044,49 +5054,69 @@ export default function Home() {
                               position.quantity
                             )}
                           </TableCell>
-                          <TableCell
-                            className={`px-3 py-1.5 text-right font-semibold ${
-                              position.pnl >= 0 ? "text-red-500" : "text-blue-500"
-                            }`}
-                          >
+                          <TableCell className="px-3 py-1.5 text-right font-semibold">
                             {(position.currency === "USD" || position.currency === "EUR") &&
                             position.pnlKrwEquityPct != null &&
                             (position.currency === "USD"
                               ? position.pnlUsdPct != null
                               : position.pnlEurPct != null) ? (
                               <div className="flex flex-col items-end gap-0.5 leading-tight">
-                                <span>
-                                  {position.currency === "USD" ? "USD" : "EUR"}{" "}
-                                  {(position.currency === "USD"
-                                    ? position.pnlUsdPct!
-                                    : position.pnlEurPct!) >= 0
-                                    ? "+"
-                                    : ""}
-                                  {(position.currency === "USD"
-                                    ? position.pnlUsdPct!
-                                    : position.pnlEurPct!
-                                  ).toFixed(2)}
-                                  %
-                                </span>
-                                <span className="text-xs font-normal opacity-90">
-                                  원화 {position.pnlKrwEquityPct >= 0 ? "+" : ""}
-                                  {position.pnlKrwEquityPct.toFixed(2)}%
-                                </span>
-                                <span className="text-xs font-normal opacity-75">
-                                  {position.valueKrw - position.costKrw >= 0 ? "+" : ""}₩
-                                  {fmtInt(position.valueKrw - position.costKrw)}
-                                </span>
+                                {(() => {
+                                  const fxPct =
+                                    position.currency === "USD"
+                                      ? position.pnlUsdPct!
+                                      : position.pnlEurPct!;
+                                  const krwPct = position.pnlKrwEquityPct!;
+                                  const krwAmt = position.valueKrw - position.costKrw;
+                                  return (
+                                    <>
+                                      <span className={signedPnlTextClass(fxPct)}>
+                                        {position.currency === "USD" ? "USD" : "EUR"}{" "}
+                                        {fxPct >= 0 ? "+" : ""}
+                                        {fxPct.toFixed(2)}%
+                                      </span>
+                                      <span
+                                        className={cn(
+                                          "text-xs font-normal opacity-90",
+                                          signedPnlTextClass(krwPct),
+                                        )}
+                                      >
+                                        원화 {krwPct >= 0 ? "+" : ""}
+                                        {krwPct.toFixed(2)}%
+                                      </span>
+                                      <span
+                                        className={cn(
+                                          "text-xs font-normal opacity-75",
+                                          signedPnlTextClass(krwAmt),
+                                        )}
+                                      >
+                                        {krwAmt >= 0 ? "+" : ""}₩{fmtInt(krwAmt)}
+                                      </span>
+                                    </>
+                                  );
+                                })()}
                               </div>
                             ) : (
                               <div className="flex flex-col items-end gap-0.5 leading-tight">
-                                <span>
-                                  {position.pnl >= 0 ? "+" : ""}
-                                  {position.pnl.toFixed(2)}%
-                                </span>
-                                <span className="text-xs font-normal opacity-75">
-                                  {position.valueKrw - position.costKrw >= 0 ? "+" : ""}₩
-                                  {fmtInt(position.valueKrw - position.costKrw)}
-                                </span>
+                                {(() => {
+                                  const krwAmt = position.valueKrw - position.costKrw;
+                                  return (
+                                    <>
+                                      <span className={signedPnlTextClass(position.pnl)}>
+                                        {position.pnl >= 0 ? "+" : ""}
+                                        {position.pnl.toFixed(2)}%
+                                      </span>
+                                      <span
+                                        className={cn(
+                                          "text-xs font-normal opacity-75",
+                                          signedPnlTextClass(krwAmt),
+                                        )}
+                                      >
+                                        {krwAmt >= 0 ? "+" : ""}₩{fmtInt(krwAmt)}
+                                      </span>
+                                    </>
+                                  );
+                                })()}
                               </div>
                             )}
                           </TableCell>
