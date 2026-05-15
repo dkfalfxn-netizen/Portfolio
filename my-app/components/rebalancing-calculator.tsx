@@ -16,6 +16,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { fmtInt, parseKoreanIntDigits } from "@/lib/format-money";
 import {
+  PORTFOLIO_TARGET_REL_DEV_BAND,
   PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT,
   type CalculatorMemberSplitMode,
   loadAllCalculatorMemberSplitModes,
@@ -363,7 +364,7 @@ function calcMemberAdjustments(
   });
 }
 
-/** 차트 리밸런싱 위젯과 동일: 현금 행 목표·현재 비중(%p) 편차 */
+/** 차트 리밸런싱 위젯과 동일: 현금 행 목표·현재 비중 상대 편차 */
 function CashAllocationDeviationLabel({
   targetPct,
   actualPct,
@@ -374,8 +375,8 @@ function CashAllocationDeviationLabel({
   const hasPositiveTarget = targetPct > 0;
   const diffPp = actualPct - targetPct;
   const relDev = hasPositiveTarget ? (actualPct - targetPct) / targetPct : 0;
-  const withinBand = hasPositiveTarget && Math.abs(relDev) <= 0.05;
-  const belowBand = hasPositiveTarget && relDev < -0.05;
+  const withinBand = hasPositiveTarget && Math.abs(relDev) <= PORTFOLIO_TARGET_REL_DEV_BAND;
+  const belowBand = hasPositiveTarget && relDev < -PORTFOLIO_TARGET_REL_DEV_BAND;
 
   if (!hasPositiveTarget && actualPct > 0) {
     return (

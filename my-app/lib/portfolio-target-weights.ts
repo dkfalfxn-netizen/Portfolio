@@ -17,6 +17,9 @@ export const CALCULATOR_MEMBER_SPLIT_MODE_STORAGE_KEY = "portfolio_calculator_me
 
 export type CalculatorMemberSplitMode = "weight" | "targetPct";
 
+/** 목표 비중 대비 현재 비중 상대 편차 — 파란「≈ 목표」밴드 (±10% = 0.10) */
+export const PORTFOLIO_TARGET_REL_DEV_BAND = 0.1;
+
 /** 원형 차트 내부 교차 탭 동기화용 브라우저 이벤트 */
 export const PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT = "portfolio-target-weights-refresh";
 

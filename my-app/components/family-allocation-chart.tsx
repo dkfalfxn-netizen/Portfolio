@@ -8,6 +8,7 @@ import {
   loadAllCalculatorMemberSplitModes,
   loadAllCalculatorMemberSplits,
   loadAllTargetStockWeights,
+  PORTFOLIO_TARGET_REL_DEV_BAND,
   PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT,
   REBALANCE_CALCULATOR_STORAGE_REFRESH_EVENT,
   TARGET_WEIGHT_STORAGE_KEY,
@@ -532,8 +533,8 @@ function TargetWeightSortableBarRow({
   const isClipped = ratio > MAX_RATIO;
 
   const relDev = hasPositiveTarget ? (actual - target) / target : 0;
-  const withinBand = hasPositiveTarget && Math.abs(relDev) <= 0.05;
-  const belowBand = hasPositiveTarget && relDev < -0.05;
+  const withinBand = hasPositiveTarget && Math.abs(relDev) <= PORTFOLIO_TARGET_REL_DEV_BAND;
+  const belowBand = hasPositiveTarget && relDev < -PORTFOLIO_TARGET_REL_DEV_BAND;
   const diffPp = actual - target;
 
   const barBg = !hasInputTarget
