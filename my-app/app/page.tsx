@@ -47,6 +47,8 @@ import {
   mergeAlertThresholdsOnPull,
   positionAlertKey,
   positionReturnPctForAlert,
+  resolveAlertRule,
+  symbolAlertKey,
   type AlertRule,
   type AlertThresholdsByKey,
 } from "@/lib/alert-thresholds";
@@ -63,6 +65,7 @@ function hasAlertThresholdRule(rule: AlertRule | undefined): boolean {
     rule.stopLossReturnPct !== undefined
   );
 }
+
 import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
@@ -1411,85 +1414,140 @@ export default function Home() {
   /** 보유 표 기준선 열 — 평소 숨김, 토글로 표시 */
   const [showHoldingsAlertColumn, setShowHoldingsAlertColumn] = useState(false);
 
-  const patchAlertThreshold = useCallback((positionKey: string, field: keyof AlertRule, value: number | undefined) => {
-    setAlertThresholdsByKey((prev) => {
-      const next = { ...prev };
-      const cur: AlertRule = { ...(next[positionKey] ?? {}) };
-      if (value === undefined || !Number.isFinite(value)) {
-        delete (cur as Record<string, unknown>)[field];
-      } else {
-        (cur as Record<string, number>)[field] = value;
-      }
-      const empty =
-        cur.takeProfitPrice === undefined &&
-        cur.stopLossPrice === undefined &&
-        cur.takeProfitReturnPct === undefined &&
-        cur.stopLossReturnPct === undefined;
-      if (empty) {
-        delete next[positionKey];
-      } else {
-        next[positionKey] = cur;
-      }
-      return next;
-    });
-  }, []);
+  const patchPositionAlertPrice = useCallback(
+    (
+      positionKey: string,
+      field: "takeProfitPrice" | "stopLossPrice",
+      value: number | undefined,
+    ) => {
+      setAlertThresholdsByKey((prev) => {
+        const next = { ...prev };
+        const cur: AlertRule = { ...(next[positionKey] ?? {}) };
+        if (value === undefined || !Number.isFinite(value)) {
+          delete cur[field];
+        } else {
+          cur[field] = value;
+        }
+        const empty = cur.takeProfitPrice === undefined && cur.stopLossPrice === undefined;
+        if (empty) delete next[positionKey];
+        else next[positionKey] = cur;
+        return next;
+      });
+    },
+    [],
+  );
+
+  /** 티커 공통 % — 종목별 합산 표에서 입력 */
+  const patchSymbolAlertPct = useCallback(
+    (
+      symbolKeys: string[],
+      field: "takeProfitReturnPct" | "stopLossReturnPct",
+      value: number | undefined,
+    ) => {
+      if (symbolKeys.length === 0) return;
+      setAlertThresholdsByKey((prev) => {
+        const next = { ...prev };
+        for (const sym of symbolKeys) {
+          const storageKey = symbolAlertKey(sym);
+          const cur: AlertRule = { ...(next[storageKey] ?? {}) };
+          if (value === undefined || !Number.isFinite(value)) {
+            delete cur[field];
+          } else {
+            cur[field] = value;
+          }
+          const empty =
+            cur.takeProfitReturnPct === undefined && cur.stopLossReturnPct === undefined;
+          if (empty) delete next[storageKey];
+          else next[storageKey] = cur;
+          const suffix = `::${sym}`;
+          for (const k of Object.keys(next)) {
+            if (k.startsWith("*::") || !k.endsWith(suffix)) continue;
+            const pos = { ...(next[k] ?? {}) };
+            delete pos.takeProfitReturnPct;
+            delete pos.stopLossReturnPct;
+            if (Object.keys(pos).length === 0) delete next[k];
+            else next[k] = pos;
+          }
+        }
+        return next;
+      });
+    },
+    [],
+  );
 
   /**
    * 보유자별 기준선 저장: localStorage(현재 state) + 서버 push.
    */
   const [savingAlertOwner, setSavingAlertOwner] = useState<string | null>(null);
+  const [savingAlertAll, setSavingAlertAll] = useState(false);
+
+  const pushAlertThresholdsToServer = useCallback(async () => {
+    const key = cloudSyncKey.trim();
+    if (key.length < 8) {
+      setSyncMessage("동기화 키를 먼저 설정해야 서버에 저장할 수 있습니다.");
+      return false;
+    }
+    safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(alertThresholdsByKey));
+    const r = await fetch("/api/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "push",
+        key,
+        positions,
+        cashByOwner,
+        holdingsSortByOwner,
+        sellLogByOwner: sellLog,
+        ownerNames,
+        targetStockWeightByOwner: loadAllTargetStockWeights(),
+        ownerScratchpadByOwner: loadAllOwnerScratchpads(),
+        rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+        alertThresholdsByPosition: getAlertThresholdsForSync(),
+      }),
+    });
+    if (r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { updated_at?: string };
+      const ts = j.updated_at ?? new Date().toISOString();
+      safeSetItem(LAST_SYNC_TS_KEY, ts);
+      window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+      setLastSyncedAt(ts);
+      return true;
+    }
+    const j = (await r.json().catch(() => ({}))) as { error?: string };
+    setSyncMessage(j.error ?? "서버 저장 실패");
+    return false;
+  }, [
+    cloudSyncKey,
+    positions,
+    cashByOwner,
+    holdingsSortByOwner,
+    sellLog,
+    ownerNames,
+    alertThresholdsByKey,
+  ]);
+
   const saveAlertThresholdsForOwner = useCallback(
     async (ownerName: string) => {
-      const key = cloudSyncKey.trim();
-      if (key.length < 8) {
-        setSyncMessage("동기화 키를 먼저 설정해야 서버에 저장할 수 있습니다.");
-        return;
-      }
       setSavingAlertOwner(ownerName);
       try {
-        safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(alertThresholdsByKey));
-        const r = await fetch("/api/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "push",
-            key,
-            positions,
-            cashByOwner,
-            holdingsSortByOwner,
-            sellLogByOwner: sellLog,
-            ownerNames,
-            targetStockWeightByOwner: loadAllTargetStockWeights(),
-            ownerScratchpadByOwner: loadAllOwnerScratchpads(),
-            rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
-            alertThresholdsByPosition: getAlertThresholdsForSync(),
-          }),
-        });
-        if (r.ok) {
-          const j = (await r.json().catch(() => ({}))) as { updated_at?: string };
-          const ts = j.updated_at ?? new Date().toISOString();
-          safeSetItem(LAST_SYNC_TS_KEY, ts);
-          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
-          setLastSyncedAt(ts);
-          setSyncMessage(`${ownerName} 보유자 기준선을 서버에 저장했습니다.`);
-        } else {
-          const j = (await r.json().catch(() => ({}))) as { error?: string };
-          setSyncMessage(j.error ?? "서버 저장 실패");
-        }
+        const ok = await pushAlertThresholdsToServer();
+        if (ok) setSyncMessage(`${ownerName} 보유자 기준선(가격)을 서버에 저장했습니다.`);
       } finally {
         setSavingAlertOwner(null);
       }
     },
-    [
-      cloudSyncKey,
-      positions,
-      cashByOwner,
-      holdingsSortByOwner,
-      sellLog,
-      ownerNames,
-      alertThresholdsByKey,
-    ],
+    [pushAlertThresholdsToServer],
   );
+
+  const saveAllAlertThresholds = useCallback(async () => {
+    setSavingAlertAll(true);
+    try {
+      const ok = await pushAlertThresholdsToServer();
+      if (ok) setSyncMessage("기준선(가격·수익률 %)을 서버에 저장했습니다.");
+    } finally {
+      setSavingAlertAll(false);
+    }
+  }, [pushAlertThresholdsToServer]);
 
   const [form, setForm] = useState({
     symbol: "",
@@ -2133,6 +2191,7 @@ export default function Home() {
           key: r.key,
           displaySymbol: r.displaySymbol,
           displayName: r.displayName,
+          symbolsForAlert: [r.key],
           valueKrw: r.valueKrw,
           costKrw: r.costKrw,
           pnlKrw,
@@ -2257,10 +2316,14 @@ export default function Home() {
               pct: null,
             }))
           : [{ code: "보유자 정보 없음", name: "", pct: null }];
+      const symbolsForAlert = [...r.symbolLineLabel.keys()].map((s) =>
+        aggregateSymbolKeyForHoldings(s),
+      );
       return {
         key: r.key,
         displaySymbol: r.displaySymbol,
         displayName,
+        symbolsForAlert,
         valueKrw: r.valueKrw,
         costKrw: r.costKrw,
         pnlKrw,
@@ -2343,8 +2406,8 @@ export default function Home() {
     }> = [];
     for (const p of enrichedPositions) {
       const alertKey = positionAlertKey(p.owner, p.symbol);
-      const rule = alertThresholdsByKey[alertKey];
-      if (!rule) continue;
+      const rule = resolveAlertRule(alertThresholdsByKey, p.owner, p.symbol);
+      if (!hasAlertThresholdRule(rule)) continue;
       const returnPct = positionReturnPctForAlert(p);
       const { hit, reasons } = evaluateAlertRule(rule, {
         price: typeof p.currentPrice === "number" && Number.isFinite(p.currentPrice) ? p.currentPrice : null,
@@ -3919,8 +3982,7 @@ export default function Home() {
       const posKey = makePositionKey({ owner, symbol, currency: form.currency });
       const isNewPosition = !positions.some((p) => makePositionKey(p) === posKey);
       if (!isNewPosition) return false;
-      const alertPk = positionAlertKey(owner, symbol);
-      return !hasAlertThresholdRule(alertThresholdsByKey[alertPk]);
+      return !hasAlertThresholdRule(resolveAlertRule(alertThresholdsByKey, owner, symbol));
     });
 
     setPositions((prev) => {
@@ -3997,7 +4059,7 @@ export default function Home() {
     if (needsAlertThresholdPrompt) {
       setShowHoldingsAlertColumn(true);
       showActionSuccessToast(
-        "종목이 반영되었습니다. 보유 표 「기준선」열에서 익절·손절 기준을 입력한 뒤 저장을 눌러 주세요.",
+        "종목이 반영되었습니다. 「종목별 합산」에서 익·손 %를, 보유 표 「기준선」열에서 익·손 가격을 입력한 뒤 저장해 주세요.",
       );
     } else {
       showActionSuccessToast("종목이 정상적으로 반영되었습니다.");
@@ -4541,7 +4603,7 @@ export default function Home() {
             >
               <h2 className="text-sm font-semibold text-amber-100 sm:text-base">기준선 도달 종목</h2>
               <p className="mt-1 text-[10px] text-amber-200/70 sm:text-[11px]">
-                「보유 종목」표의 <span className="font-medium text-amber-100">기준선</span> 열에 넣은 가격·수익률
+                「종목별 합산」의 수익률 %·「보유 종목」표의 익·손 가격
                 조건 중 <span className="font-medium text-amber-100">현재 만족</span>하는 종목만 여기 모읍니다. 시세는
                 약 30초 주기로 갱신됩니다.
               </p>
@@ -4861,12 +4923,12 @@ export default function Home() {
                         {showHoldingsAlertColumn ? (
                           <span className="text-muted-foreground/90">
                             {" "}
-                            「기준선」열: 익절·손절 가격(현재가와 같은 통화)과 % — 여러 칸은 OR, 비우면 미사용. 입력 후 「기준선 저장」으로 서버 반영.
+                            「익·손 가격」열: 보유자별 가격만. 익·손 %는 「종목별 합산」 탭에서 티커 공통. 가격·% 여러 칸은 OR.
                           </span>
                         ) : (
                           <span className="text-muted-foreground/90">
                             {" "}
-                            기준선 입력은 「기준선 열 표시」를 누르면 표에 나타납니다.
+                            가격 입력은 「기준선 열 표시」 후 보유 표에, %는 「종목별 합산」 탭에서 입력합니다.
                           </span>
                         )}
                       </p>
@@ -4980,9 +5042,9 @@ export default function Home() {
                         {showHoldingsAlertColumn ? (
                           <TableHead
                             className="px-3 py-1.5 text-center"
-                            title="익절·손절 가격(현재가와 같은 통화) 및 수익률 %. 비우면 미사용. 여러 칸은 OR."
+                            title="보유자별 익절·손절 가격(현재가와 같은 통화). %는 종목별 합산 표에서 입력."
                           >
-                            기준선
+                            익·손 가격
                           </TableHead>
                         ) : null}
                         <TableHead className="px-3 py-1.5 text-center">시그널</TableHead>
@@ -5248,16 +5310,14 @@ export default function Home() {
                           </TableCell>
                           {showHoldingsAlertColumn ? (
                           <TableCell
-                            className="min-w-[6.75rem] max-w-[8.5rem] px-1 py-1 align-top"
-                            title="가격=현재가와 같은 통화. %는 이 행 수익률과 동일(해외=원화 매입 대비). 여러 칸은 OR."
+                            className="min-w-[4.5rem] max-w-[5.5rem] px-1 py-1 align-top"
+                            title="보유자별 익절·손절 가격(현재가와 같은 통화). %는 종목별 합산 표."
                           >
                             {(() => {
                               const alertPk = positionAlertKey(position.owner, position.symbol);
                               const ar = alertThresholdsByKey[alertPk] ?? {};
                               const inp =
                                 "h-6 w-full min-w-0 rounded border border-border bg-background px-1 text-right text-[10px] tabular-nums text-foreground placeholder:text-muted-foreground/50";
-                              const pctBtn =
-                                "min-w-0 flex-1 rounded border border-border/80 bg-muted/40 px-0 py-px text-[8px] tabular-nums text-foreground hover:bg-muted";
                               const parseNum = (raw: string) => {
                                 const v = raw.trim();
                                 if (v === "") return undefined;
@@ -5265,7 +5325,7 @@ export default function Home() {
                                 return Number.isFinite(n) ? n : undefined;
                               };
                               return (
-                                <div className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-0.5 gap-y-0.5 text-[9px] leading-tight">
+                                <div className="grid grid-cols-[1rem_minmax(0,1fr)] items-center gap-x-0.5 gap-y-0.5 text-[9px] leading-tight">
                                   <span className="text-muted-foreground">익가</span>
                                   <input
                                     type="number"
@@ -5276,7 +5336,7 @@ export default function Home() {
                                     placeholder="·"
                                     value={ar.takeProfitPrice ?? ""}
                                     onChange={(e) =>
-                                      patchAlertThreshold(alertPk, "takeProfitPrice", parseNum(e.target.value))
+                                      patchPositionAlertPrice(alertPk, "takeProfitPrice", parseNum(e.target.value))
                                     }
                                   />
                                   <span className="text-muted-foreground">손가</span>
@@ -5289,77 +5349,9 @@ export default function Home() {
                                     placeholder="·"
                                     value={ar.stopLossPrice ?? ""}
                                     onChange={(e) =>
-                                      patchAlertThreshold(alertPk, "stopLossPrice", parseNum(e.target.value))
+                                      patchPositionAlertPrice(alertPk, "stopLossPrice", parseNum(e.target.value))
                                     }
                                   />
-                                  <span className="text-muted-foreground">익%</span>
-                                  <div className="min-w-0 space-y-0.5">
-                                    <input
-                                      type="number"
-                                      step="any"
-                                      inputMode="decimal"
-                                      aria-label={`${position.name} 익절 수익률 퍼센트`}
-                                      className={inp}
-                                      placeholder="·"
-                                      value={ar.takeProfitReturnPct ?? ""}
-                                      onChange={(e) =>
-                                        patchAlertThreshold(
-                                          alertPk,
-                                          "takeProfitReturnPct",
-                                          parseNum(e.target.value),
-                                        )
-                                      }
-                                    />
-                                    <div className="flex gap-px">
-                                      {ALERT_RETURN_PCT_PRESETS.map((pct) => (
-                                        <button
-                                          key={`tp-${pct}`}
-                                          type="button"
-                                          className={pctBtn}
-                                          title={`익절 ${pct}%`}
-                                          onClick={() =>
-                                            patchAlertThreshold(alertPk, "takeProfitReturnPct", pct)
-                                          }
-                                        >
-                                          {pct}%
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                  <span className="text-muted-foreground">손%</span>
-                                  <div className="min-w-0 space-y-0.5">
-                                    <input
-                                      type="number"
-                                      step="any"
-                                      inputMode="decimal"
-                                      aria-label={`${position.name} 손절 수익률 퍼센트`}
-                                      className={inp}
-                                      placeholder="·"
-                                      value={ar.stopLossReturnPct ?? ""}
-                                      onChange={(e) =>
-                                        patchAlertThreshold(
-                                          alertPk,
-                                          "stopLossReturnPct",
-                                          parseNum(e.target.value),
-                                        )
-                                      }
-                                    />
-                                    <div className="flex gap-px">
-                                      {ALERT_RETURN_PCT_PRESETS.map((pct) => (
-                                        <button
-                                          key={`sl-${pct}`}
-                                          type="button"
-                                          className={pctBtn}
-                                          title={`손절 -${pct}%`}
-                                          onClick={() =>
-                                            patchAlertThreshold(alertPk, "stopLossReturnPct", -pct)
-                                          }
-                                        >
-                                          -{pct}%
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
                                 </div>
                               );
                             })()}
@@ -6190,9 +6182,20 @@ export default function Home() {
                   <h2 className="font-semibold text-slate-100">종목별 합산</h2>
                   <p className="mt-1 text-xs text-slate-400">
                     모든 보유자·계좌의 같은 종목을 합산한 평가액, 매입원가, 평가손익, 수익률(원화 기준)입니다.
+                    익·손 <span className="text-slate-300">%</span>는 티커별로 모든 보유자에게 동일 적용됩니다.
                   </p>
                 </div>
                 <div className="flex flex-col gap-3 p-4 pt-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={savingAlertAll}
+                      className="rounded-md border border-sky-500/60 bg-sky-500/20 px-2 py-1 text-[11px] font-medium text-sky-100 transition-colors hover:bg-sky-500/30 disabled:opacity-50"
+                      onClick={() => void saveAllAlertThresholds()}
+                    >
+                      {savingAlertAll ? "저장 중…" : "기준선 저장"}
+                    </button>
+                  </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[10px] font-medium text-slate-500">합산 기준</span>
                     <button
@@ -6260,13 +6263,19 @@ export default function Home() {
                         <TableHead className="px-3 py-2 text-right tabular-nums">매입원가</TableHead>
                         <TableHead className="px-3 py-2 text-right tabular-nums">평가손익</TableHead>
                         <TableHead className="px-3 py-2 text-right tabular-nums">수익률</TableHead>
+                        <TableHead
+                          className="min-w-[6rem] px-1 py-2 text-center"
+                          title="티커별 공통 — 모든 보유자의 해당 종목 수익률에 적용"
+                        >
+                          익·손 %
+                        </TableHead>
                         <TableHead className="px-3 py-2 text-center">보유자</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {holdingsAggSource.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                          <TableCell colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
                             합산할 주식 보유가 없습니다.
                           </TableCell>
                         </TableRow>
@@ -6334,6 +6343,105 @@ export default function Home() {
                                   : `${row.pnlPct >= 0 ? "+" : ""}${row.pnlPct.toFixed(2)}%`}
                               </TableCell>
                               <TableCell
+                                className="min-w-[6.75rem] max-w-[8.5rem] px-1 py-1 align-top"
+                                title={
+                                  row.symbolsForAlert.length > 1
+                                    ? `차트 그룹 내 ${row.symbolsForAlert.length}개 티커에 동일 % 적용`
+                                    : "모든 보유자에게 동일 적용"
+                                }
+                              >
+                                {(() => {
+                                  const syms = row.symbolsForAlert;
+                                  if (syms.length === 0) {
+                                    return <span className="text-muted-foreground">—</span>;
+                                  }
+                                  const ar =
+                                    alertThresholdsByKey[symbolAlertKey(syms[0])] ?? {};
+                                  const inp =
+                                    "h-6 w-full min-w-0 rounded border border-border bg-background px-1 text-right text-[10px] tabular-nums text-foreground placeholder:text-muted-foreground/50";
+                                  const pctBtn =
+                                    "min-w-0 flex-1 rounded border border-border/80 bg-muted/40 px-0 py-px text-[8px] tabular-nums text-foreground hover:bg-muted";
+                                  const parseNum = (raw: string) => {
+                                    const v = raw.trim();
+                                    if (v === "") return undefined;
+                                    const n = parseFloat(v.replace(/,/g, ""));
+                                    return Number.isFinite(n) ? n : undefined;
+                                  };
+                                  return (
+                                    <div className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-0.5 gap-y-0.5 text-[9px] leading-tight">
+                                      <span className="text-muted-foreground">익%</span>
+                                      <div className="min-w-0 space-y-0.5">
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          inputMode="decimal"
+                                          aria-label={`${row.displaySymbol} 익절 수익률 퍼센트`}
+                                          className={inp}
+                                          placeholder="·"
+                                          value={ar.takeProfitReturnPct ?? ""}
+                                          onChange={(e) =>
+                                            patchSymbolAlertPct(
+                                              syms,
+                                              "takeProfitReturnPct",
+                                              parseNum(e.target.value),
+                                            )
+                                          }
+                                        />
+                                        <div className="flex gap-px">
+                                          {ALERT_RETURN_PCT_PRESETS.map((pct) => (
+                                            <button
+                                              key={`agg-tp-${row.key}-${pct}`}
+                                              type="button"
+                                              className={pctBtn}
+                                              title={`익절 ${pct}%`}
+                                              onClick={() =>
+                                                patchSymbolAlertPct(syms, "takeProfitReturnPct", pct)
+                                              }
+                                            >
+                                              {pct}%
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <span className="text-muted-foreground">손%</span>
+                                      <div className="min-w-0 space-y-0.5">
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          inputMode="decimal"
+                                          aria-label={`${row.displaySymbol} 손절 수익률 퍼센트`}
+                                          className={inp}
+                                          placeholder="·"
+                                          value={ar.stopLossReturnPct ?? ""}
+                                          onChange={(e) =>
+                                            patchSymbolAlertPct(
+                                              syms,
+                                              "stopLossReturnPct",
+                                              parseNum(e.target.value),
+                                            )
+                                          }
+                                        />
+                                        <div className="flex gap-px">
+                                          {ALERT_RETURN_PCT_PRESETS.map((pct) => (
+                                            <button
+                                              key={`agg-sl-${row.key}-${pct}`}
+                                              type="button"
+                                              className={pctBtn}
+                                              title={`손절 -${pct}%`}
+                                              onClick={() =>
+                                                patchSymbolAlertPct(syms, "stopLossReturnPct", -pct)
+                                              }
+                                            >
+                                              -{pct}%
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </TableCell>
+                              <TableCell
                                 className="cursor-help px-3 py-2 text-center text-[11px] text-muted-foreground"
                               >
                                 <HoldingsAggRichTooltip
@@ -6377,6 +6485,7 @@ export default function Home() {
                                 ? "—"
                                 : `${holdingsSymbolGrandTotals.pnlPct >= 0 ? "+" : ""}${holdingsSymbolGrandTotals.pnlPct.toFixed(2)}%`}
                             </TableCell>
+                            <TableCell className="px-1 py-2.5 text-center text-muted-foreground">—</TableCell>
                             <TableCell className="px-3 py-2.5 text-center text-muted-foreground">—</TableCell>
                           </TableRow>
                         </>
