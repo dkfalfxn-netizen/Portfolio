@@ -1435,23 +1435,19 @@ export default function Home() {
   }, []);
 
   /**
-   * 기준선 행 저장 버튼: localStorage 즉시 저장 + 서버 push.
-   * autoSync/debounce 와 별개로 버튼 클릭 시 즉시 push.
+   * 보유자별 기준선 저장: localStorage(현재 state) + 서버 push.
    */
-  const [savingAlertKey, setSavingAlertKey] = useState<string | null>(null);
-  const saveAlertThresholdRow = useCallback(
-    async (positionKey: string) => {
+  const [savingAlertOwner, setSavingAlertOwner] = useState<string | null>(null);
+  const saveAlertThresholdsForOwner = useCallback(
+    async (ownerName: string) => {
       const key = cloudSyncKey.trim();
       if (key.length < 8) {
         setSyncMessage("동기화 키를 먼저 설정해야 서버에 저장할 수 있습니다.");
         return;
       }
-      setSavingAlertKey(positionKey);
+      setSavingAlertOwner(ownerName);
       try {
-        const thresholds = (() => {
-          const raw = window.localStorage.getItem(ALERT_THRESHOLDS_STORAGE_KEY);
-          try { return raw ? (JSON.parse(raw) as AlertThresholdsByKey) : {}; } catch { return {}; }
-        })();
+        safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(alertThresholdsByKey));
         const r = await fetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1466,7 +1462,7 @@ export default function Home() {
             targetStockWeightByOwner: loadAllTargetStockWeights(),
             ownerScratchpadByOwner: loadAllOwnerScratchpads(),
             rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
-            alertThresholdsByPosition: thresholds,
+            alertThresholdsByPosition: getAlertThresholdsForSync(),
           }),
         });
         if (r.ok) {
@@ -1475,16 +1471,24 @@ export default function Home() {
           safeSetItem(LAST_SYNC_TS_KEY, ts);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
           setLastSyncedAt(ts);
-          setSyncMessage("기준선을 서버에 저장했습니다.");
+          setSyncMessage(`${ownerName} 보유자 기준선을 서버에 저장했습니다.`);
         } else {
           const j = (await r.json().catch(() => ({}))) as { error?: string };
           setSyncMessage(j.error ?? "서버 저장 실패");
         }
       } finally {
-        setSavingAlertKey(null);
+        setSavingAlertOwner(null);
       }
     },
-    [cloudSyncKey, positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames],
+    [
+      cloudSyncKey,
+      positions,
+      cashByOwner,
+      holdingsSortByOwner,
+      sellLog,
+      ownerNames,
+      alertThresholdsByKey,
+    ],
   );
 
   const [form, setForm] = useState({
@@ -4839,6 +4843,17 @@ export default function Home() {
                         >
                           기준선 {showHoldingsAlertColumn ? "숨기기" : "열 표시"}
                         </button>
+                        {showHoldingsAlertColumn ? (
+                          <button
+                            type="button"
+                            disabled={savingAlertOwner === group.ownerName}
+                            title="이 보유자 표에 입력한 익절·손절 기준을 서버에 저장"
+                            className="rounded-md border border-primary bg-primary/15 px-2 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/25 disabled:opacity-50"
+                            onClick={() => void saveAlertThresholdsForOwner(group.ownerName)}
+                          >
+                            {savingAlertOwner === group.ownerName ? "저장 중…" : "기준선 저장"}
+                          </button>
+                        ) : null}
                       </div>
                       <p className="text-[10px] text-muted-foreground">
                         입력 순은 ⋮ 드래그 또는 ▲▼로 저장됩니다. 다른 정렬일 때는 순서 변경이 비활성화됩니다. 표는
@@ -4846,7 +4861,7 @@ export default function Home() {
                         {showHoldingsAlertColumn ? (
                           <span className="text-muted-foreground/90">
                             {" "}
-                            「기준선」열: 익절·손절 가격(현재가와 같은 통화)과 % — 여러 칸은 OR, 비우면 미사용.
+                            「기준선」열: 익절·손절 가격(현재가와 같은 통화)과 % — 여러 칸은 OR, 비우면 미사용. 입력 후 「기준선 저장」으로 서버 반영.
                           </span>
                         ) : (
                           <span className="text-muted-foreground/90">
@@ -5345,15 +5360,6 @@ export default function Home() {
                                       ))}
                                     </div>
                                   </div>
-                                  <span />
-                                  <button
-                                    type="button"
-                                    disabled={savingAlertKey === alertPk}
-                                    onClick={() => void saveAlertThresholdRow(alertPk)}
-                                    className="mt-0.5 w-full rounded border border-primary bg-primary/10 px-1 py-0.5 text-[9px] font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
-                                  >
-                                    {savingAlertKey === alertPk ? "저장 중…" : "저장"}
-                                  </button>
                                 </div>
                               );
                             })()}
