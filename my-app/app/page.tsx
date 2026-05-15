@@ -369,6 +369,8 @@ const AUTO_SYNC_STORAGE = "portfolio_auto_sync_v1";
 const HOLDINGS_SORT_STORAGE_KEY = "portfolio_holdings_sort_v1";
 /** 보유 표 「기준선」열 표시 여부 (기본 숨김) */
 const HOLDINGS_ALERT_COLUMN_VISIBLE_KEY = "portfolio_holdings_alert_col_visible_v1";
+/** 종목별 합산 표 「기준선」(% )열 표시 여부 (기본 표시) */
+const AGG_ALERT_COLUMN_VISIBLE_KEY = "portfolio_agg_alert_col_visible_v1";
 const DAILY_SNAPSHOTS_KEY = "portfolio_daily_snapshots_v1";
 /**
  * 마지막으로 서버와 성공적으로 동기화했을 때의 서버 updated_at 값.
@@ -1413,6 +1415,8 @@ export default function Home() {
   const [alertThresholdsByKey, setAlertThresholdsByKey] = useState<AlertThresholdsByKey>({});
   /** 보유 표 기준선 열 — 평소 숨김, 토글로 표시 */
   const [showHoldingsAlertColumn, setShowHoldingsAlertColumn] = useState(false);
+  /** 종목별 합산 표 기준선(익·손 %) 열 */
+  const [showAggAlertColumn, setShowAggAlertColumn] = useState(true);
 
   const patchPositionAlertPrice = useCallback(
     (
@@ -3149,6 +3153,12 @@ export default function Home() {
     } catch {
       setShowHoldingsAlertColumn(false);
     }
+    try {
+      const aggCol = window.localStorage.getItem(AGG_ALERT_COLUMN_VISIBLE_KEY);
+      setShowAggAlertColumn(aggCol === null ? true : aggCol === "1");
+    } catch {
+      setShowAggAlertColumn(true);
+    }
     setIsHydrated(true);
 
     if (savedKey.length < 8) {
@@ -3202,6 +3212,11 @@ export default function Home() {
     if (!isHydrated) return;
     safeSetItem(HOLDINGS_ALERT_COLUMN_VISIBLE_KEY, showHoldingsAlertColumn ? "1" : "0");
   }, [showHoldingsAlertColumn, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    safeSetItem(AGG_ALERT_COLUMN_VISIBLE_KEY, showAggAlertColumn ? "1" : "0");
+  }, [showAggAlertColumn, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -6189,12 +6204,27 @@ export default function Home() {
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      disabled={savingAlertAll}
-                      className="rounded-md border border-sky-500/60 bg-sky-500/20 px-2 py-1 text-[11px] font-medium text-sky-100 transition-colors hover:bg-sky-500/30 disabled:opacity-50"
-                      onClick={() => void saveAllAlertThresholds()}
+                      className={cn(
+                        "rounded-md border px-2 py-1 text-[11px] transition-colors",
+                        showAggAlertColumn
+                          ? "border-sky-500 bg-sky-500/25 text-sky-100"
+                          : "border-slate-600 bg-slate-900/50 text-slate-300 hover:bg-slate-800/80",
+                      )}
+                      title="익·손 % 입력 열 표시/숨김"
+                      onClick={() => setShowAggAlertColumn((v) => !v)}
                     >
-                      {savingAlertAll ? "저장 중…" : "기준선 저장"}
+                      기준선 {showAggAlertColumn ? "숨기기" : "열 표시"}
                     </button>
+                    {showAggAlertColumn ? (
+                      <button
+                        type="button"
+                        disabled={savingAlertAll}
+                        className="rounded-md border border-sky-500/60 bg-sky-500/20 px-2 py-1 text-[11px] font-medium text-sky-100 transition-colors hover:bg-sky-500/30 disabled:opacity-50"
+                        onClick={() => void saveAllAlertThresholds()}
+                      >
+                        {savingAlertAll ? "저장 중…" : "기준선 저장"}
+                      </button>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[10px] font-medium text-slate-500">합산 기준</span>
@@ -6263,19 +6293,24 @@ export default function Home() {
                         <TableHead className="px-3 py-2 text-right tabular-nums">매입원가</TableHead>
                         <TableHead className="px-3 py-2 text-right tabular-nums">평가손익</TableHead>
                         <TableHead className="px-3 py-2 text-right tabular-nums">수익률</TableHead>
-                        <TableHead
-                          className="min-w-[6rem] px-1 py-2 text-center"
-                          title="티커별 공통 — 모든 보유자의 해당 종목 수익률에 적용"
-                        >
-                          익·손 %
-                        </TableHead>
+                        {showAggAlertColumn ? (
+                          <TableHead
+                            className="w-[4.75rem] min-w-[4.75rem] max-w-[4.75rem] px-0.5 py-2 text-center text-[11px]"
+                            title="티커별 공통 — 모든 보유자의 해당 종목 수익률에 적용"
+                          >
+                            기준선
+                          </TableHead>
+                        ) : null}
                         <TableHead className="px-3 py-2 text-center">보유자</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {holdingsAggSource.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
+                          <TableCell
+                            colSpan={showAggAlertColumn ? 8 : 7}
+                            className="px-3 py-8 text-center text-muted-foreground"
+                          >
                             합산할 주식 보유가 없습니다.
                           </TableCell>
                         </TableRow>
@@ -6342,8 +6377,9 @@ export default function Home() {
                                   ? "—"
                                   : `${row.pnlPct >= 0 ? "+" : ""}${row.pnlPct.toFixed(2)}%`}
                               </TableCell>
+                              {showAggAlertColumn ? (
                               <TableCell
-                                className="min-w-[6.75rem] max-w-[8.5rem] px-1 py-1 align-top"
+                                className="w-[4.75rem] min-w-[4.75rem] max-w-[4.75rem] px-0.5 py-1 align-top"
                                 title={
                                   row.symbolsForAlert.length > 1
                                     ? `차트 그룹 내 ${row.symbolsForAlert.length}개 티커에 동일 % 적용`
@@ -6358,9 +6394,9 @@ export default function Home() {
                                   const ar =
                                     alertThresholdsByKey[symbolAlertKey(syms[0])] ?? {};
                                   const inp =
-                                    "h-6 w-full min-w-0 rounded border border-border bg-background px-1 text-right text-[10px] tabular-nums text-foreground placeholder:text-muted-foreground/50";
+                                    "h-5 w-full max-w-[3.25rem] min-w-0 rounded border border-border bg-background px-0.5 text-right text-[9px] tabular-nums text-foreground placeholder:text-muted-foreground/50";
                                   const pctBtn =
-                                    "min-w-0 flex-1 rounded border border-border/80 bg-muted/40 px-0 py-px text-[8px] tabular-nums text-foreground hover:bg-muted";
+                                    "min-w-0 flex-1 rounded border border-border/80 bg-muted/40 px-0 py-px text-[7px] leading-none tabular-nums text-foreground hover:bg-muted";
                                   const parseNum = (raw: string) => {
                                     const v = raw.trim();
                                     if (v === "") return undefined;
@@ -6368,8 +6404,8 @@ export default function Home() {
                                     return Number.isFinite(n) ? n : undefined;
                                   };
                                   return (
-                                    <div className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-0.5 gap-y-0.5 text-[9px] leading-tight">
-                                      <span className="text-muted-foreground">익%</span>
+                                    <div className="grid grid-cols-[0.65rem_minmax(0,1fr)] items-start gap-x-px gap-y-0.5 text-[8px] leading-tight">
+                                      <span className="text-muted-foreground">익</span>
                                       <div className="min-w-0 space-y-0.5">
                                         <input
                                           type="number"
@@ -6403,7 +6439,7 @@ export default function Home() {
                                           ))}
                                         </div>
                                       </div>
-                                      <span className="text-muted-foreground">손%</span>
+                                      <span className="text-muted-foreground">손</span>
                                       <div className="min-w-0 space-y-0.5">
                                         <input
                                           type="number"
@@ -6441,6 +6477,7 @@ export default function Home() {
                                   );
                                 })()}
                               </TableCell>
+                              ) : null}
                               <TableCell
                                 className="cursor-help px-3 py-2 text-center text-[11px] text-muted-foreground"
                               >
@@ -6485,7 +6522,9 @@ export default function Home() {
                                 ? "—"
                                 : `${holdingsSymbolGrandTotals.pnlPct >= 0 ? "+" : ""}${holdingsSymbolGrandTotals.pnlPct.toFixed(2)}%`}
                             </TableCell>
-                            <TableCell className="px-1 py-2.5 text-center text-muted-foreground">—</TableCell>
+                            {showAggAlertColumn ? (
+                              <TableCell className="px-0.5 py-2.5 text-center text-muted-foreground">—</TableCell>
+                            ) : null}
                             <TableCell className="px-3 py-2.5 text-center text-muted-foreground">—</TableCell>
                           </TableRow>
                         </>
