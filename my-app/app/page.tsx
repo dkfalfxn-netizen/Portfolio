@@ -345,6 +345,8 @@ const OWNER_NAMES_STORAGE_KEY = "portfolio_owner_names_v1";
 const SYNC_KEY_STORAGE = "portfolio_sync_key_v1";
 const AUTO_SYNC_STORAGE = "portfolio_auto_sync_v1";
 const HOLDINGS_SORT_STORAGE_KEY = "portfolio_holdings_sort_v1";
+/** 보유 표 「기준선」열 표시 여부 (기본 숨김) */
+const HOLDINGS_ALERT_COLUMN_VISIBLE_KEY = "portfolio_holdings_alert_col_visible_v1";
 const DAILY_SNAPSHOTS_KEY = "portfolio_daily_snapshots_v1";
 /**
  * 마지막으로 서버와 성공적으로 동기화했을 때의 서버 updated_at 값.
@@ -1387,6 +1389,8 @@ export default function Home() {
 
   /** 보유자::티커 → 익절·손절 가격 및 수익률 % 기준 */
   const [alertThresholdsByKey, setAlertThresholdsByKey] = useState<AlertThresholdsByKey>({});
+  /** 보유 표 기준선 열 — 평소 숨김, 토글로 표시 */
+  const [showHoldingsAlertColumn, setShowHoldingsAlertColumn] = useState(false);
 
   const patchAlertThreshold = useCallback((positionKey: string, field: keyof AlertRule, value: number | undefined) => {
     setAlertThresholdsByKey((prev) => {
@@ -2984,6 +2988,13 @@ export default function Home() {
     setAutoSync(auto);
     const holdSort = loadHoldingsSort();
     setHoldingsSortByOwner(holdSort);
+    try {
+      setShowHoldingsAlertColumn(
+        window.localStorage.getItem(HOLDINGS_ALERT_COLUMN_VISIBLE_KEY) === "1",
+      );
+    } catch {
+      setShowHoldingsAlertColumn(false);
+    }
     setIsHydrated(true);
 
     if (savedKey.length < 8) {
@@ -3032,6 +3043,11 @@ export default function Home() {
       safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
     }
   }, [alertThresholdsByKey, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    safeSetItem(HOLDINGS_ALERT_COLUMN_VISIBLE_KEY, showHoldingsAlertColumn ? "1" : "0");
+  }, [showHoldingsAlertColumn, isHydrated]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -4689,13 +4705,34 @@ export default function Home() {
                         {sortBtn("valueAsc", "평가금액 ↑")}
                         {sortBtn("valueDesc", "평가금액 ↓")}
                         {sortBtn("group", "그룹별")}
+                        <button
+                          type="button"
+                          className={cn(
+                            "rounded-md border px-2 py-1 text-[11px] transition-colors",
+                            showHoldingsAlertColumn
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border bg-background hover:bg-muted",
+                          )}
+                          title="익절·손절 가격·수익률 % 입력 열 표시/숨김"
+                          onClick={() => setShowHoldingsAlertColumn((v) => !v)}
+                        >
+                          기준선 {showHoldingsAlertColumn ? "숨기기" : "열 표시"}
+                        </button>
                       </div>
                       <p className="text-[10px] text-muted-foreground">
                         입력 순은 ⋮ 드래그 또는 ▲▼로 저장됩니다. 다른 정렬일 때는 순서 변경이 비활성화됩니다. 표는
-                        차트 그룹(미입력 시 티커)별로 묶여 보입니다.{" "}
-                        <span className="text-muted-foreground/90">
-                          「기준선」열: 익절·손절 가격(현재가와 같은 통화)과 % — 여러 칸은 OR, 비우면 미사용.
-                        </span>
+                        차트 그룹(미입력 시 티커)별로 묶여 보입니다.
+                        {showHoldingsAlertColumn ? (
+                          <span className="text-muted-foreground/90">
+                            {" "}
+                            「기준선」열: 익절·손절 가격(현재가와 같은 통화)과 % — 여러 칸은 OR, 비우면 미사용.
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/90">
+                            {" "}
+                            기준선 입력은 「기준선 열 표시」를 누르면 표에 나타납니다.
+                          </span>
+                        )}
                       </p>
                     </div>
                     <div className="max-w-md space-y-1 text-right text-sm">
@@ -4804,12 +4841,14 @@ export default function Home() {
                         <TableHead className="px-3 py-1.5 text-right">현재가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">수량</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">수익률</TableHead>
-                        <TableHead
-                          className="w-[5.75rem] min-w-[5.75rem] max-w-[6.5rem] px-1 py-1.5 text-center align-bottom text-[9px] font-normal leading-tight text-muted-foreground sm:w-[6.25rem] sm:min-w-[6.25rem]"
-                          title="익절·손절 가격(현재가와 같은 통화) 및 수익률 %. 비우면 미사용. 여러 칸은 OR."
-                        >
-                          기준선
-                        </TableHead>
+                        {showHoldingsAlertColumn ? (
+                          <TableHead
+                            className="px-3 py-1.5 text-center"
+                            title="익절·손절 가격(현재가와 같은 통화) 및 수익률 %. 비우면 미사용. 여러 칸은 OR."
+                          >
+                            기준선
+                          </TableHead>
+                        ) : null}
                         <TableHead className="px-3 py-1.5 text-center">시그널</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">평단가</TableHead>
                         <TableHead className="px-3 py-1.5 text-right">매입환율</TableHead>
@@ -4820,7 +4859,7 @@ export default function Home() {
                       {displayItems.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={11}
+                            colSpan={showHoldingsAlertColumn ? 11 : 10}
                             className="px-3 py-4 text-center text-xs text-muted-foreground"
                           >
                             등록된 종목이 없습니다.
@@ -4856,7 +4895,7 @@ export default function Home() {
                           return (
                           <Fragment key={`${group.ownerName}-${block.label}`}>
                             <TableRow className="border-y border-border hover:bg-transparent">
-                              <TableCell colSpan={11} className="px-0 py-0">
+                              <TableCell colSpan={showHoldingsAlertColumn ? 11 : 10} className="px-0 py-0">
                                 <div className="flex flex-wrap items-center justify-between gap-2 border-l-4 border-primary/70 bg-primary/[0.07] px-3 py-2">
                                   <span className="text-base font-bold tracking-wide text-foreground">
                                     {block.label}
@@ -5051,6 +5090,7 @@ export default function Home() {
                               </div>
                             )}
                           </TableCell>
+                          {showHoldingsAlertColumn ? (
                           <TableCell
                             className="min-w-[5.5rem] max-w-[6.75rem] px-1 py-1 align-top"
                             title="가격=현재가와 같은 통화. %는 이 행 수익률과 동일(해외=원화 매입 대비). 여러 칸은 OR."
@@ -5124,6 +5164,7 @@ export default function Home() {
                               );
                             })()}
                           </TableCell>
+                          ) : null}
                           <TableCell className="px-3 py-1.5 text-center">
                             {group.ownerName === "김승주" ? (
                               (() => {
