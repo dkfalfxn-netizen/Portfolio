@@ -2432,6 +2432,28 @@ export default function Home() {
     return out;
   }, [enrichedPositions, alertThresholdsByKey]);
 
+  const alertLineHitsByOwner = useMemo(() => {
+    const map = new Map<string, typeof alertLineHits>();
+    for (const h of alertLineHits) {
+      const list = map.get(h.owner) ?? [];
+      list.push(h);
+      map.set(h.owner, list);
+    }
+    const orderedOwners: string[] = [];
+    for (const o of ownerNames) {
+      if (map.has(o)) orderedOwners.push(o);
+    }
+    for (const o of map.keys()) {
+      if (!orderedOwners.includes(o)) orderedOwners.push(o);
+    }
+    return orderedOwners.map((owner) => ({
+      owner,
+      hits: (map.get(owner) ?? []).sort((a, b) =>
+        a.name.localeCompare(b.name, "ko", { sensitivity: "base" }),
+      ),
+    }));
+  }, [alertLineHits, ownerNames]);
+
   const summaryCards = useMemo(() => {
     const stockValue = enrichedPositions.reduce((sum, position) => sum + position.valueKrw, 0);
     const stockCost = enrichedPositions.reduce((sum, position) => sum + position.costKrw, 0);
@@ -4627,35 +4649,59 @@ export default function Home() {
                   조건을 만족하는 종목이 없습니다. (기준을 입력하지 않았거나, 아직 도달하지 않은 경우)
                 </p>
               ) : (
-                <ul className="mt-2 space-y-2 text-xs sm:text-sm">
-                  {alertLineHits.map((h) => (
-                    <li
-                      key={h.key}
-                      className="rounded-md border border-amber-500/25 bg-slate-950/40 px-2 py-2 sm:px-3"
+                <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {alertLineHitsByOwner.map(({ owner, hits }) => (
+                    <div
+                      key={owner}
+                      className="overflow-hidden rounded-md border border-amber-500/25 bg-slate-950/40"
                     >
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                        <span className="font-semibold text-slate-100">{h.name}</span>
-                        <span className="text-[11px] text-slate-500">{h.symbol}</span>
-                        <span className="text-[11px] text-slate-400">· {h.owner}</span>
-                      </div>
-                      <p className="mt-1 text-[11px] text-amber-100/90">
-                        {h.reasons.join(" · ")}
+                      <p className="border-b border-amber-500/20 bg-amber-950/30 px-2 py-1.5 text-xs font-semibold text-amber-100">
+                        {owner}
+                        <span className="ml-1.5 font-normal text-amber-200/70">({hits.length}종목)</span>
                       </p>
-                      <p className="mt-0.5 text-[10px] tabular-nums text-slate-500">
-                        현재가 {h.currentPrice.toLocaleString(MONEY_INT_LOCALE, { maximumFractionDigits: 6 })}
-                        {h.returnPct != null ? (
-                          <span className={signedPnlTextClass(h.returnPct)}>
-                            {" "}
-                            · 수익률 {h.returnPct >= 0 ? "+" : ""}
-                            {h.returnPct.toFixed(2)}%
-                          </span>
-                        ) : (
-                          <span> · 수익률 계산 불가</span>
-                        )}
-                      </p>
-                    </li>
+                      <Table className="text-[11px]">
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead className="h-7 px-2 py-1">종목</TableHead>
+                            <TableHead className="h-7 px-2 py-1">조건</TableHead>
+                            <TableHead className="h-7 px-2 py-1 text-right tabular-nums">현재가</TableHead>
+                            <TableHead className="h-7 px-2 py-1 text-right tabular-nums">수익률</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {hits.map((h) => (
+                            <TableRow key={h.key} className="border-amber-500/10">
+                              <TableCell className="max-w-[7rem] px-2 py-1.5 align-top">
+                                <span className="block truncate font-medium text-slate-100">{h.name}</span>
+                                <span className="block truncate text-[10px] text-slate-500">{h.symbol}</span>
+                              </TableCell>
+                              <TableCell className="max-w-[6.5rem] px-2 py-1.5 align-top text-[10px] leading-snug text-amber-100/90">
+                                {h.reasons.join(" · ")}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap px-2 py-1.5 text-right align-top tabular-nums text-slate-300">
+                                {h.currentPrice.toLocaleString(MONEY_INT_LOCALE, {
+                                  maximumFractionDigits: 6,
+                                })}
+                              </TableCell>
+                              <TableCell
+                                className={cn(
+                                  "whitespace-nowrap px-2 py-1.5 text-right align-top tabular-nums font-medium",
+                                  h.returnPct != null
+                                    ? signedPnlTextClass(h.returnPct)
+                                    : "text-slate-500",
+                                )}
+                              >
+                                {h.returnPct != null
+                                  ? `${h.returnPct >= 0 ? "+" : ""}${h.returnPct.toFixed(2)}%`
+                                  : "—"}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   ))}
-                </ul>
+                </div>
               )}
             </section>
           </div>
