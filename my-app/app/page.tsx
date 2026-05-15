@@ -3540,7 +3540,32 @@ export default function Home() {
     }
   }
 
-  /** 서버(Supabase)에 저장된 현재 스냅샷을 백업 테이블에 복사합니다. 메인 portfolio_snapshots는 변경하지 않습니다. */
+  /** 이 기기 localStorage·state 기준 전체 스냅샷(기준선·목표비중·메모 등 포함) */
+  const buildLocalSnapshotForBackup = useCallback(() => {
+    safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(alertThresholdsByKey));
+    return {
+      positions,
+      cash_by_owner: cashByOwner,
+      holdings_sort_by_owner: holdingsSortByOwner,
+      sell_log_by_owner: sellLog,
+      owner_names: ownerNames,
+      target_stock_weight_by_owner: loadAllTargetStockWeights(),
+      owner_scratchpad_by_owner: loadAllOwnerScratchpads(),
+      rebalance_calculator_by_owner: buildRebalanceCalculatorByOwnerFromLocal(),
+      alert_thresholds_by_position: getAlertThresholdsForSync(),
+      source_updated_at: lastSyncedAt ?? new Date().toISOString(),
+    };
+  }, [
+    positions,
+    cashByOwner,
+    holdingsSortByOwner,
+    sellLog,
+    ownerNames,
+    alertThresholdsByKey,
+    lastSyncedAt,
+  ]);
+
+  /** 현재 기기의 수기 입력 전체를 백업 테이블에 저장합니다. */
   async function handleBackupSnapshot() {
     const key = cloudSyncKey.trim();
     if (key.length < 8) {
@@ -3549,9 +3574,9 @@ export default function Home() {
     }
     const ok = window.confirm(
       [
-        "지금 서버(Supabase)에 올라가 있는 잔고를 백업 테이블에 한 번 더 복사합니다.",
+        "이 기기에 있는 데이터를 백업합니다.",
         "",
-        "이 기기에서만 수정하고 아직 서버로 반영되지 않은 종목·현금·보유자 변경은 백업에 포함되지 않습니다. 먼저 「서버로 올리기」 또는 자동 저장이 끝난 뒤 누르세요.",
+        "포함: 종목·현금·보유자·매도일지·보유 순서·목표 비중·메모·리밸런스 계산·기준선(익·손 %·가격) 등",
         "",
         "백업을 진행할까요?",
       ].join("\n"),
@@ -3563,7 +3588,7 @@ export default function Home() {
       const r = await fetch("/api/backup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sync_key: key }),
+        body: JSON.stringify({ sync_key: key, snapshot: buildLocalSnapshotForBackup() }),
       });
       const j = (await r.json()) as { ok?: boolean; message?: string; error?: string; warning?: string };
       if (!r.ok) {
@@ -3588,7 +3613,7 @@ export default function Home() {
     }
     const ok = window.confirm(
       [
-        "① 먼저 지금 서버에 올라가 있는 잔고를 백업 테이블에 한 줄 추가하고,",
+        "① 이 기기의 잔고·기준선·목표비중 등 수기 입력을 백업 테이블에 한 줄 추가하고,",
         "② 이어서 서버에 쌓인 백업 목록을 JSON 파일로 내려받습니다.",
         "",
         "내려받은 파일은 내 PC의 다운로드 폴더 등에 남습니다. 웹이 그 파일을 대신 지우지는 못합니다(브라우저 보안). 필요 없으면 직접 삭제하세요.",
@@ -3605,7 +3630,7 @@ export default function Home() {
       const rSnap = await fetch("/api/backup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sync_key: key }),
+        body: JSON.stringify({ sync_key: key, snapshot: buildLocalSnapshotForBackup() }),
       });
       const jSnap = (await rSnap.json().catch(() => ({}))) as { error?: string; ok?: boolean };
       if (!rSnap.ok) {
