@@ -51,6 +51,18 @@ import {
   type AlertThresholdsByKey,
 } from "@/lib/alert-thresholds";
 import { todayKST, yesterdayKST } from "@/lib/date-utils";
+
+const ALERT_RETURN_PCT_PRESETS = [5, 10, 15, 20] as const;
+
+function hasAlertThresholdRule(rule: AlertRule | undefined): boolean {
+  if (!rule) return false;
+  return (
+    rule.takeProfitPrice !== undefined ||
+    rule.stopLossPrice !== undefined ||
+    rule.takeProfitReturnPct !== undefined ||
+    rule.stopLossReturnPct !== undefined
+  );
+}
 import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
@@ -3899,6 +3911,14 @@ export default function Home() {
       ...(cg ? { chartGroup: cg } : {}),
     };
 
+    const needsAlertThresholdPrompt = ownersOrdered.some((owner) => {
+      const posKey = makePositionKey({ owner, symbol, currency: form.currency });
+      const isNewPosition = !positions.some((p) => makePositionKey(p) === posKey);
+      if (!isNewPosition) return false;
+      const alertPk = positionAlertKey(owner, symbol);
+      return !hasAlertThresholdRule(alertThresholdsByKey[alertPk]);
+    });
+
     setPositions((prev) => {
       let acc = prev;
       for (const owner of ownersOrdered) {
@@ -3970,7 +3990,14 @@ export default function Home() {
       selectedOwners: form.selectedOwners,
     });
 
-    showActionSuccessToast("종목이 정상적으로 반영되었습니다.");
+    if (needsAlertThresholdPrompt) {
+      setShowHoldingsAlertColumn(true);
+      showActionSuccessToast(
+        "종목이 반영되었습니다. 보유 표 「기준선」열에서 익절·손절 기준을 입력한 뒤 저장을 눌러 주세요.",
+      );
+    } else {
+      showActionSuccessToast("종목이 정상적으로 반영되었습니다.");
+    }
 
     requestAnimationFrame(() => {
       window.scrollTo({ top: savedScrollY, behavior: "instant" });
@@ -5206,7 +5233,7 @@ export default function Home() {
                           </TableCell>
                           {showHoldingsAlertColumn ? (
                           <TableCell
-                            className="min-w-[5.5rem] max-w-[6.75rem] px-1 py-1 align-top"
+                            className="min-w-[6.75rem] max-w-[8.5rem] px-1 py-1 align-top"
                             title="가격=현재가와 같은 통화. %는 이 행 수익률과 동일(해외=원화 매입 대비). 여러 칸은 OR."
                           >
                             {(() => {
@@ -5214,6 +5241,8 @@ export default function Home() {
                               const ar = alertThresholdsByKey[alertPk] ?? {};
                               const inp =
                                 "h-6 w-full min-w-0 rounded border border-border bg-background px-1 text-right text-[10px] tabular-nums text-foreground placeholder:text-muted-foreground/50";
+                              const pctBtn =
+                                "min-w-0 flex-1 rounded border border-border/80 bg-muted/40 px-0 py-px text-[8px] tabular-nums text-foreground hover:bg-muted";
                               const parseNum = (raw: string) => {
                                 const v = raw.trim();
                                 if (v === "") return undefined;
@@ -5221,7 +5250,7 @@ export default function Home() {
                                 return Number.isFinite(n) ? n : undefined;
                               };
                               return (
-                                <div className="grid grid-cols-[1rem_minmax(0,1fr)] items-center gap-x-0.5 gap-y-0.5 text-[9px] leading-tight">
+                                <div className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-0.5 gap-y-0.5 text-[9px] leading-tight">
                                   <span className="text-muted-foreground">익가</span>
                                   <input
                                     type="number"
@@ -5249,31 +5278,73 @@ export default function Home() {
                                     }
                                   />
                                   <span className="text-muted-foreground">익%</span>
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    inputMode="decimal"
-                                    aria-label={`${position.name} 익절 수익률 퍼센트`}
-                                    className={inp}
-                                    placeholder="·"
-                                    value={ar.takeProfitReturnPct ?? ""}
-                                    onChange={(e) =>
-                                      patchAlertThreshold(alertPk, "takeProfitReturnPct", parseNum(e.target.value))
-                                    }
-                                  />
+                                  <div className="min-w-0 space-y-0.5">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      inputMode="decimal"
+                                      aria-label={`${position.name} 익절 수익률 퍼센트`}
+                                      className={inp}
+                                      placeholder="·"
+                                      value={ar.takeProfitReturnPct ?? ""}
+                                      onChange={(e) =>
+                                        patchAlertThreshold(
+                                          alertPk,
+                                          "takeProfitReturnPct",
+                                          parseNum(e.target.value),
+                                        )
+                                      }
+                                    />
+                                    <div className="flex gap-px">
+                                      {ALERT_RETURN_PCT_PRESETS.map((pct) => (
+                                        <button
+                                          key={`tp-${pct}`}
+                                          type="button"
+                                          className={pctBtn}
+                                          title={`익절 ${pct}%`}
+                                          onClick={() =>
+                                            patchAlertThreshold(alertPk, "takeProfitReturnPct", pct)
+                                          }
+                                        >
+                                          {pct}%
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
                                   <span className="text-muted-foreground">손%</span>
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    inputMode="decimal"
-                                    aria-label={`${position.name} 손절 수익률 퍼센트`}
-                                    className={inp}
-                                    placeholder="·"
-                                    value={ar.stopLossReturnPct ?? ""}
-                                    onChange={(e) =>
-                                      patchAlertThreshold(alertPk, "stopLossReturnPct", parseNum(e.target.value))
-                                    }
-                                  />
+                                  <div className="min-w-0 space-y-0.5">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      inputMode="decimal"
+                                      aria-label={`${position.name} 손절 수익률 퍼센트`}
+                                      className={inp}
+                                      placeholder="·"
+                                      value={ar.stopLossReturnPct ?? ""}
+                                      onChange={(e) =>
+                                        patchAlertThreshold(
+                                          alertPk,
+                                          "stopLossReturnPct",
+                                          parseNum(e.target.value),
+                                        )
+                                      }
+                                    />
+                                    <div className="flex gap-px">
+                                      {ALERT_RETURN_PCT_PRESETS.map((pct) => (
+                                        <button
+                                          key={`sl-${pct}`}
+                                          type="button"
+                                          className={pctBtn}
+                                          title={`손절 -${pct}%`}
+                                          onClick={() =>
+                                            patchAlertThreshold(alertPk, "stopLossReturnPct", -pct)
+                                          }
+                                        >
+                                          -{pct}%
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
                                   <span />
                                   <button
                                     type="button"
