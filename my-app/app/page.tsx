@@ -56,6 +56,16 @@ import { todayKST, yesterdayKST } from "@/lib/date-utils";
 
 const ALERT_RETURN_PCT_PRESETS = [5, 10, 15, 20] as const;
 
+const ALERT_PCT_PRESET_BTN =
+  "min-h-[1.35rem] min-w-0 flex-1 rounded-md border border-slate-500/90 bg-slate-800 px-0.5 py-0.5 text-[10px] font-semibold leading-tight tabular-nums text-slate-100 shadow-sm transition-colors hover:border-sky-400/80 hover:bg-sky-500/25 active:scale-[0.98]";
+
+function alertPctPresetBtnClass(active: boolean): string {
+  return cn(
+    ALERT_PCT_PRESET_BTN,
+    active && "border-sky-400 bg-sky-500/40 text-white ring-1 ring-sky-400/40",
+  );
+}
+
 function hasAlertThresholdRule(rule: AlertRule | undefined): boolean {
   if (!rule) return false;
   return (
@@ -6341,7 +6351,7 @@ export default function Home() {
                         <TableHead className="px-3 py-2 text-right tabular-nums">수익률</TableHead>
                         {showAggAlertColumn ? (
                           <TableHead
-                            className="w-[4.75rem] min-w-[4.75rem] max-w-[4.75rem] px-0.5 py-2 text-center text-[11px]"
+                            className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-0.5 py-2 text-center text-[11px]"
                             title="티커별 공통 — 모든 보유자의 해당 종목 수익률에 적용"
                           >
                             기준선
@@ -6425,7 +6435,7 @@ export default function Home() {
                               </TableCell>
                               {showAggAlertColumn ? (
                               <TableCell
-                                className="w-[4.75rem] min-w-[4.75rem] max-w-[4.75rem] px-0.5 py-1 align-top"
+                                className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-0.5 py-1 align-top"
                                 title={
                                   row.symbolsForAlert.length > 1
                                     ? `차트 그룹 내 ${row.symbolsForAlert.length}개 티커에 동일 % 적용`
@@ -6440,9 +6450,7 @@ export default function Home() {
                                   const ar =
                                     alertThresholdsByKey[symbolAlertKey(syms[0])] ?? {};
                                   const inp =
-                                    "h-5 w-full max-w-[3.25rem] min-w-0 rounded border border-border bg-background px-0.5 text-right text-[9px] tabular-nums text-foreground placeholder:text-muted-foreground/50";
-                                  const pctBtn =
-                                    "min-w-0 flex-1 rounded border border-border/80 bg-muted/40 px-0 py-px text-[7px] leading-none tabular-nums text-foreground hover:bg-muted";
+                                    "h-6 w-full min-w-0 rounded-md border border-border bg-background px-1 text-right text-[11px] tabular-nums text-foreground placeholder:text-muted-foreground/50";
                                   const parseNum = (raw: string) => {
                                     const v = raw.trim();
                                     if (v === "") return undefined;
@@ -6450,9 +6458,11 @@ export default function Home() {
                                     return Number.isFinite(n) ? n : undefined;
                                   };
                                   return (
-                                    <div className="grid grid-cols-[0.65rem_minmax(0,1fr)] items-start gap-x-px gap-y-0.5 text-[8px] leading-tight">
-                                      <span className="text-muted-foreground">익</span>
-                                      <div className="min-w-0 space-y-0.5">
+                                    <div className="grid grid-cols-[1.1rem_minmax(0,1fr)] items-start gap-x-0.5 gap-y-1 text-[10px] leading-tight">
+                                      <span className="pt-1 text-[10px] font-medium text-muted-foreground">
+                                        익
+                                      </span>
+                                      <div className="min-w-0 space-y-1">
                                         <input
                                           type="number"
                                           step="any"
@@ -6469,12 +6479,14 @@ export default function Home() {
                                             )
                                           }
                                         />
-                                        <div className="flex gap-px">
+                                        <div className="flex gap-0.5">
                                           {ALERT_RETURN_PCT_PRESETS.map((pct) => (
                                             <button
                                               key={`agg-tp-${row.key}-${pct}`}
                                               type="button"
-                                              className={pctBtn}
+                                              className={alertPctPresetBtnClass(
+                                                ar.takeProfitReturnPct === pct,
+                                              )}
                                               title={`익절 ${pct}%`}
                                               onClick={() =>
                                                 patchSymbolAlertPct(syms, "takeProfitReturnPct", pct)
@@ -6485,8 +6497,10 @@ export default function Home() {
                                           ))}
                                         </div>
                                       </div>
-                                      <span className="text-muted-foreground">손</span>
-                                      <div className="min-w-0 space-y-0.5">
+                                      <span className="pt-1 text-[10px] font-medium text-muted-foreground">
+                                        손
+                                      </span>
+                                      <div className="min-w-0 space-y-1">
                                         <input
                                           type="number"
                                           step="any"
@@ -6503,12 +6517,14 @@ export default function Home() {
                                             )
                                           }
                                         />
-                                        <div className="flex gap-px">
+                                        <div className="flex gap-0.5">
                                           {ALERT_RETURN_PCT_PRESETS.map((pct) => (
                                             <button
                                               key={`agg-sl-${row.key}-${pct}`}
                                               type="button"
-                                              className={pctBtn}
+                                              className={alertPctPresetBtnClass(
+                                                ar.stopLossReturnPct === -pct,
+                                              )}
                                               title={`손절 -${pct}%`}
                                               onClick={() =>
                                                 patchSymbolAlertPct(syms, "stopLossReturnPct", -pct)
