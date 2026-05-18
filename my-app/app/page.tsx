@@ -1348,6 +1348,8 @@ export default function Home() {
   const [sellTickerSearch, setSellTickerSearch] = useState<Record<string, string>>({});
   /** 실현손익 티커 검색 combobox: owner별 드롭다운 열림 여부 */
   const [sellTickerOpen, setSellTickerOpen] = useState<Record<string, boolean>>({});
+  /** 실현손익 티커 검색 combobox: owner별 키보드 하이라이트 인덱스 */
+  const [sellTickerHl, setSellTickerHl] = useState<Record<string, number>>({});
   /** 실현손익 티커 입력 ref: 기록 추가 후 포커스 복귀용 */
   const sellTickerInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -7344,52 +7346,78 @@ export default function Home() {
                   <div className="grid grid-cols-2 gap-1.5 rounded-lg border bg-muted/20 p-2 text-xs sm:grid-cols-4">
                     <input type="date" className="rounded border bg-background px-1.5 py-1" value={form.date} onChange={(e) => setForm2({ date: e.target.value })} />
                     <div className="relative">
-                      <input
-                        ref={(el) => { sellTickerInputRefs.current[owner] = el; }}
-                        className="w-full rounded border bg-background px-1.5 py-1"
-                        placeholder="티커 또는 종목명 검색"
-                        value={sellTickerSearch[owner] ?? (form.symbol ? `${form.symbol}(${form.name})` : "")}
-                        onChange={(e) => {
-                          const q = e.target.value;
-                          setSellTickerSearch((prev) => ({ ...prev, [owner]: q }));
-                          setSellTickerOpen((prev) => ({ ...prev, [owner]: true }));
-                          if (q === "") handleTickerChange("");
-                        }}
-                        onFocus={() => setSellTickerOpen((prev) => ({ ...prev, [owner]: true }))}
-                        onBlur={() => window.setTimeout(() => setSellTickerOpen((prev) => ({ ...prev, [owner]: false })), 150)}
-                        autoComplete="off"
-                      />
-                      {sellTickerOpen[owner] && (() => {
+                      {(() => {
                         const q = (sellTickerSearch[owner] ?? "").toLowerCase();
                         const filtered = ownerTickerOptions.filter((opt) =>
                           !q || opt.symbol.toLowerCase().includes(q) || opt.name.toLowerCase().includes(q)
                         );
-                        return filtered.length > 0 ? (
-                          <ul
-                            className="absolute left-0 top-full z-50 mt-0.5 max-h-48 w-max min-w-full overflow-y-auto rounded border shadow-lg"
-                            style={{ background: "var(--background, #18181b)", color: "inherit" }}
-                            onMouseDown={(e) => e.preventDefault()}
-                          >
-                            {filtered.map((opt) => (
-                              <li
-                                key={opt.symbol}
-                                className="cursor-pointer px-2 py-1"
-                                style={{ background: "transparent" }}
-                                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent, #27272a)")}
-                                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                                onMouseDown={(e) => {
+                        const hl = sellTickerHl[owner] ?? 0;
+                        const selectByIndex = (idx: number) => {
+                          const opt = filtered[idx];
+                          if (!opt) return;
+                          handleTickerChange(opt.symbol);
+                          setSellTickerSearch((prev) => ({ ...prev, [owner]: "" }));
+                          setSellTickerOpen((prev) => ({ ...prev, [owner]: false }));
+                          setSellTickerHl((prev) => ({ ...prev, [owner]: 0 }));
+                        };
+                        return (
+                          <>
+                            <input
+                              ref={(el) => { sellTickerInputRefs.current[owner] = el; }}
+                              className="w-full rounded border bg-background px-1.5 py-1"
+                              placeholder="티커 또는 종목명 검색"
+                              value={sellTickerSearch[owner] ?? (form.symbol ? `${form.symbol}(${form.name})` : "")}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setSellTickerSearch((prev) => ({ ...prev, [owner]: v }));
+                                setSellTickerOpen((prev) => ({ ...prev, [owner]: true }));
+                                setSellTickerHl((prev) => ({ ...prev, [owner]: 0 }));
+                                if (v === "") handleTickerChange("");
+                              }}
+                              onFocus={() => setSellTickerOpen((prev) => ({ ...prev, [owner]: true }))}
+                              onBlur={() => window.setTimeout(() => setSellTickerOpen((prev) => ({ ...prev, [owner]: false })), 150)}
+                              onKeyDown={(e) => {
+                                if (!sellTickerOpen[owner] || filtered.length === 0) return;
+                                if (e.key === "ArrowDown") {
                                   e.preventDefault();
-                                  handleTickerChange(opt.symbol);
-                                  setSellTickerSearch((prev) => ({ ...prev, [owner]: "" }));
+                                  setSellTickerHl((prev) => ({ ...prev, [owner]: Math.min((prev[owner] ?? 0) + 1, filtered.length - 1) }));
+                                } else if (e.key === "ArrowUp") {
+                                  e.preventDefault();
+                                  setSellTickerHl((prev) => ({ ...prev, [owner]: Math.max((prev[owner] ?? 0) - 1, 0) }));
+                                } else if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  selectByIndex(hl);
+                                } else if (e.key === "Escape") {
                                   setSellTickerOpen((prev) => ({ ...prev, [owner]: false }));
-                                }}
+                                }
+                              }}
+                              autoComplete="off"
+                            />
+                            {sellTickerOpen[owner] && filtered.length > 0 && (
+                              <ul
+                                className="absolute left-0 top-full z-50 mt-0.5 max-h-48 w-max min-w-full overflow-y-auto rounded border shadow-lg"
+                                style={{ background: "var(--background, #18181b)", color: "inherit" }}
+                                onMouseDown={(e) => e.preventDefault()}
                               >
-                                <span className="font-mono">{opt.symbol}</span>
-                                <span className="ml-1 text-muted-foreground">{opt.name}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null;
+                                {filtered.map((opt, idx) => (
+                                  <li
+                                    key={opt.symbol}
+                                    className="cursor-pointer px-2 py-1"
+                                    style={{ background: idx === hl ? "var(--accent, #27272a)" : "transparent" }}
+                                    onMouseEnter={() => setSellTickerHl((prev) => ({ ...prev, [owner]: idx }))}
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      selectByIndex(idx);
+                                    }}
+                                  >
+                                    <span className="font-mono">{opt.symbol}</span>
+                                    <span className="ml-1 text-muted-foreground">{opt.name}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </>
+                        );
                       })()}
                     </div>
                     <select className="cursor-pointer rounded border bg-background px-1.5 py-1" value={form.currency} onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW" })}>
