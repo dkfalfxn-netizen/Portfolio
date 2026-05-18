@@ -7365,11 +7365,18 @@ export default function Home() {
                           !q || opt.symbol.toLowerCase().includes(q) || opt.name.toLowerCase().includes(q)
                         );
                         return filtered.length > 0 ? (
-                          <ul className="absolute left-0 top-full z-50 mt-0.5 max-h-48 w-max min-w-full overflow-y-auto rounded border bg-popover shadow-lg">
+                          <ul
+                            className="absolute left-0 top-full z-50 mt-0.5 max-h-48 w-max min-w-full overflow-y-auto rounded border shadow-lg"
+                            style={{ background: "var(--background, #18181b)", color: "inherit" }}
+                            onMouseDown={(e) => e.preventDefault()}
+                          >
                             {filtered.map((opt) => (
                               <li
                                 key={opt.symbol}
-                                className="cursor-pointer px-2 py-1 hover:bg-accent"
+                                className="cursor-pointer px-2 py-1"
+                                style={{ background: "transparent" }}
+                                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent, #27272a)")}
+                                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                                 onMouseDown={(e) => {
                                   e.preventDefault();
                                   handleTickerChange(opt.symbol);
