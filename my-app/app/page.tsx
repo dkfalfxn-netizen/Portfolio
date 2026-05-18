@@ -7280,7 +7280,7 @@ export default function Home() {
                   currency: "USD", fxRate: String(Math.round(usdKrw)),
                   note: "", selectedOwners: [owner], ownerOverrides: {}, editingId: null,
                 });
-                setSellTickerSearch((prev) => ({ ...prev, [owner]: "" }));
+                setSellTickerSearch((prev) => { const next = { ...prev }; delete next[owner]; return next; });
                 window.setTimeout(() => { sellTickerInputRefs.current[owner]?.focus(); }, 0);
               };
               const handleListEdit = (e: SellLogEntry) => {
@@ -7356,7 +7356,7 @@ export default function Home() {
                           const opt = filtered[idx];
                           if (!opt) return;
                           handleTickerChange(opt.symbol);
-                          setSellTickerSearch((prev) => ({ ...prev, [owner]: "" }));
+                          setSellTickerSearch((prev) => { const next = { ...prev }; delete next[owner]; return next; });
                           setSellTickerOpen((prev) => ({ ...prev, [owner]: false }));
                           setSellTickerHl((prev) => ({ ...prev, [owner]: 0 }));
                         };
