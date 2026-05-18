@@ -1583,6 +1583,8 @@ export default function Home() {
   const skipAddFormAutoNameRef = useRef(false);
   /** 차트 그룹 수동 입력 시 자동 채움 비활성 */
   const skipAddFormAutoChartGroupRef = useRef(false);
+  /** 종목 추가 폼: 추가 후 포커스 복귀용 티커 입력 ref */
+  const addSymbolInputRef = useRef<HTMLInputElement>(null);
   /** 보유 티커 커스텀 자동완성 패널 */
   const [holdingsTickerSuggestOpen, setHoldingsTickerSuggestOpen] = useState(false);
   const [holdingsTickerSuggestHl, setHoldingsTickerSuggestHl] = useState(0);
@@ -1590,6 +1592,7 @@ export default function Home() {
   const addFormFxManualRef = useRef(false);
   const [purchaseFxAutoBusy, setPurchaseFxAutoBusy] = useState(false);
   const [addPositionError, setAddPositionError] = useState("");
+  const [focusSymbolTrigger, setFocusSymbolTrigger] = useState(0);
   const actionSuccessToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [actionSuccessToast, setActionSuccessToast] = useState("");
   const showActionSuccessToast = useCallback((message: string) => {
@@ -3947,6 +3950,12 @@ export default function Home() {
     }
   }
 
+  // 종목 추가 후 티커 입력칸 자동 포커스
+  useEffect(() => {
+    if (focusSymbolTrigger === 0) return;
+    addSymbolInputRef.current?.focus();
+  }, [focusSymbolTrigger]);
+
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const savedScrollY = window.scrollY;
@@ -4140,6 +4149,7 @@ export default function Home() {
     requestAnimationFrame(() => {
       window.scrollTo({ top: savedScrollY, behavior: "instant" });
     });
+    setFocusSymbolTrigger((n) => n + 1);
   }
 
   function handleDeleteRow(rowIndex: number) {
@@ -6729,6 +6739,7 @@ export default function Home() {
               </div>
               <div className="relative min-w-0">
                 <input
+                  ref={addSymbolInputRef}
                   className="w-full rounded-md border bg-background px-2 py-1 text-sm leading-tight"
                   placeholder="티커 (예: NVDA, 005930)"
                   value={form.symbol}
