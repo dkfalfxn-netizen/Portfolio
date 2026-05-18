@@ -1344,6 +1344,13 @@ export default function Home() {
   const [sellLogListViewOwner, setSellLogListViewOwner] = useState<string>("김승주");
   /** 기록 목록 UI 접힘(기본 접힘) */
   const [sellLogListExpanded, setSellLogListExpanded] = useState(false);
+  /** 실현손익 티커 검색 combobox: owner별 검색어 */
+  const [sellTickerSearch, setSellTickerSearch] = useState<Record<string, string>>({});
+  /** 실현손익 티커 검색 combobox: owner별 드롭다운 열림 여부 */
+  const [sellTickerOpen, setSellTickerOpen] = useState<Record<string, boolean>>({});
+  /** 실현손익 티커 입력 ref: 기록 추가 후 포커스 복귀용 */
+  const sellTickerInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
   const [sellLogForm, setSellLogForm] = useState<Record<string, {
     date: string; symbol: string; name: string; qty: string;
     sellPrice: string; avgPrice: string; currency: "USD" | "EUR" | "KRW"; fxRate: string; note: string;
@@ -7271,6 +7278,8 @@ export default function Home() {
                   currency: "USD", fxRate: String(Math.round(usdKrw)),
                   note: "", selectedOwners: [owner], ownerOverrides: {}, editingId: null,
                 });
+                setSellTickerSearch((prev) => ({ ...prev, [owner]: "" }));
+                window.setTimeout(() => { sellTickerInputRefs.current[owner]?.focus(); }, 0);
               };
               const handleListEdit = (e: SellLogEntry) => {
                 setSellLogOwnerForSection(listViewOwner);
@@ -7334,10 +7343,48 @@ export default function Home() {
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 rounded-lg border bg-muted/20 p-2 text-xs sm:grid-cols-4">
                     <input type="date" className="rounded border bg-background px-1.5 py-1" value={form.date} onChange={(e) => setForm2({ date: e.target.value })} />
-                    <select className="cursor-pointer rounded border bg-background px-1.5 py-1" value={form.symbol} onChange={(e) => handleTickerChange(e.target.value)}>
-                      <option value="">티커 선택</option>
-                      {ownerTickerOptions.map((opt) => <option key={opt.symbol} value={opt.symbol}>{opt.symbol}({opt.name})</option>)}
-                    </select>
+                    <div className="relative">
+                      <input
+                        ref={(el) => { sellTickerInputRefs.current[owner] = el; }}
+                        className="w-full rounded border bg-background px-1.5 py-1"
+                        placeholder="티커 또는 종목명 검색"
+                        value={sellTickerSearch[owner] ?? (form.symbol ? `${form.symbol}(${form.name})` : "")}
+                        onChange={(e) => {
+                          const q = e.target.value;
+                          setSellTickerSearch((prev) => ({ ...prev, [owner]: q }));
+                          setSellTickerOpen((prev) => ({ ...prev, [owner]: true }));
+                          if (q === "") handleTickerChange("");
+                        }}
+                        onFocus={() => setSellTickerOpen((prev) => ({ ...prev, [owner]: true }))}
+                        onBlur={() => window.setTimeout(() => setSellTickerOpen((prev) => ({ ...prev, [owner]: false })), 150)}
+                        autoComplete="off"
+                      />
+                      {sellTickerOpen[owner] && (() => {
+                        const q = (sellTickerSearch[owner] ?? "").toLowerCase();
+                        const filtered = ownerTickerOptions.filter((opt) =>
+                          !q || opt.symbol.toLowerCase().includes(q) || opt.name.toLowerCase().includes(q)
+                        );
+                        return filtered.length > 0 ? (
+                          <ul className="absolute left-0 top-full z-50 mt-0.5 max-h-48 w-max min-w-full overflow-y-auto rounded border bg-popover shadow-lg">
+                            {filtered.map((opt) => (
+                              <li
+                                key={opt.symbol}
+                                className="cursor-pointer px-2 py-1 hover:bg-accent"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  handleTickerChange(opt.symbol);
+                                  setSellTickerSearch((prev) => ({ ...prev, [owner]: "" }));
+                                  setSellTickerOpen((prev) => ({ ...prev, [owner]: false }));
+                                }}
+                              >
+                                <span className="font-mono">{opt.symbol}</span>
+                                <span className="ml-1 text-muted-foreground">{opt.name}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null;
+                      })()}
+                    </div>
                     <select className="cursor-pointer rounded border bg-background px-1.5 py-1" value={form.currency} onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW" })}>
                       <option value="USD">USD</option><option value="EUR">EUR</option><option value="KRW">KRW</option>
                     </select>
