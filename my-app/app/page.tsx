@@ -4102,6 +4102,11 @@ export default function Home() {
     e.preventDefault();
     const savedScrollY = window.scrollY;
 
+    // 붙여넣기 오류가 남아 있으면 저장 차단
+    if (buyPasteError && !buyPasteError.startsWith("ℹ️")) {
+      return;
+    }
+
     const quantity = Number(form.quantity);
     const avgPrice = Number(form.avgPrice);
 
@@ -6018,6 +6023,10 @@ export default function Home() {
                     }
 
                     function handleSellLogSave() {
+                      // 붙여넣기 오류(⚠️)가 남아 있으면 저장 차단
+                      const currentErr = sellLogErrorByOwner[owner] ?? "";
+                      if (currentErr.startsWith("⚠️")) return;
+
                       setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
                       const sell = Number(form.sellPrice);
                       if (!form.symbol.trim()) {
@@ -7278,7 +7287,8 @@ export default function Home() {
                 </span>
                 <button
                   type="submit"
-                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
+                  disabled={!!(buyPasteError && !buyPasteError.startsWith("ℹ️"))}
+                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   추가
                 </button>
@@ -7910,7 +7920,12 @@ export default function Home() {
                     {/* 행 4: 메모 · 저장 */}
                     <div className="flex gap-2">
                       <input className="flex-1 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70" placeholder="메모 (선택)" value={form.note} onChange={(e) => setForm2({ note: e.target.value })} />
-                      <button type="button" className="shrink-0 cursor-pointer rounded-md bg-primary px-4 py-1.5 font-semibold text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all" onClick={handleSave}>
+                      <button
+                        type="button"
+                        disabled={!!(sellLogErrorByOwner[owner] && sellLogErrorByOwner[owner].startsWith("⚠️"))}
+                        className="shrink-0 cursor-pointer rounded-md bg-primary px-4 py-1.5 font-semibold text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                        onClick={handleSave}
+                      >
                         {form.editingId ? "수정 저장" : "+ 기록 추가"}
                       </button>
                     </div>
