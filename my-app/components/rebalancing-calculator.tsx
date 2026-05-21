@@ -1577,6 +1577,35 @@ function RebalancingOwner({
           한 종목이 이번 회 금액만으로 목표치에 먼저 도달하면 남은 금액은 아직 부족한 종목들만 대상으로 같은 비율로 다시 배분합니다.
         </p>
 
+        {/* ── 계산 방식 요약 메모 ───────────────────────────────────────────────── */}
+        <details className="rounded-lg border border-slate-700/40 bg-slate-900/20 text-[11px] leading-relaxed text-muted-foreground">
+          <summary className="cursor-pointer select-none px-3 py-2 font-semibold text-slate-300 hover:text-slate-100">
+            계산 방식 요약 ▸
+          </summary>
+          <div className="grid gap-3 px-3 pb-3 pt-1 sm:grid-cols-3">
+            <div>
+              <p className="mb-1 font-semibold text-slate-200">① 회당 금액</p>
+              <p><span className="text-slate-300">남은 금액÷n:</span> 총 남은 금액을 n등분</p>
+              <p className="mt-1"><span className="text-slate-300">목표÷n 단계별 (k/n):</span> 그룹 목표%의 k/n 비중까지 올리는 금액</p>
+              <p className="mt-1 text-slate-500">└ 현재 비중이 0%가 아니면 1회차가 나머지 회차보다 적음</p>
+              <p className="text-slate-500">└ 예) 현재 9.6%, 목표 55%, 1/2 → 9.6%→27.5%만 올리면 되므로 ≠ 총액÷2</p>
+            </div>
+            <div>
+              <p className="mb-1 font-semibold text-slate-200">② 종목별 배분</p>
+              <p>회당 그룹 금액을 <span className="text-slate-300">각 종목의 목표액 비율</span>로 배분</p>
+              <p className="text-slate-500">└ 목표액 = 현재 보유액 + 추가 필요액</p>
+              <p className="mt-1">배분액 &lt; 1주 가격이면 → <span className="text-slate-300">0주 매수</span></p>
+              <p className="text-slate-500">└ 금액은 표시되지만 실제 매수 없음</p>
+            </div>
+            <div>
+              <p className="mb-1 font-semibold text-slate-200">③ → X% 의미</p>
+              <p><span className="text-slate-300">(현재 보유액 + 회당 배분) ÷ 전체 포트폴리오 목표액</span></p>
+              <p className="text-slate-500">└ 분모는 목표액으로 고정 (투자 후 현재액 기준 아님)</p>
+              <p className="mt-1">목표 포트폴리오 전체 대비 해당 종목의 <span className="text-slate-300">달성률</span></p>
+            </div>
+          </div>
+        </details>
+
         <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm">
             <thead>
