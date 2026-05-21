@@ -6854,10 +6854,14 @@ export default function Home() {
                   }
                   setBuyPasteError("");
                   const autoOwner = ownerNames.find((n) => n === parsed.accountName);
+                  const resolvedSymbol = parsed.symbol || parsed.name;
+                  // 이미 보유 중인 종목이면 저장된 종목명 사용 (닉네임 불일치 오류 방지)
+                  const existingPos = positions.find((p) => p.symbol === resolvedSymbol);
+                  const resolvedName = existingPos ? existingPos.name : parsed.name;
                   setForm((prev) => ({
                     ...prev,
-                    symbol: parsed.symbol || parsed.name,
-                    name: parsed.name,
+                    symbol: resolvedSymbol,
+                    name: resolvedName,
                     quantity: String(parsed.qty),
                     avgPrice: String(parsed.price),
                     currency: parsed.currency,
@@ -7554,7 +7558,8 @@ export default function Home() {
                         setForm2(
                           {
                             symbol: parsed.symbol || parsed.name,
-                            name: parsed.name,
+                            // 저장된 종목명 우선 사용 (닉네임 불일치 방지)
+                            name: pos ? pos.name : parsed.name,
                             qty: String(parsed.qty),
                             sellPrice: String(parsed.price),
                             avgPrice,
