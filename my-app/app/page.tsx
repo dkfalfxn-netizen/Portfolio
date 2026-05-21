@@ -469,18 +469,28 @@ type BuyJournalEntry = {
   totalKrw: number;
 };
 
-// ── 미래에셋증권 카카오 체결 알림 파서 ────────────────────────────────────────
-type MiraeAssetParsed = {
+// ── 증권사 체결 알림 파서 ─────────────────────────────────────────────────────
+type BrokerNotificationParsed = {
   accountName: string;
   name: string;
-  symbol: string;
+  symbol: string;        // 없으면 빈 문자열 (하나증권 등)
   tradeType: "buy" | "sell";
   qty: number;
   price: number;
   currency: "KRW" | "USD" | "EUR";
 };
 
-function parseMiraeAssetNotification(text: string): MiraeAssetParsed | null {
+function parsePriceField(raw: string): { price: number; currency: "KRW" | "USD" | "EUR" } {
+  if (raw.includes("$") || raw.toUpperCase().includes("USD"))
+    return { currency: "USD", price: parseFloat(raw.replace(/[^0-9.]/g, "")) };
+  if (raw.includes("€") || raw.toUpperCase().includes("EUR"))
+    return { currency: "EUR", price: parseFloat(raw.replace(/[^0-9.]/g, "")) };
+  return { currency: "KRW", price: parseInt(raw.replace(/[^\d]/g, ""), 10) };
+}
+
+/** 미래에셋증권 카카오 체결 알림
+ * 예) [미래에셋증권] 전량체결 / 계좌명 : 김찬율 / 종목명 : SOL 미국원자력SMR(A0051G0) */
+function parseMiraeAssetNotification(text: string): BrokerNotificationParsed | null {
   if (!text.includes("미래에셋")) return null;
   const get = (key: string) => {
     const m = text.match(new RegExp(`${key}\\s*:\\s*(.+)`));
@@ -493,30 +503,48 @@ function parseMiraeAssetNotification(text: string): MiraeAssetParsed | null {
   const 계좌명 = get("계좌명");
   if (!종목명Raw || !매매구분 || !체결수량Raw || !체결단가Raw) return null;
 
-  // "SOL 미국원자력SMR(A0051G0)" → name / symbol 분리
   const nameMatch = 종목명Raw.match(/^(.+?)\(([^)]+)\)$/);
   const name = nameMatch ? nameMatch[1].trim() : 종목명Raw.trim();
   const symbol = nameMatch ? nameMatch[2].trim() : "";
-
   const qty = parseInt(체결수량Raw.replace(/[^\d]/g, ""), 10);
   if (!Number.isFinite(qty) || qty <= 0) return null;
-
-  let currency: "KRW" | "USD" | "EUR" = "KRW";
-  let price = 0;
-  if (체결단가Raw.includes("$") || 체결단가Raw.toUpperCase().includes("USD")) {
-    currency = "USD";
-    price = parseFloat(체결단가Raw.replace(/[^0-9.]/g, ""));
-  } else if (체결단가Raw.includes("€") || 체결단가Raw.toUpperCase().includes("EUR")) {
-    currency = "EUR";
-    price = parseFloat(체결단가Raw.replace(/[^0-9.]/g, ""));
-  } else {
-    price = parseInt(체결단가Raw.replace(/[^\d]/g, ""), 10);
-  }
+  const { price, currency } = parsePriceField(체결단가Raw);
   if (!Number.isFinite(price) || price <= 0) return null;
-
   const tradeType: "buy" | "sell" = 매매구분.includes("매도") ? "sell" : "buy";
   return { accountName: 계좌명, name, symbol, tradeType, qty, price, currency };
 }
+
+/** 하나증권 퇴직연금 체결 알림
+ * 예) [하나증권] 퇴직연금 매매체결 안내 / ■ 종목 : TIGER 테슬라채권혼합Fn / ■ 수량 : 5 주 */
+function parseHanaNotification(text: string): BrokerNotificationParsed | null {
+  if (!text.includes("하나증권")) return null;
+  const get = (key: string) => {
+    const m = text.match(new RegExp(`■\\s*${key}\\s*:\\s*(.+)`));
+    return m ? m[1].trim() : "";
+  };
+  const 주문구분 = get("주문구분");
+  const 종목 = get("종목");
+  const 수량Raw = get("수량");
+  const 가격Raw = get("가격");
+  if (!주문구분 || !종목 || !수량Raw || !가격Raw) return null;
+
+  const qty = parseInt(수량Raw.replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  const { price, currency } = parsePriceField(가격Raw);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const tradeType: "buy" | "sell" = 주문구분.includes("매도") ? "sell" : "buy";
+  // 헤더 "퇴직연금"으로 보유자 추론
+  const accountName = text.includes("퇴직연금") ? "퇴직연금" : "";
+  return { accountName, name: 종목.trim(), symbol: "", tradeType, qty, price, currency };
+}
+
+/** 지원하는 모든 증권사 파서를 순서대로 시도 */
+function parseBrokerNotification(text: string): BrokerNotificationParsed | null {
+  return parseMiraeAssetNotification(text) ?? parseHanaNotification(text);
+}
+
+// 하위 호환: 기존 타입명 유지
+type MiraeAssetParsed = BrokerNotificationParsed;
 
 function calcSellRealizedKrw(entry: Pick<SellLogEntry, "qty" | "sellPrice" | "avgPrice" | "currency" | "fxRate">): number {
   const qty = Number(entry.qty);
@@ -6837,15 +6865,15 @@ export default function Home() {
               </p>
               <textarea
                 rows={3}
-                placeholder={"[미래에셋증권] 전량체결\n계좌명 : 홍길동\n종목명 : SOL 미국원자력SMR(A0051G0)\n매매구분 : 매수 ..."}
+                placeholder={"[미래에셋증권] 전량체결 또는 [하나증권] 퇴직연금 매매체결 안내\n체결 알림 텍스트를 그대로 붙여넣으세요"}
                 className="w-full resize-none rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70"
                 value=""
                 onChange={(e) => {
                   const text = e.target.value;
                   if (!text.trim()) { setBuyPasteError(""); return; }
-                  const parsed = parseMiraeAssetNotification(text);
+                  const parsed = parseBrokerNotification(text);
                   if (!parsed) {
-                    setBuyPasteError("미래에셋 체결 알림 형식이 아닙니다.");
+                    setBuyPasteError("지원하지 않는 형식입니다. (미래에셋·하나증권 체결 알림만 지원)");
                     return;
                   }
                   if (parsed.tradeType === "sell") {
@@ -6856,7 +6884,10 @@ export default function Home() {
                   const autoOwner = ownerNames.find((n) => n === parsed.accountName);
                   const resolvedSymbol = parsed.symbol || parsed.name;
                   // 이미 보유 중인 종목이면 저장된 종목명 사용 (닉네임 불일치 오류 방지)
-                  const existingPos = positions.find((p) => p.symbol === resolvedSymbol);
+                  // 심볼 없는 경우(하나증권 등)는 종목명으로도 검색
+                  const existingPos = positions.find(
+                    (p) => p.symbol === resolvedSymbol || p.name === parsed.name,
+                  );
                   const resolvedName = existingPos ? existingPos.name : parsed.name;
                   setForm((prev) => ({
                     ...prev,
@@ -7525,7 +7556,7 @@ export default function Home() {
                     </p>
                     <textarea
                       rows={3}
-                      placeholder={"[미래에셋증권] 전량체결\n계좌명 : 홍길동\n종목명 : SOL 미국원자력SMR(A0051G0)\n매매구분 : 매도 ..."}
+                      placeholder={"[미래에셋증권] 전량체결 또는 [하나증권] 퇴직연금 매매체결 안내\n체결 알림 텍스트를 그대로 붙여넣으세요"}
                       className="w-full resize-none rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70"
                       value=""
                       onChange={(e) => {
@@ -7534,9 +7565,9 @@ export default function Home() {
                           setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
                           return;
                         }
-                        const parsed = parseMiraeAssetNotification(text);
+                        const parsed = parseBrokerNotification(text);
                         if (!parsed) {
-                          setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "미래에셋 체결 알림 형식이 아닙니다." }));
+                          setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "지원하지 않는 형식입니다. (미래에셋·하나증권 체결 알림만 지원)" }));
                           return;
                         }
                         if (parsed.tradeType === "buy") {
