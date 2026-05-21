@@ -652,20 +652,25 @@ function TargetWeightSortableBarRow({
             ? `${slice.ticker} (${slice.displayName})`
             : slice.ticker}
         </span>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={0.1}
-            placeholder="—"
-            aria-label={`${slice.ticker} 목표 비중 %`}
-            className="w-7 rounded border border-white/10 bg-zinc-900/80 px-0.5 py-px text-right text-[9px] tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
-            value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
-            onChange={(e) => setTarget(slice.ticker, e.target.value)}
-          />
-          <span className="text-[8px] text-zinc-600">%</span>
+        <div className="flex shrink-0 flex-col items-end gap-0">
+          <div className="flex items-center gap-0.5">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.1}
+              placeholder="—"
+              aria-label={`${slice.ticker} 목표 비중 %`}
+              className="w-7 rounded border border-white/10 bg-zinc-900/80 px-0.5 py-px text-right text-[9px] font-bold tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
+              value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
+              onChange={(e) => setTarget(slice.ticker, e.target.value)}
+            />
+            <span className="text-[8px] text-zinc-600">%</span>
+          </div>
+          <span className="text-[7px] tabular-nums leading-tight text-zinc-600">
+            ({slice.weight.toFixed(1)}/{hasInputTarget ? targetsByTicker[slice.ticker] : "—"}%)
+          </span>
         </div>
       </div>
 
@@ -683,14 +688,14 @@ function TargetWeightSortableBarRow({
         className="relative h-[13px] flex-1 overflow-hidden rounded-sm"
         style={{ background: "rgba(255,255,255,0.04)" }}
       >
-        {/* 0~100% 달성도 축 기준 33%·66% (상단 눈금 25·50·75와 같은 좌표계; 목표선=100%와 겹치지 않음) */}
-        {[33, 66].map((pct) => (
+        {/* 10% 단위 격자선 (목표=100% 위치는 별도 실선으로 표시) */}
+        {[10, 20, 30, 40, 50, 60, 70, 80, 90].map((pct) => (
           <div
             key={pct}
             className="pointer-events-none absolute top-0 z-[5] h-full w-px"
             style={{
               left: `${(pct / 100) * TARGET_AT * 100}%`,
-              borderRight: "1px dashed rgba(161,161,170,0.32)",
+              borderRight: `1px dashed rgba(161,161,170,${pct === 50 ? 0.45 : 0.22})`,
             }}
           />
         ))}
@@ -1247,10 +1252,10 @@ function TargetStockWeightNeu({
       {/* ── Shared scale labels (비현금 행 왼쪽 드래그 핸들 폭 반영) ── */}
       <div className="mb-0.5 flex items-end gap-1 pl-[180px] pr-20 md:pl-[252px]">
         <div className="relative flex-1">
-          {[0, 25, 50, 75, 100].map((pct) => (
+          {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((pct) => (
             <span
               key={pct}
-              className="absolute -translate-x-1/2 text-[7px] tabular-nums text-zinc-600"
+              className="absolute -translate-x-1/2 text-[6px] tabular-nums text-zinc-600"
               style={{ left: `${(pct / 100) * TARGET_AT * 100}%` }}
             >
               {pct}%
