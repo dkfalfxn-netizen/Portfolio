@@ -471,14 +471,26 @@ type BuyJournalEntry = {
 
 // ── 증권사 체결 알림 파서 ─────────────────────────────────────────────────────
 type BrokerNotificationParsed = {
-  accountName: string;
+  accountName: string;       // 정확한 이름 또는 마스킹된 이름 (김*주)
   name: string;
-  symbol: string;        // 없으면 빈 문자열 (하나증권 등)
+  symbol: string;            // 없으면 빈 문자열 (하나증권 등)
   tradeType: "buy" | "sell";
   qty: number;
   price: number;
   currency: "KRW" | "USD" | "EUR";
+  date?: string;             // YYYY-MM-DD (없으면 호출부에서 오늘 날짜 사용)
 };
+
+/** 마스킹된 이름(김*주)을 ownerNames 목록에서 찾아 실제 이름 반환. 유일하게 매칭되면 반환, 아니면 빈 문자열 */
+function resolveOwnerFromMasked(masked: string, ownerNames: string[]): string {
+  if (!masked) return "";
+  // 마스킹 없으면 그대로 exact match 시도
+  if (!masked.includes("*")) return ownerNames.find((n) => n === masked) ? masked : "";
+  const first = masked[0];
+  const last = masked[masked.length - 1];
+  const matches = ownerNames.filter((n) => n.length >= 2 && n[0] === first && n[n.length - 1] === last);
+  return matches.length === 1 ? matches[0] : "";
+}
 
 function parsePriceField(raw: string): { price: number; currency: "KRW" | "USD" | "EUR" } {
   if (raw.includes("$") || raw.toUpperCase().includes("USD"))
@@ -538,9 +550,47 @@ function parseHanaNotification(text: string): BrokerNotificationParsed | null {
   return { accountName, name: 종목.trim(), symbol: "", tradeType, qty, price, currency };
 }
 
+/** 메리츠증권 해외주식 주문체결 안내
+ * 예) [메리츠증권] 해외주식 주문체결 안내 / 종목명 : FIDELITY CRYPTO...(FDIG) / 체결단가 : USD 44.8300 */
+function parseMeritzNotification(text: string): BrokerNotificationParsed | null {
+  if (!text.includes("메리츠")) return null;
+  const get = (key: string) => {
+    const m = text.match(new RegExp(`${key}\\s*:\\s*(.+)`));
+    return m ? m[1].trim() : "";
+  };
+  const 종목명Raw = get("종목명");
+  const 매매구분 = get("매매구분");
+  const 체결수량Raw = get("체결수량");
+  const 체결단가Raw = get("체결단가");
+  const 계좌명Raw = get("계좌명");
+  const 체결일자Raw = get("체결일자"); // MM/DD 형식
+  if (!종목명Raw || !매매구분 || !체결수량Raw || !체결단가Raw) return null;
+
+  // "FIDELITY CRYPTO INDUSTRY AND DIGITAL PAY(FDIG)" → name / symbol 분리
+  const nameMatch = 종목명Raw.match(/^(.+?)\(([^)]+)\)$/);
+  const name = nameMatch ? nameMatch[1].trim() : 종목명Raw.trim();
+  const symbol = nameMatch ? nameMatch[2].trim() : "";
+
+  const qty = parseInt(체결수량Raw.replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  const { price, currency } = parsePriceField(체결단가Raw);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const tradeType: "buy" | "sell" = 매매구분.includes("매도") ? "sell" : "buy";
+
+  // 체결일자 MM/DD → YYYY-MM-DD
+  let date: string | undefined;
+  const dateMatch = 체결일자Raw.match(/^(\d{1,2})\/(\d{2})$/);
+  if (dateMatch) {
+    const year = new Date().getFullYear();
+    date = `${year}-${dateMatch[1].padStart(2, "0")}-${dateMatch[2]}`;
+  }
+
+  return { accountName: 계좌명Raw, name, symbol, tradeType, qty, price, currency, date };
+}
+
 /** 지원하는 모든 증권사 파서를 순서대로 시도 */
 function parseBrokerNotification(text: string): BrokerNotificationParsed | null {
-  return parseMiraeAssetNotification(text) ?? parseHanaNotification(text);
+  return parseMiraeAssetNotification(text) ?? parseHanaNotification(text) ?? parseMeritzNotification(text);
 }
 
 // 하위 호환: 기존 타입명 유지
@@ -6908,7 +6958,7 @@ export default function Home() {
             {/* ── 미래에셋 체결 알림 붙여넣기 (매수) ── */}
             <div className="mb-4 rounded-xl border border-slate-700/50 bg-slate-900/30 p-3">
               <p className="mb-1.5 text-[11px] font-semibold text-slate-300">
-                미래에셋 체결 알림 붙여넣기 <span className="font-normal text-slate-500">— 카카오 알림 텍스트를 그대로 붙여넣으면 자동 입력됩니다</span>
+                증권사 체결 알림 붙여넣기 <span className="font-normal text-slate-500">— 미래에셋·하나·메리츠증권 체결 알림 텍스트를 그대로 붙여넣으면 자동 입력됩니다</span>
               </p>
               <textarea
                 rows={3}
@@ -6921,14 +6971,17 @@ export default function Home() {
                   if (!text.trim()) { setBuyPasteError(""); return; }
                   const parsed = parseBrokerNotification(text);
                   if (!parsed) {
-                    setBuyPasteError("지원하지 않는 형식입니다. (미래에셋·하나증권 체결 알림만 지원)");
+                    setBuyPasteError("지원하지 않는 형식입니다. (미래에셋·하나·메리츠증권 체결 알림만 지원)");
                     return;
                   }
                   if (parsed.tradeType === "sell") {
                     setBuyPasteError("⚠️ 매도 체결 내역입니다. '실현손익 입력' 탭에 붙여넣어 주세요.");
                     return;
                   }
-                  const autoOwner = ownerNames.find((n) => n === parsed.accountName);
+                  const autoOwner = (() => {
+                    const exact = ownerNames.find((n) => n === parsed.accountName);
+                    return exact ?? (resolveOwnerFromMasked(parsed.accountName, ownerNames) || undefined);
+                  })();
                   // 기존 보유 종목 검색 (심볼 또는 종목명으로)
                   const existingPos = positions.find(
                     (p) => (parsed.symbol && p.symbol === parsed.symbol) || p.name === parsed.name,
@@ -7603,7 +7656,7 @@ export default function Home() {
                   {/* ── 미래에셋 체결 알림 붙여넣기 (매도) ── */}
                   <div className="rounded-xl border border-slate-700/50 bg-slate-900/30 p-3">
                     <p className="mb-1.5 text-[11px] font-semibold text-slate-300">
-                      미래에셋 체결 알림 붙여넣기 <span className="font-normal text-slate-500">— 카카오 알림 텍스트를 그대로 붙여넣으면 자동 입력됩니다</span>
+                      증권사 체결 알림 붙여넣기 <span className="font-normal text-slate-500">— 미래에셋·하나·메리츠증권 체결 알림 텍스트를 그대로 붙여넣으면 자동 입력됩니다</span>
                     </p>
                     <textarea
                       rows={3}
@@ -7619,7 +7672,7 @@ export default function Home() {
                         }
                         const parsed = parseBrokerNotification(text);
                         if (!parsed) {
-                          setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "지원하지 않는 형식입니다. (미래에셋·하나증권 체결 알림만 지원)" }));
+                          setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "지원하지 않는 형식입니다. (미래에셋·하나·메리츠증권 체결 알림만 지원)" }));
                           return;
                         }
                         if (parsed.tradeType === "buy") {
@@ -7627,8 +7680,9 @@ export default function Home() {
                           return;
                         }
                         setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
-                        // 계좌명으로 보유자 자동 전환
-                        const autoOwner = ownerNames.find((n) => n === parsed.accountName) ?? owner;
+                        // 계좌명(마스킹 포함)으로 보유자 자동 전환
+                        const resolvedFromMasked = resolveOwnerFromMasked(parsed.accountName, ownerNames);
+                        const autoOwner = (ownerNames.find((n) => n === parsed.accountName) ?? resolvedFromMasked) || owner;
                         if (autoOwner !== owner) setSellLogOwnerForSection(autoOwner);
                         // 해당 보유자의 포지션에서 티커·평균단가 자동 조회
                         const pos = positions.find(
@@ -7668,6 +7722,7 @@ export default function Home() {
                                 : "1")
                               : fxRate,
                             selectedOwners: [autoOwner],
+                            ...(parsed.date ? { date: parsed.date } : {}),
                           },
                           autoOwner,
                         );
