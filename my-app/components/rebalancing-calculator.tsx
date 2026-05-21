@@ -584,29 +584,34 @@ function RebalancingBarSortableRow({
           >
             {row.displayName || row.groupKey}
           </span>
-          <div className="flex shrink-0 items-center gap-0.5">
-            <input
-              type="number"
-              min={0}
-              max={100}
-              step={0.1}
-              className="w-12 rounded-md border-2 border-slate-500/80 bg-slate-950/80 px-1 py-0.5 text-right text-xs font-semibold tabular-nums text-slate-100 shadow-inner outline-none focus:border-primary focus:ring-1 focus:ring-primary/35"
-              value={targets[row.groupKey] ?? ""}
-              onChange={(e) => setTargets((prev) => ({ ...prev, [row.groupKey]: e.target.value }))}
-              title="목표 비중 입력 — 계산기 전용 저장소에 자동 저장됩니다."
-              aria-label={`${row.displayName || row.groupKey} 목표 비중 퍼센트`}
-            />
-            <span className="text-xs text-muted-foreground">%</span>
+          <div className="flex shrink-0 flex-col items-end gap-0">
+            <div className="flex items-center gap-0.5">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={0.1}
+                className="w-12 rounded-md border-2 border-slate-500/80 bg-slate-950/80 px-1 py-0.5 text-right text-xs font-bold tabular-nums text-slate-100 shadow-inner outline-none focus:border-primary focus:ring-1 focus:ring-primary/35"
+                value={targets[row.groupKey] ?? ""}
+                onChange={(e) => setTargets((prev) => ({ ...prev, [row.groupKey]: e.target.value }))}
+                title="목표 비중 입력 — 계산기 전용 저장소에 자동 저장됩니다."
+                aria-label={`${row.displayName || row.groupKey} 목표 비중 퍼센트`}
+              />
+              <span className="text-xs text-muted-foreground">%</span>
+            </div>
+            <span className="text-[10px] tabular-nums text-slate-500 leading-tight">
+              ({row.currentPct.toFixed(1)}/{targets[row.groupKey] ? parseFloat(targets[row.groupKey]).toFixed(1) : "0"}%)
+            </span>
           </div>
         </div>
 
         <div className="relative mx-1.5 h-5 flex-1 min-w-0">
           <div className="absolute inset-y-1 inset-x-0 rounded-sm bg-slate-800/60" />
-          {[0.25, 0.5, 0.75].map((f) => (
+          {[10, 20, 30, 40, 50, 60, 70, 80, 90].map((v) => (
             <div
-              key={f}
-              className="pointer-events-none absolute inset-y-1 w-px bg-slate-700/40"
-              style={{ left: `${f * 100}%` }}
+              key={v}
+              className={`pointer-events-none absolute inset-y-1 w-px ${v % 50 === 0 ? "bg-slate-600/60" : "bg-slate-700/35"}`}
+              style={{ left: `${v}%` }}
             />
           ))}
           <div
@@ -1039,15 +1044,8 @@ function RebalancingOwner({
   const sumIsOver = targetSum > 100.05;
   const sumIsUnder = targetSum < 99.95;
 
-  // ── 바 스케일: 현재 & 목표 중 최대값의 125% (5% 단위로 올림) ──────────────
-  const maxScale = useMemo(() => {
-    const vals = groups.flatMap((g) => [
-      g.currentPct,
-      parseFloat(targets[g.groupKey] ?? "0") || 0,
-    ]);
-    const raw = Math.max(...vals, 5);
-    return Math.ceil((raw * 1.25) / 5) * 5;
-  }, [groups, targets]);
+  // ── 바 스케일: 0~100% 고정 ──────────────────────────────────────────────
+  const maxScale = 100;
 
   // ── 행 계산 (표시 순서 = orderedGroups, 대시보드와 같은 visual order 키) ───
   const rows = useMemo((): ComputedRow[] => {
@@ -1472,9 +1470,9 @@ function RebalancingOwner({
             <div className="w-36 shrink-0 sm:w-44" />
           </div>
           <div className="mx-1.5 flex-1">
-            <div className="flex justify-between text-xs tabular-nums text-slate-400 sm:text-sm">
-              {[0, 0.25, 0.5, 0.75, 1].map((f) => (
-                <span key={f}>{(maxScale * f).toFixed(0)}%</span>
+            <div className="flex justify-between text-[10px] tabular-nums text-slate-400 sm:text-xs">
+              {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((v) => (
+                <span key={v}>{v}%</span>
               ))}
             </div>
           </div>
