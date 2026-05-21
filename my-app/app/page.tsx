@@ -6990,10 +6990,15 @@ export default function Home() {
                   const resolvedSymbol = existingPos ? existingPos.symbol : (parsed.symbol || "");
                   const resolvedName = existingPos ? existingPos.name : parsed.name;
                   const isNewStock = !existingPos && !parsed.symbol;
+                  const ownerUnresolved = !autoOwner && !!parsed.accountName;
                   setBuyPasteError(
-                    isNewStock
-                      ? "ℹ️ 보유 목록에 없는 종목입니다. 티커(종목코드)를 직접 입력해주세요."
-                      : "",
+                    isNewStock && ownerUnresolved
+                      ? "ℹ️ 보유 목록에 없는 종목입니다. 티커와 담당자를 직접 입력해주세요."
+                      : isNewStock
+                        ? "ℹ️ 보유 목록에 없는 종목입니다. 티커(종목코드)를 직접 입력해주세요."
+                        : ownerUnresolved
+                          ? `ℹ️ 계좌명(${parsed.accountName})으로 담당자를 특정할 수 없습니다. 담당자를 직접 선택해주세요.`
+                          : "",
                   );
                   setForm((prev) => ({
                     ...prev,
@@ -7679,10 +7684,11 @@ export default function Home() {
                           setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "⚠️ 매수 체결 내역입니다. '종목 추가' 탭에 붙여넣어 주세요." }));
                           return;
                         }
-                        setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
                         // 계좌명(마스킹 포함)으로 보유자 자동 전환
                         const resolvedFromMasked = resolveOwnerFromMasked(parsed.accountName, ownerNames);
-                        const autoOwner = (ownerNames.find((n) => n === parsed.accountName) ?? resolvedFromMasked) || owner;
+                        const exactOwner = ownerNames.find((n) => n === parsed.accountName);
+                        const ownerUnresolved = !exactOwner && !resolvedFromMasked && !!parsed.accountName;
+                        const autoOwner = (exactOwner ?? resolvedFromMasked) || owner;
                         if (autoOwner !== owner) setSellLogOwnerForSection(autoOwner);
                         // 해당 보유자의 포지션에서 티커·평균단가 자동 조회
                         const pos = positions.find(
@@ -7696,8 +7702,13 @@ export default function Home() {
                         const fxRate = parsed.currency === "KRW" ? "1"
                           : parsed.currency === "EUR" ? String(Math.round(eurKrw))
                           : String(Math.round(usdKrw));
-                        // 보유 목록에 없으면 티커 직접 입력 안내
-                        if (!pos && !parsed.symbol) {
+                        // 담당자 미특정 안내 (우선순위 1)
+                        if (ownerUnresolved) {
+                          setSellLogErrorByOwner((prev) => ({
+                            ...prev,
+                            [autoOwner]: `ℹ️ 계좌명(${parsed.accountName})으로 담당자를 특정할 수 없습니다. 담당자를 직접 선택해주세요.`,
+                          }));
+                        } else if (!pos && !parsed.symbol) {
                           setSellLogErrorByOwner((prev) => ({
                             ...prev,
                             [autoOwner]: "ℹ️ 보유 목록에 없는 종목입니다. 티커(종목코드)를 직접 입력해주세요.",
@@ -7707,6 +7718,8 @@ export default function Home() {
                             ...prev,
                             [autoOwner]: "ℹ️ 보유 목록에 없는 종목입니다. 평균매입단가를 직접 입력해주세요.",
                           }));
+                        } else {
+                          setSellLogErrorByOwner((prev) => ({ ...prev, [autoOwner]: "" }));
                         }
                         setForm2(
                           {
