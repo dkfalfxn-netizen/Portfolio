@@ -21,6 +21,7 @@ import { DailyTrendChart, type DailyTradeMarker } from "@/components/daily-trend
 import { DailyChangeCalendar } from "@/components/daily-change-calendar";
 import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
+import TradeImageImport, { type ConfirmedBuyTrade, type ConfirmedSellTrade } from "@/components/trade-image-import";
 import { cn } from "@/lib/utils";
 import { holdingSymbolsEquivalent, inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
 import {
@@ -1337,6 +1338,7 @@ export default function Home() {
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
   const [buyJournal, setBuyJournal] = useState<BuyJournalEntry[]>([]);
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
+  const [showTradeImageImport, setShowTradeImageImport] = useState(false);
   const [showSymbolPnl, setShowSymbolPnl] = useState<Record<string, boolean>>({});
   const [sellLogErrorByOwner, setSellLogErrorByOwner] = useState<Record<string, string>>({});
   const [sellLogOwnerForSection, setSellLogOwnerForSection] = useState<string>("김승주");
@@ -4161,6 +4163,97 @@ export default function Home() {
     setFocusSymbolTrigger((n) => n + 1);
   }
 
+  // ── 이미지 파싱 → 매수 일괄 반영 ──────────────────────────────────────────
+  function handleImageBuyConfirm(trades: ConfirmedBuyTrade[]) {
+    for (const t of trades) {
+      const symbol = (t.symbol || t.name).trim().toUpperCase();
+      const nameTrimmed = t.name.trim();
+      const accountType: "해외주식" | "국내주식" = t.currency === "KRW" ? "국내주식" : "해외주식";
+      const accountName = accountType === "국내주식" ? "국내주식-주계좌" : "미국주식-주계좌";
+      const ownersOrdered = ownerNames.filter((o) => t.owners.includes(o));
+      if (!symbol || !nameTrimmed || t.qty <= 0 || t.price <= 0 || ownersOrdered.length === 0) continue;
+
+      setPositions((prev) => {
+        let next = [...prev];
+        for (const owner of ownersOrdered) {
+          const idx = next.findIndex(
+            (p) => p.owner === owner && p.symbol === symbol && p.currency === t.currency,
+          );
+          if (idx >= 0) {
+            const existing = next[idx];
+            const totalQty = existing.quantity + t.qty;
+            const blendedAvg = (existing.quantity * existing.avgPrice + t.qty * t.price) / totalQty;
+            next[idx] = { ...existing, quantity: totalQty, avgPrice: blendedAvg };
+          } else {
+            next.push({
+              symbol,
+              name: nameTrimmed,
+              quantity: t.qty,
+              avgPrice: t.price,
+              currentPrice: t.price,
+              currency: t.currency,
+              purchaseUsdKrw: t.currency === "USD" ? (usdKrw ?? undefined) : undefined,
+              purchaseEurKrw: t.currency === "EUR" ? (eurKrw ?? undefined) : undefined,
+              accountType,
+              accountName,
+              owner,
+            });
+          }
+        }
+        return next;
+      });
+
+      const newBuys: BuyJournalEntry[] = ownersOrdered.map((owner) => {
+        const fx = t.currency === "KRW" ? 1 : t.currency === "USD" ? (usdKrw ?? 1) : (eurKrw ?? 1);
+        return {
+          id: `buy-img-${Date.now()}-${symbol}-${owner}`,
+          date: t.date,
+          owner,
+          symbol,
+          name: nameTrimmed,
+          qty: t.qty,
+          buyPrice: t.price,
+          currency: t.currency,
+          fxRate: fx,
+          totalKrw: t.currency === "KRW" ? t.qty * t.price : t.qty * t.price * fx,
+        };
+      });
+      setBuyJournal((prev) => [...prev, ...newBuys].slice(-BUY_JOURNAL_MAX));
+    }
+    showActionSuccessToast(`매수 ${trades.length}건이 반영되었습니다.`);
+  }
+
+  // ── 이미지 파싱 → 매도 일괄 반영 ──────────────────────────────────────────
+  function handleImageSellConfirm(trades: ConfirmedSellTrade[]) {
+    setSellLog((prev) => {
+      const next = { ...prev };
+      for (const t of trades) {
+        if (!t.owner || !t.name || t.qty <= 0 || t.sellPrice <= 0) continue;
+        const fx = t.fxRate > 0 ? t.fxRate : t.currency === "KRW" ? 1 : (usdKrw ?? 1);
+        const avgP = t.avgPrice > 0 ? t.avgPrice : t.sellPrice;
+        const realizedKrw =
+          t.currency === "KRW"
+            ? (t.sellPrice - avgP) * t.qty
+            : (t.sellPrice - avgP) * t.qty * fx;
+        const entry: SellLogEntry = {
+          id: `sell-img-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          date: t.date,
+          symbol: (t.symbol || t.name).trim().toUpperCase(),
+          name: t.name.trim(),
+          qty: t.qty,
+          sellPrice: t.sellPrice,
+          avgPrice: avgP,
+          currency: t.currency,
+          fxRate: fx,
+          realizedKrw,
+        };
+        next[t.owner] = [...(next[t.owner] ?? []), entry];
+      }
+      return next;
+    });
+    showActionSuccessToast(`매도 ${trades.length}건이 반영되었습니다.`);
+  }
+
   function handleDeleteRow(rowIndex: number) {
     if (rowIndex < 0) return;
     setPositions((prev) => prev.filter((_, idx) => idx !== rowIndex));
@@ -6687,6 +6780,16 @@ export default function Home() {
                 ))}
               </div>
             </div>
+            <div className="mb-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowTradeImageImport(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-600/60 bg-indigo-900/30 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-800/50 hover:text-indigo-200 transition-colors"
+              >
+                📷 이미지로 입력
+              </button>
+              <span className="text-[11px] text-muted-foreground">거래내역 스크린샷을 올리면 자동 파싱</span>
+            </div>
             <p className="mb-3 text-xs text-muted-foreground">
               담당자를 여러 명 선택하면 같은 티커·수량·평단으로 각각 한 줄씩 추가됩니다.
               같은 티커·담당자·계좌(해외/국내+계좌명)·통화로 다시 추가하면 기존 줄에{" "}
@@ -8195,6 +8298,15 @@ export default function Home() {
 
         </main>
       </div>
+
+      {showTradeImageImport && (
+        <TradeImageImport
+          ownerNames={ownerNames}
+          onBuyConfirm={handleImageBuyConfirm}
+          onSellConfirm={handleImageSellConfirm}
+          onClose={() => setShowTradeImageImport(false)}
+        />
+      )}
 
       <TechnicalSignalDetailModal
         open={signalDetailTarget !== null}
