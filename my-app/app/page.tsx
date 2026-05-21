@@ -6940,35 +6940,31 @@ export default function Home() {
                 ))}
               </datalist>
               <div className="col-span-2 flex flex-col gap-2 sm:col-span-3 md:col-span-6">
-                <span className="text-[11px] font-medium text-muted-foreground">담당자 (복수 선택)</span>
+                <span className="text-[11px] font-medium text-muted-foreground">담당자</span>
                 <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-                  {ownerNames.map((name) => (
+                  {ownerNames.map((name) => {
+                    const isSelected = form.selectedOwners.includes(name);
+                    const anySelected = form.selectedOwners.length > 0;
+                    return (
                     <label
                       key={name}
-                      className="flex cursor-pointer items-center gap-1.5 text-sm select-none"
+                      className={`flex cursor-pointer items-center gap-1.5 text-sm select-none transition-opacity ${anySelected && !isSelected ? "opacity-30" : "opacity-100"}`}
                     >
                       <input
-                        type="checkbox"
+                        type="radio"
+                        name="buy-form-owner"
                         className="cursor-pointer accent-primary"
-                        checked={form.selectedOwners.includes(name)}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
+                        checked={isSelected}
+                        onChange={() => {
                           skipAddFormAutoNameRef.current = false;
                           skipAddFormAutoChartGroupRef.current = false;
-                          setForm((prev) => {
-                            const next = checked
-                              ? ownerNames.filter(
-                                  (o) => prev.selectedOwners.includes(o) || o === name,
-                                )
-                              : prev.selectedOwners.filter((o) => o !== name);
-                            if (next.length === 0) return prev;
-                            return { ...prev, selectedOwners: next };
-                          });
+                          setForm((prev) => ({ ...prev, selectedOwners: [name] }));
                         }}
                       />
-                      {name}
+                      <span className={isSelected ? "font-semibold text-foreground" : ""}>{name}</span>
                     </label>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
               <div className="relative min-w-0">
