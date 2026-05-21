@@ -6384,7 +6384,7 @@ export default function Home() {
                             </div>
                           </div>
                           {sellLogErrorByOwner[owner] ? (
-                            <p className="col-span-2 text-[11px] font-medium text-destructive sm:col-span-4">
+                            <p className={`col-span-2 text-[11px] font-medium sm:col-span-4 ${sellLogErrorByOwner[owner].startsWith("ℹ️") ? "text-blue-400" : "text-destructive"}`}>
                               {sellLogErrorByOwner[owner]}
                             </p>
                           ) : null}
@@ -6880,15 +6880,20 @@ export default function Home() {
                     setBuyPasteError("⚠️ 매도 체결 내역입니다. '실현손익 입력' 탭에 붙여넣어 주세요.");
                     return;
                   }
-                  setBuyPasteError("");
                   const autoOwner = ownerNames.find((n) => n === parsed.accountName);
-                  const resolvedSymbol = parsed.symbol || parsed.name;
-                  // 이미 보유 중인 종목이면 저장된 종목명 사용 (닉네임 불일치 오류 방지)
-                  // 심볼 없는 경우(하나증권 등)는 종목명으로도 검색
+                  // 기존 보유 종목 검색 (심볼 또는 종목명으로)
                   const existingPos = positions.find(
-                    (p) => p.symbol === resolvedSymbol || p.name === parsed.name,
+                    (p) => (parsed.symbol && p.symbol === parsed.symbol) || p.name === parsed.name,
                   );
+                  // 기존 보유면 저장된 티커·종목명 사용, 신규면 알림 내용 그대로
+                  const resolvedSymbol = existingPos ? existingPos.symbol : (parsed.symbol || "");
                   const resolvedName = existingPos ? existingPos.name : parsed.name;
+                  const isNewStock = !existingPos && !parsed.symbol;
+                  setBuyPasteError(
+                    isNewStock
+                      ? "ℹ️ 보유 목록에 없는 종목입니다. 티커(종목코드)를 직접 입력해주세요."
+                      : "",
+                  );
                   setForm((prev) => ({
                     ...prev,
                     symbol: resolvedSymbol,
@@ -6902,7 +6907,9 @@ export default function Home() {
                 }}
               />
               {buyPasteError && (
-                <p className="mt-1 text-[11px] font-medium text-red-400">{buyPasteError}</p>
+                <p className={`mt-1 text-[11px] font-medium ${buyPasteError.startsWith("ℹ️") ? "text-blue-400" : "text-red-400"}`}>
+                  {buyPasteError}
+                </p>
               )}
             </div>
             <p className="mb-3 text-xs text-muted-foreground">
@@ -7578,19 +7585,29 @@ export default function Home() {
                         // 계좌명으로 보유자 자동 전환
                         const autoOwner = ownerNames.find((n) => n === parsed.accountName) ?? owner;
                         if (autoOwner !== owner) setSellLogOwnerForSection(autoOwner);
-                        // 해당 보유자의 포지션에서 평균단가 자동 조회
+                        // 해당 보유자의 포지션에서 티커·평균단가 자동 조회
                         const pos = positions.find(
-                          (p) => p.owner === autoOwner && (p.symbol === parsed.symbol || p.name === parsed.name),
+                          (p) => p.owner === autoOwner && (
+                            (parsed.symbol && p.symbol === parsed.symbol) || p.name === parsed.name
+                          ),
                         );
+                        const resolvedSellSymbol = pos ? pos.symbol : (parsed.symbol || "");
+                        const resolvedSellName = pos ? pos.name : parsed.name;
                         const avgPrice = pos ? String(pos.avgPrice) : "";
                         const fxRate = parsed.currency === "KRW" ? "1"
                           : parsed.currency === "EUR" ? String(Math.round(eurKrw))
                           : String(Math.round(usdKrw));
+                        // 보유 목록에 없으면 티커 직접 입력 안내
+                        if (!pos && !parsed.symbol) {
+                          setSellLogErrorByOwner((prev) => ({
+                            ...prev,
+                            [autoOwner]: "ℹ️ 보유 목록에 없는 종목입니다. 티커(종목코드)를 직접 입력해주세요.",
+                          }));
+                        }
                         setForm2(
                           {
-                            symbol: parsed.symbol || parsed.name,
-                            // 저장된 종목명 우선 사용 (닉네임 불일치 방지)
-                            name: pos ? pos.name : parsed.name,
+                            symbol: resolvedSellSymbol,
+                            name: resolvedSellName,
                             qty: String(parsed.qty),
                             sellPrice: String(parsed.price),
                             avgPrice,
@@ -7769,7 +7786,7 @@ export default function Home() {
                         (매도 {(TRADING_FEE_RATE * 100).toFixed(1)}% 반영)
                       </span>
                     </div>
-                    {sellLogErrorByOwner[owner] ? <p className="col-span-2 text-[11px] font-medium text-destructive sm:col-span-4">{sellLogErrorByOwner[owner]}</p> : null}
+                    {sellLogErrorByOwner[owner] ? <p className={`col-span-2 text-[11px] font-medium sm:col-span-4 ${sellLogErrorByOwner[owner].startsWith("ℹ️") ? "text-blue-400" : "text-destructive"}`}>{sellLogErrorByOwner[owner]}</p> : null}
                   </div>
                   {symPnlList.length > 0 && (
                     <div className="overflow-x-auto rounded-lg border bg-muted/20 p-2">
