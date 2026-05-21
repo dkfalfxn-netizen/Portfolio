@@ -1417,6 +1417,8 @@ export default function Home() {
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
   const [showTradeImageImport, setShowTradeImageImport] = useState(false);
   const [buyPasteError, setBuyPasteError] = useState("");
+  const [buyPasteText, setBuyPasteText] = useState("");
+  const [sellPasteText, setSellPasteText] = useState("");
   const [showSymbolPnl, setShowSymbolPnl] = useState<Record<string, boolean>>({});
   const [sellLogErrorByOwner, setSellLogErrorByOwner] = useState<Record<string, string>>({});
   const [sellLogOwnerForSection, setSellLogOwnerForSection] = useState<string>("김승주");
@@ -4052,7 +4054,11 @@ export default function Home() {
     const quantity = Number(form.quantity);
     const avgPrice = Number(form.avgPrice);
 
-    if (!form.symbol.trim() || !form.name.trim()) return;
+    if (!form.symbol.trim()) {
+      setBuyPasteError("ℹ️ 티커(종목코드)를 입력해주세요.");
+      return;
+    }
+    if (!form.name.trim()) return;
     if (!Number.isFinite(quantity) || quantity <= 0) return;
     if (!Number.isFinite(avgPrice) || avgPrice <= 0) return;
 
@@ -5929,7 +5935,15 @@ export default function Home() {
                     function handleSellLogSave() {
                       setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
                       const sell = Number(form.sellPrice);
-                      if (!form.symbol) return;
+                      if (!form.symbol.trim()) {
+                        setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "ℹ️ 티커(종목코드)를 입력해주세요." }));
+                        return;
+                      }
+                      const avg = Number(form.avgPrice);
+                      if (!Number.isFinite(avg) || avg <= 0) {
+                        setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "ℹ️ 평균매입단가를 입력해주세요." }));
+                        return;
+                      }
                       if (!Number.isFinite(sell) || sell <= 0) return;
                       const selectedOwners = form.selectedOwners.length > 0 ? form.selectedOwners : [owner];
                       const symbol = form.symbol.trim().toUpperCase();
@@ -5948,10 +5962,8 @@ export default function Home() {
                           return;
                         }
                         const qty = Number(form.qty);
-                        const avg = Number(form.avgPrice);
                         const fx = Number(form.fxRate) || 1;
                         if (!Number.isFinite(qty) || qty <= 0) return;
-                        if (!Number.isFinite(avg) || avg <= 0) return;
                         const realized = calcRealized(form);
                         const entry: SellLogEntry = {
                           id: form.editingId,
@@ -6867,9 +6879,10 @@ export default function Home() {
                 rows={3}
                 placeholder={"[미래에셋증권] 전량체결 또는 [하나증권] 퇴직연금 매매체결 안내\n체결 알림 텍스트를 그대로 붙여넣으세요"}
                 className="w-full resize-none rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70"
-                value=""
+                value={buyPasteText}
                 onChange={(e) => {
                   const text = e.target.value;
+                  setBuyPasteText(text);
                   if (!text.trim()) { setBuyPasteError(""); return; }
                   const parsed = parseBrokerNotification(text);
                   if (!parsed) {
@@ -6903,7 +6916,7 @@ export default function Home() {
                     currency: parsed.currency,
                     ...(autoOwner ? { selectedOwners: [autoOwner] } : {}),
                   }));
-                  e.target.value = "";
+                  setBuyPasteText("");
                 }}
               />
               {buyPasteError && (
@@ -6913,7 +6926,7 @@ export default function Home() {
               )}
             </div>
             <p className="mb-3 text-xs text-muted-foreground">
-              담당자를 여러 명 선택하면 같은 티커·수량·평단으로 각각 한 줄씩 추가됩니다.
+              담당자를 선택한 뒤 추가하세요.
               같은 티커·담당자·계좌(해외/국내+계좌명)·통화로 다시 추가하면 기존 줄에{" "}
               <span className="font-medium text-foreground">수량이 더해지고 평단은 가중평균</span>으로
               갱신됩니다. 이 경우{" "}
@@ -7561,9 +7574,10 @@ export default function Home() {
                       rows={3}
                       placeholder={"[미래에셋증권] 전량체결 또는 [하나증권] 퇴직연금 매매체결 안내\n체결 알림 텍스트를 그대로 붙여넣으세요"}
                       className="w-full resize-none rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70"
-                      value=""
+                      value={sellPasteText}
                       onChange={(e) => {
                         const text = e.target.value;
+                        setSellPasteText(text);
                         if (!text.trim()) {
                           setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
                           return;
@@ -7599,6 +7613,11 @@ export default function Home() {
                             ...prev,
                             [autoOwner]: "ℹ️ 보유 목록에 없는 종목입니다. 티커(종목코드)를 직접 입력해주세요.",
                           }));
+                        } else if (!pos && parsed.symbol) {
+                          setSellLogErrorByOwner((prev) => ({
+                            ...prev,
+                            [autoOwner]: "ℹ️ 보유 목록에 없는 종목입니다. 평균매입단가를 직접 입력해주세요.",
+                          }));
                         }
                         setForm2(
                           {
@@ -7617,7 +7636,7 @@ export default function Home() {
                           },
                           autoOwner,
                         );
-                        e.target.value = "";
+                        setSellPasteText("");
                       }}
                     />
                   </div>
