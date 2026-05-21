@@ -661,14 +661,14 @@ function TargetWeightSortableBarRow({
               step={0.1}
               placeholder="—"
               aria-label={`${slice.ticker} 목표 비중 %`}
-              className="w-7 rounded border border-white/10 bg-zinc-900/80 px-0.5 py-px text-right text-[9px] font-bold tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              className="w-8 rounded border border-white/10 bg-zinc-900/80 px-0.5 py-px text-right text-[11px] font-bold tabular-nums text-zinc-100 outline-none ring-sky-500/40 [appearance:textfield] placeholder:text-zinc-600 focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               style={{ boxShadow: "inset 2px 2px 4px rgba(0,0,0,0.5)" }}
               value={hasInputTarget ? String(targetsByTicker[slice.ticker]) : ""}
               onChange={(e) => setTarget(slice.ticker, e.target.value)}
             />
-            <span className="text-[8px] text-zinc-600">%</span>
+            <span className="text-[10px] text-zinc-500">%</span>
           </div>
-          <span className="text-[7px] tabular-nums leading-tight text-zinc-600">
+          <span className="text-[10px] font-bold tabular-nums leading-tight text-zinc-400">
             {hasInputTarget && target > 0
               ? (actual / target).toFixed(2)
               : hasInputTarget
@@ -678,11 +678,11 @@ function TargetWeightSortableBarRow({
         </div>
       </div>
 
-      <div className="w-8 shrink-0 text-right text-[8px] font-normal tabular-nums leading-none text-zinc-500">
-        {slice.weight.toFixed(2)}%
+      <div className="w-9 shrink-0 text-right text-[11px] font-bold tabular-nums leading-none text-zinc-300">
+        {slice.weight.toFixed(1)}%
       </div>
       <div
-        className="hidden w-[4.25rem] shrink-0 truncate text-right text-[8px] tabular-nums leading-none text-zinc-500 md:block"
+        className="hidden w-[4.75rem] shrink-0 truncate text-right text-[10px] font-semibold tabular-nums leading-none text-zinc-400 md:block"
         title={formatKrw(Math.round(slice.value))}
       >
         {formatKrw(Math.round(slice.value))}
@@ -726,7 +726,7 @@ function TargetWeightSortableBarRow({
         : null}
       </div>
 
-      <div className="w-[4.5rem] shrink-0 text-right text-[8px] tabular-nums leading-snug sm:w-[4.75rem]">
+      <div className="w-[5rem] shrink-0 text-right text-[10px] tabular-nums leading-snug sm:w-[5.25rem]">
         {!hasInputTarget ?
           <span className="text-zinc-600">—</span>
         : !hasPositiveTarget && actual > 0 ?
@@ -1254,7 +1254,7 @@ function TargetStockWeightNeu({
       </div>
 
       {/* ── Shared scale labels (비현금 행 왼쪽 드래그 핸들 폭 반영) ── */}
-      <div className="mb-0.5 flex items-end gap-1 pl-[190px] pr-20 md:pl-[262px]">
+      <div className="mb-0.5 flex items-end gap-1 pl-[196px] pr-[5.5rem] md:pl-[276px]">
         <div className="relative flex-1">
           {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((pct) => (
             <span
