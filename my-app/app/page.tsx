@@ -7016,6 +7016,7 @@ export default function Home() {
                     quantity: String(parsed.qty),
                     avgPrice: String(parsed.price),
                     currency: parsed.currency,
+                    ...(parsed.date ? { purchaseDateForFx: parsed.date } : {}),
                     ...(autoOwner ? { selectedOwners: [autoOwner] } : {}),
                   }));
                   setBuyPasteText("");

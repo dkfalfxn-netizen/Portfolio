@@ -585,7 +585,7 @@ function TargetWeightSortableBarRow({
       {!isCashRow ?
         <button
           type="button"
-          className="touch-none shrink-0 cursor-grab rounded p-0.5 text-zinc-500 hover:text-zinc-300 active:cursor-grabbing"
+          className="touch-none flex w-[22px] shrink-0 items-center justify-center cursor-grab rounded p-0.5 text-zinc-500 hover:text-zinc-300 active:cursor-grabbing"
           title="순서 이동 (드래그)"
           {...attributes}
           {...listeners}
@@ -643,9 +643,9 @@ function TargetWeightSortableBarRow({
         </div>
       )}
 
-      <div className="flex w-[118px] shrink-0 items-center gap-1 sm:w-[124px]">
+      <div className="flex w-[128px] shrink-0 items-center gap-1 sm:w-[136px]">
         <span
-          className="min-w-0 flex-1 truncate text-[9px] font-normal leading-tight text-zinc-300 tabular-nums"
+          className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-tight text-zinc-200"
           title={slice.displayName || slice.ticker}
         >
           {slice.displayName && slice.displayName !== slice.ticker
@@ -669,7 +669,11 @@ function TargetWeightSortableBarRow({
             <span className="text-[8px] text-zinc-600">%</span>
           </div>
           <span className="text-[7px] tabular-nums leading-tight text-zinc-600">
-            ({slice.weight.toFixed(1)}/{hasInputTarget ? targetsByTicker[slice.ticker] : "—"}%)
+            {hasInputTarget && target > 0
+              ? (actual / target).toFixed(2)
+              : hasInputTarget
+              ? "—"
+              : ""}
           </span>
         </div>
       </div>
@@ -1194,7 +1198,7 @@ function TargetStockWeightNeu({
 
   return (
     <div
-      className="flex flex-col rounded-2xl p-2"
+      className="flex flex-col rounded-2xl p-1"
       style={{
         background: "#151a24",
         boxShadow:
@@ -1250,7 +1254,7 @@ function TargetStockWeightNeu({
       </div>
 
       {/* ── Shared scale labels (비현금 행 왼쪽 드래그 핸들 폭 반영) ── */}
-      <div className="mb-0.5 flex items-end gap-1 pl-[180px] pr-20 md:pl-[252px]">
+      <div className="mb-0.5 flex items-end gap-1 pl-[190px] pr-20 md:pl-[262px]">
         <div className="relative flex-1">
           {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((pct) => (
             <span
@@ -1514,7 +1518,7 @@ export function FamilyAllocationDonut({
 
   return (
     <div
-      className="relative rounded-2xl border border-white/[0.08] p-4 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
+      className="relative rounded-2xl border border-white/[0.08] p-2.5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]"
       style={{
         backgroundImage: `
           repeating-linear-gradient(
@@ -1534,7 +1538,7 @@ export function FamilyAllocationDonut({
       }}
     >
       {/* ── 소유자 헤더 + 현재 비중 범례 ── */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <div className="flex items-baseline gap-2">
           <p className="text-sm font-bold text-zinc-100">{ownerName}</p>
           <p className="text-[11px] tabular-nums text-zinc-400">{formatKrw(total)}</p>
