@@ -7674,6 +7674,11 @@ export default function Home() {
                         setSellPasteText("");
                       }}
                     />
+                    {sellLogErrorByOwner[owner] && (
+                      <p className={`mt-1.5 text-[11px] font-medium ${sellLogErrorByOwner[owner].startsWith("ℹ️") ? "text-blue-400" : "text-red-400"}`}>
+                        {sellLogErrorByOwner[owner]}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">
@@ -7687,156 +7692,168 @@ export default function Home() {
                       누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{fmtInt(totalRealized)}
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-1.5 rounded-lg border bg-muted/20 p-2 text-xs sm:grid-cols-4">
-                    <input type="date" className="rounded border bg-background px-1.5 py-1" value={form.date} onChange={(e) => setForm2({ date: e.target.value })} />
-                    <div className="relative">
-                      {(() => {
-                        const q = (sellTickerSearch[owner] ?? "").toLowerCase();
-                        const filtered = ownerTickerOptions.filter((opt) =>
-                          !q || opt.symbol.toLowerCase().includes(q) || opt.name.toLowerCase().includes(q)
-                        );
-                        const hl = sellTickerHl[owner] ?? 0;
-                        const selectByIndex = (idx: number) => {
-                          const opt = filtered[idx];
-                          if (!opt) return;
-                          handleTickerChange(opt.symbol);
-                          setSellTickerSearch((prev) => { const next = { ...prev }; delete next[owner]; return next; });
-                          setSellTickerOpen((prev) => ({ ...prev, [owner]: false }));
-                          setSellTickerHl((prev) => ({ ...prev, [owner]: 0 }));
-                        };
-                        return (
-                          <>
-                            <input
-                              ref={(el) => { sellTickerInputRefs.current[owner] = el; }}
-                              className="w-full rounded border bg-background px-1.5 py-1"
-                              placeholder="티커 또는 종목명 검색"
-                              value={sellTickerSearch[owner] ?? (form.symbol ? `${form.symbol}(${form.name})` : "")}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setSellTickerSearch((prev) => ({ ...prev, [owner]: v }));
-                                setSellTickerOpen((prev) => ({ ...prev, [owner]: true }));
-                                setSellTickerHl((prev) => ({ ...prev, [owner]: 0 }));
-                                if (v === "") handleTickerChange("");
-                              }}
-                              onFocus={() => setSellTickerOpen((prev) => ({ ...prev, [owner]: true }))}
-                              onBlur={() => window.setTimeout(() => setSellTickerOpen((prev) => ({ ...prev, [owner]: false })), 150)}
-                              onKeyDown={(e) => {
-                                if (!sellTickerOpen[owner] || filtered.length === 0) return;
-                                if (e.key === "ArrowDown") {
-                                  e.preventDefault();
-                                  setSellTickerHl((prev) => ({ ...prev, [owner]: Math.min((prev[owner] ?? 0) + 1, filtered.length - 1) }));
-                                } else if (e.key === "ArrowUp") {
-                                  e.preventDefault();
-                                  setSellTickerHl((prev) => ({ ...prev, [owner]: Math.max((prev[owner] ?? 0) - 1, 0) }));
-                                } else if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  selectByIndex(hl);
-                                } else if (e.key === "Escape") {
-                                  setSellTickerOpen((prev) => ({ ...prev, [owner]: false }));
-                                }
-                              }}
-                              autoComplete="off"
-                            />
-                            {sellTickerOpen[owner] && filtered.length > 0 && (
-                              <ul
-                                className="absolute left-0 top-full z-50 mt-0.5 max-h-48 w-max min-w-full overflow-y-auto rounded border shadow-lg"
-                                style={{ background: "var(--background, #18181b)", color: "inherit" }}
-                                onMouseDown={(e) => e.preventDefault()}
-                              >
-                                {filtered.map((opt, idx) => (
-                                  <li
-                                    key={opt.symbol}
-                                    className="cursor-pointer px-2 py-1"
-                                    style={{ background: idx === hl ? "var(--accent, #27272a)" : "transparent" }}
-                                    onMouseEnter={() => setSellTickerHl((prev) => ({ ...prev, [owner]: idx }))}
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      selectByIndex(idx);
-                                    }}
-                                  >
-                                    <span className="font-mono">{opt.symbol}</span>
-                                    <span className="ml-1 text-muted-foreground">{opt.name}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </div>
-                    <select className="cursor-pointer rounded border bg-background px-1.5 py-1" value={form.currency} onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW" })}>
-                      <option value="USD">USD</option><option value="EUR">EUR</option><option value="KRW">KRW</option>
-                    </select>
-                    <div className="col-span-2 rounded border bg-muted/30 p-1.5 sm:col-span-4">
-                      <p className="mb-1 text-[10px] text-muted-foreground">보유자</p>
-                      <select
-                        className="w-full rounded border bg-background px-1.5 py-1"
-                        value={form.selectedOwners[0] ?? ""}
-                        disabled={!selectedSymbol}
-                        onChange={(e) => {
-                          const nextOwner = e.target.value;
-                          const match = positions.find((p) => p.owner === nextOwner && p.symbol === selectedSymbol);
-                          const matchedFxRate =
-                            form.currency === "KRW"
-                              ? "1"
-                              : form.currency === "EUR"
-                                ? String(Math.round(match?.purchaseEurKrw ?? eurKrw))
-                                : String(Math.round(match?.purchaseUsdKrw ?? usdKrw));
-                          const patchOwnerKey = nextOwner || owner;
-                          setSellLogOwnerForSection(nextOwner);
-                          // 다른 보유자 슬롯에 병합할 때 종목·입력값이 빈 기본값만 잡혀 초기화되지 않도록 현재 폼을 함께 전달
-                          setForm2(
-                            {
-                              symbol: form.symbol,
-                              name: form.name,
-                              date: form.date,
-                              qty: form.qty,
-                              sellPrice: form.sellPrice,
-                              note: form.note,
-                              currency: form.currency,
-                              editingId: form.editingId,
-                              selectedOwners: nextOwner ? [nextOwner] : [],
-                              ownerOverrides: {},
-                              avgPrice: match ? String(match.avgPrice) : form.avgPrice,
-                              fxRate: matchedFxRate,
-                            },
-                            patchOwnerKey,
+                  <div className="rounded-xl border border-slate-700/50 bg-slate-900/30 p-3 space-y-3 text-xs">
+                    {/* 행 1: 날짜 · 티커 · 통화 */}
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] font-medium text-slate-400">날짜</span>
+                        <input type="date" className="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-slate-200 outline-none focus:border-indigo-500/70" value={form.date} onChange={(e) => setForm2({ date: e.target.value })} />
+                      </label>
+                      <label className="relative flex flex-col gap-1 sm:col-span-2">
+                        <span className="text-[10px] font-medium text-slate-400">티커 / 종목명</span>
+                        {(() => {
+                          const q = (sellTickerSearch[owner] ?? "").toLowerCase();
+                          const filtered = ownerTickerOptions.filter((opt) =>
+                            !q || opt.symbol.toLowerCase().includes(q) || opt.name.toLowerCase().includes(q)
                           );
-                        }}
-                      >
-                        <option value="">{selectedSymbol ? "보유자 선택" : "먼저 티커를 선택해 주세요."}</option>
-                        {ownerNames.map((name) => {
-                          const noHoldingForTicker =
-                            Boolean(selectedSymbol) && !ownersWithTicker.includes(name);
+                          const hl = sellTickerHl[owner] ?? 0;
+                          const selectByIndex = (idx: number) => {
+                            const opt = filtered[idx];
+                            if (!opt) return;
+                            handleTickerChange(opt.symbol);
+                            setSellTickerSearch((prev) => { const next = { ...prev }; delete next[owner]; return next; });
+                            setSellTickerOpen((prev) => ({ ...prev, [owner]: false }));
+                            setSellTickerHl((prev) => ({ ...prev, [owner]: 0 }));
+                          };
                           return (
-                            <option key={name} value={name}>
-                              {name}
-                              {noHoldingForTicker ? " · 미보유" : ""}
-                            </option>
+                            <>
+                              <input
+                                ref={(el) => { sellTickerInputRefs.current[owner] = el; }}
+                                className="w-full rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70"
+                                placeholder="티커 또는 종목명 검색"
+                                value={sellTickerSearch[owner] ?? (form.symbol ? `${form.symbol}(${form.name})` : "")}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setSellTickerSearch((prev) => ({ ...prev, [owner]: v }));
+                                  setSellTickerOpen((prev) => ({ ...prev, [owner]: true }));
+                                  setSellTickerHl((prev) => ({ ...prev, [owner]: 0 }));
+                                  if (v === "") handleTickerChange("");
+                                }}
+                                onFocus={() => setSellTickerOpen((prev) => ({ ...prev, [owner]: true }))}
+                                onBlur={() => window.setTimeout(() => setSellTickerOpen((prev) => ({ ...prev, [owner]: false })), 150)}
+                                onKeyDown={(e) => {
+                                  if (!sellTickerOpen[owner] || filtered.length === 0) return;
+                                  if (e.key === "ArrowDown") { e.preventDefault(); setSellTickerHl((prev) => ({ ...prev, [owner]: Math.min((prev[owner] ?? 0) + 1, filtered.length - 1) })); }
+                                  else if (e.key === "ArrowUp") { e.preventDefault(); setSellTickerHl((prev) => ({ ...prev, [owner]: Math.max((prev[owner] ?? 0) - 1, 0) })); }
+                                  else if (e.key === "Enter") { e.preventDefault(); selectByIndex(hl); }
+                                  else if (e.key === "Escape") { setSellTickerOpen((prev) => ({ ...prev, [owner]: false })); }
+                                }}
+                                autoComplete="off"
+                              />
+                              {sellTickerOpen[owner] && filtered.length > 0 && (
+                                <ul
+                                  className="absolute left-0 top-full z-50 mt-0.5 max-h-48 w-max min-w-full overflow-y-auto rounded border shadow-lg"
+                                  style={{ background: "var(--background, #18181b)", color: "inherit" }}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                >
+                                  {filtered.map((opt, idx) => (
+                                    <li
+                                      key={opt.symbol}
+                                      className="cursor-pointer px-2 py-1"
+                                      style={{ background: idx === hl ? "var(--accent, #27272a)" : "transparent" }}
+                                      onMouseEnter={() => setSellTickerHl((prev) => ({ ...prev, [owner]: idx }))}
+                                      onMouseDown={(e) => { e.preventDefault(); selectByIndex(idx); }}
+                                    >
+                                      <span className="font-mono">{opt.symbol}</span>
+                                      <span className="ml-1 text-muted-foreground">{opt.name}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] font-medium text-slate-400">통화</span>
+                        <select className="cursor-pointer rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-slate-200 outline-none focus:border-indigo-500/70" value={form.currency} onChange={(e) => setForm2({ currency: e.target.value as "USD" | "EUR" | "KRW" })}>
+                          <option value="USD">USD</option><option value="EUR">EUR</option><option value="KRW">KRW</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    {/* 행 2: 담당자 (라디오 버튼) */}
+                    <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 px-3 py-2">
+                      <p className="mb-2 text-[10px] font-medium text-slate-400">담당자</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                        {ownerNames.map((name) => {
+                          const isSelected = (form.selectedOwners[0] ?? "") === name;
+                          const anySelected = form.selectedOwners.length > 0;
+                          const noHolding = Boolean(selectedSymbol) && !ownersWithTicker.includes(name);
+                          return (
+                            <label
+                              key={name}
+                              className={`flex cursor-pointer items-center gap-1.5 select-none transition-opacity ${anySelected && !isSelected ? "opacity-30" : "opacity-100"}`}
+                            >
+                              <input
+                                type="radio"
+                                name={`sell-form-owner-${owner}`}
+                                className="cursor-pointer accent-primary"
+                                checked={isSelected}
+                                onChange={() => {
+                                  const match = positions.find((p) => p.owner === name && p.symbol === selectedSymbol);
+                                  const matchedFxRate = form.currency === "KRW" ? "1"
+                                    : form.currency === "EUR" ? String(Math.round(match?.purchaseEurKrw ?? eurKrw))
+                                    : String(Math.round(match?.purchaseUsdKrw ?? usdKrw));
+                                  setSellLogOwnerForSection(name);
+                                  setForm2(
+                                    {
+                                      symbol: form.symbol, name: form.name, date: form.date,
+                                      qty: form.qty, sellPrice: form.sellPrice, note: form.note,
+                                      currency: form.currency, editingId: form.editingId,
+                                      selectedOwners: [name], ownerOverrides: {},
+                                      avgPrice: match ? String(match.avgPrice) : form.avgPrice,
+                                      fxRate: matchedFxRate,
+                                    },
+                                    name,
+                                  );
+                                }}
+                              />
+                              <span className={`text-sm ${isSelected ? "font-semibold text-foreground" : ""}`}>
+                                {name}
+                                {noHolding && <span className="ml-0.5 text-[10px] text-slate-500">· 미보유</span>}
+                              </span>
+                            </label>
                           );
                         })}
-                      </select>
+                      </div>
                     </div>
-                    <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right sm:col-start-1" placeholder="수량" value={form.qty} onChange={(e) => setForm2({ qty: e.target.value })} />
-                    <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="매도가" value={form.sellPrice} onChange={(e) => setForm2({ sellPrice: e.target.value })} />
-                    <input type="number" min="0" step="any" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="매수평단가" value={form.avgPrice} onChange={(e) => setForm2({ avgPrice: e.target.value })} />
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground">매입 환율(₩)</span>
-                      <input type="number" min="0" step="1" className="rounded border bg-background px-1.5 py-1 text-right" placeholder="적용환율" value={form.fxRate} onChange={(e) => setForm2({ fxRate: e.target.value })} />
-                    </label>
-                    <input className="col-span-2 rounded border bg-background px-1.5 py-1 sm:col-span-3" placeholder="메모" value={form.note} onChange={(e) => setForm2({ note: e.target.value })} />
-                    <button type="button" className="cursor-pointer rounded bg-primary px-3 py-1 text-primary-foreground hover:bg-primary/90" onClick={handleSave}>
-                      {form.editingId ? "수정 저장" : "+ 기록 추가"}
-                    </button>
-                    <div className="col-span-2 sm:col-span-4">
+
+                    {/* 행 3: 수량 · 매도가 · 매수평단가 · 매입환율 */}
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] font-medium text-slate-400">수량</span>
+                        <input type="number" min="0" step="any" className="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-right text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70" placeholder="0" value={form.qty} onChange={(e) => setForm2({ qty: e.target.value })} />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] font-medium text-slate-400">매도가</span>
+                        <input type="number" min="0" step="any" className="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-right text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70" placeholder="0" value={form.sellPrice} onChange={(e) => setForm2({ sellPrice: e.target.value })} />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] font-medium text-slate-400">매수평단가</span>
+                        <input type="number" min="0" step="any" className="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-right text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70" placeholder="0" value={form.avgPrice} onChange={(e) => setForm2({ avgPrice: e.target.value })} />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[10px] font-medium text-slate-400">매입 환율 (₩)</span>
+                        <input type="number" min="0" step="1" className="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-right text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70" placeholder="0" value={form.fxRate} onChange={(e) => setForm2({ fxRate: e.target.value })} />
+                      </label>
+                    </div>
+
+                    {/* 행 4: 메모 · 저장 */}
+                    <div className="flex gap-2">
+                      <input className="flex-1 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1.5 text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70" placeholder="메모 (선택)" value={form.note} onChange={(e) => setForm2({ note: e.target.value })} />
+                      <button type="button" className="shrink-0 cursor-pointer rounded-md bg-primary px-4 py-1.5 font-semibold text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all" onClick={handleSave}>
+                        {form.editingId ? "수정 저장" : "+ 기록 추가"}
+                      </button>
+                    </div>
+
+                    {/* 실현손익 예상 */}
+                    <div className="flex items-center gap-2">
                       <span className="text-[11px] font-semibold">
-                        실현손익 예상: {preview >= 0 ? "+" : ""}₩{fmtInt(preview)}
+                        실현손익 예상: <span className={preview >= 0 ? "text-red-400" : "text-blue-400"}>{preview >= 0 ? "+" : ""}₩{fmtInt(preview)}</span>
                       </span>
-                      <span className="ml-1 text-[10px] text-muted-foreground">
-                        (매도 {(TRADING_FEE_RATE * 100).toFixed(1)}% 반영)
-                      </span>
+                      <span className="text-[10px] text-muted-foreground">(매도 {(TRADING_FEE_RATE * 100).toFixed(1)}% 반영)</span>
                     </div>
-                    {sellLogErrorByOwner[owner] ? <p className={`col-span-2 text-[11px] font-medium sm:col-span-4 ${sellLogErrorByOwner[owner].startsWith("ℹ️") ? "text-blue-400" : "text-destructive"}`}>{sellLogErrorByOwner[owner]}</p> : null}
                   </div>
                   {symPnlList.length > 0 && (
                     <div className="overflow-x-auto rounded-lg border bg-muted/20 p-2">
