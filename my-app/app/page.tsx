@@ -469,6 +469,55 @@ type BuyJournalEntry = {
   totalKrw: number;
 };
 
+// ── 미래에셋증권 카카오 체결 알림 파서 ────────────────────────────────────────
+type MiraeAssetParsed = {
+  accountName: string;
+  name: string;
+  symbol: string;
+  tradeType: "buy" | "sell";
+  qty: number;
+  price: number;
+  currency: "KRW" | "USD" | "EUR";
+};
+
+function parseMiraeAssetNotification(text: string): MiraeAssetParsed | null {
+  if (!text.includes("미래에셋")) return null;
+  const get = (key: string) => {
+    const m = text.match(new RegExp(`${key}\\s*:\\s*(.+)`));
+    return m ? m[1].trim() : "";
+  };
+  const 종목명Raw = get("종목명");
+  const 매매구분 = get("매매구분");
+  const 체결수량Raw = get("체결수량");
+  const 체결단가Raw = get("체결단가");
+  const 계좌명 = get("계좌명");
+  if (!종목명Raw || !매매구분 || !체결수량Raw || !체결단가Raw) return null;
+
+  // "SOL 미국원자력SMR(A0051G0)" → name / symbol 분리
+  const nameMatch = 종목명Raw.match(/^(.+?)\(([^)]+)\)$/);
+  const name = nameMatch ? nameMatch[1].trim() : 종목명Raw.trim();
+  const symbol = nameMatch ? nameMatch[2].trim() : "";
+
+  const qty = parseInt(체결수량Raw.replace(/[^\d]/g, ""), 10);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+
+  let currency: "KRW" | "USD" | "EUR" = "KRW";
+  let price = 0;
+  if (체결단가Raw.includes("$") || 체결단가Raw.toUpperCase().includes("USD")) {
+    currency = "USD";
+    price = parseFloat(체결단가Raw.replace(/[^0-9.]/g, ""));
+  } else if (체결단가Raw.includes("€") || 체결단가Raw.toUpperCase().includes("EUR")) {
+    currency = "EUR";
+    price = parseFloat(체결단가Raw.replace(/[^0-9.]/g, ""));
+  } else {
+    price = parseInt(체결단가Raw.replace(/[^\d]/g, ""), 10);
+  }
+  if (!Number.isFinite(price) || price <= 0) return null;
+
+  const tradeType: "buy" | "sell" = 매매구분.includes("매도") ? "sell" : "buy";
+  return { accountName: 계좌명, name, symbol, tradeType, qty, price, currency };
+}
+
 function calcSellRealizedKrw(entry: Pick<SellLogEntry, "qty" | "sellPrice" | "avgPrice" | "currency" | "fxRate">): number {
   const qty = Number(entry.qty);
   const sell = Number(entry.sellPrice);
@@ -1339,6 +1388,7 @@ export default function Home() {
   const [buyJournal, setBuyJournal] = useState<BuyJournalEntry[]>([]);
   const [sellLog, setSellLog] = useState<Record<string, SellLogEntry[]>>({});
   const [showTradeImageImport, setShowTradeImageImport] = useState(false);
+  const [buyPasteError, setBuyPasteError] = useState("");
   const [showSymbolPnl, setShowSymbolPnl] = useState<Record<string, boolean>>({});
   const [sellLogErrorByOwner, setSellLogErrorByOwner] = useState<Record<string, string>>({});
   const [sellLogOwnerForSection, setSellLogOwnerForSection] = useState<string>("김승주");
@@ -6780,15 +6830,45 @@ export default function Home() {
                 ))}
               </div>
             </div>
-            <div className="mb-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowTradeImageImport(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-600/60 bg-indigo-900/30 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-800/50 hover:text-indigo-200 transition-colors"
-              >
-                📷 이미지로 입력
-              </button>
-              <span className="text-[11px] text-muted-foreground">거래내역 스크린샷을 올리면 자동 파싱</span>
+            {/* ── 미래에셋 체결 알림 붙여넣기 (매수) ── */}
+            <div className="mb-4 rounded-xl border border-slate-700/50 bg-slate-900/30 p-3">
+              <p className="mb-1.5 text-[11px] font-semibold text-slate-300">
+                미래에셋 체결 알림 붙여넣기 <span className="font-normal text-slate-500">— 카카오 알림 텍스트를 그대로 붙여넣으면 자동 입력됩니다</span>
+              </p>
+              <textarea
+                rows={3}
+                placeholder={"[미래에셋증권] 전량체결\n계좌명 : 홍길동\n종목명 : SOL 미국원자력SMR(A0051G0)\n매매구분 : 매수 ..."}
+                className="w-full resize-none rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70"
+                value=""
+                onChange={(e) => {
+                  const text = e.target.value;
+                  if (!text.trim()) { setBuyPasteError(""); return; }
+                  const parsed = parseMiraeAssetNotification(text);
+                  if (!parsed) {
+                    setBuyPasteError("미래에셋 체결 알림 형식이 아닙니다.");
+                    return;
+                  }
+                  if (parsed.tradeType === "sell") {
+                    setBuyPasteError("⚠️ 매도 체결 내역입니다. '실현손익 입력' 탭에 붙여넣어 주세요.");
+                    return;
+                  }
+                  setBuyPasteError("");
+                  const autoOwner = ownerNames.find((n) => n === parsed.accountName);
+                  setForm((prev) => ({
+                    ...prev,
+                    symbol: parsed.symbol || parsed.name,
+                    name: parsed.name,
+                    quantity: String(parsed.qty),
+                    avgPrice: String(parsed.price),
+                    currency: parsed.currency,
+                    ...(autoOwner ? { selectedOwners: [autoOwner] } : {}),
+                  }));
+                  e.target.value = "";
+                }}
+              />
+              {buyPasteError && (
+                <p className="mt-1 text-[11px] font-medium text-red-400">{buyPasteError}</p>
+              )}
             </div>
             <p className="mb-3 text-xs text-muted-foreground">
               담당자를 여러 명 선택하면 같은 티커·수량·평단으로 각각 한 줄씩 추가됩니다.
@@ -7434,6 +7514,64 @@ export default function Home() {
               const preview = calcRealized(form);
               return (
                 <div className="space-y-2">
+                  {/* ── 미래에셋 체결 알림 붙여넣기 (매도) ── */}
+                  <div className="rounded-xl border border-slate-700/50 bg-slate-900/30 p-3">
+                    <p className="mb-1.5 text-[11px] font-semibold text-slate-300">
+                      미래에셋 체결 알림 붙여넣기 <span className="font-normal text-slate-500">— 카카오 알림 텍스트를 그대로 붙여넣으면 자동 입력됩니다</span>
+                    </p>
+                    <textarea
+                      rows={3}
+                      placeholder={"[미래에셋증권] 전량체결\n계좌명 : 홍길동\n종목명 : SOL 미국원자력SMR(A0051G0)\n매매구분 : 매도 ..."}
+                      className="w-full resize-none rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-2 text-[11px] text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/70"
+                      value=""
+                      onChange={(e) => {
+                        const text = e.target.value;
+                        if (!text.trim()) {
+                          setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
+                          return;
+                        }
+                        const parsed = parseMiraeAssetNotification(text);
+                        if (!parsed) {
+                          setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "미래에셋 체결 알림 형식이 아닙니다." }));
+                          return;
+                        }
+                        if (parsed.tradeType === "buy") {
+                          setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "⚠️ 매수 체결 내역입니다. '종목 추가' 탭에 붙여넣어 주세요." }));
+                          return;
+                        }
+                        setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "" }));
+                        // 계좌명으로 보유자 자동 전환
+                        const autoOwner = ownerNames.find((n) => n === parsed.accountName) ?? owner;
+                        if (autoOwner !== owner) setSellLogOwnerForSection(autoOwner);
+                        // 해당 보유자의 포지션에서 평균단가 자동 조회
+                        const pos = positions.find(
+                          (p) => p.owner === autoOwner && (p.symbol === parsed.symbol || p.name === parsed.name),
+                        );
+                        const avgPrice = pos ? String(pos.avgPrice) : "";
+                        const fxRate = parsed.currency === "KRW" ? "1"
+                          : parsed.currency === "EUR" ? String(Math.round(eurKrw))
+                          : String(Math.round(usdKrw));
+                        setForm2(
+                          {
+                            symbol: parsed.symbol || parsed.name,
+                            name: parsed.name,
+                            qty: String(parsed.qty),
+                            sellPrice: String(parsed.price),
+                            avgPrice,
+                            currency: parsed.currency,
+                            fxRate: pos
+                              ? (parsed.currency === "USD" ? String(Math.round(pos.purchaseUsdKrw ?? usdKrw))
+                                : parsed.currency === "EUR" ? String(Math.round(pos.purchaseEurKrw ?? eurKrw))
+                                : "1")
+                              : fxRate,
+                            selectedOwners: [autoOwner],
+                          },
+                          autoOwner,
+                        );
+                        e.target.value = "";
+                      }}
+                    />
+                  </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">
                       보유자는 전부 표시됩니다(해당 티커를 안 갖고 있으면 &quot;· 미보유&quot;). 그 티커는 실제로 보유한 보유자만 저장됩니다.
