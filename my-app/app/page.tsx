@@ -5003,12 +5003,15 @@ export default function Home() {
                   })}
                 />
               </div>
-              {allocationByOwnerForGrid.map(({ ownerName, data, total }) => (
-                <FamilyAllocationDonut
+              {allocationByOwnerForGrid.map(({ ownerName, data, total }) => {
+                const pos = positionsByOwner.find((g) => g.ownerName === ownerName);
+                return <FamilyAllocationDonut
                   key={ownerName}
                   ownerName={ownerName}
                   data={data}
                   total={total}
+                  sectionPnL={pos?.sectionPnL}
+                  sectionPnLPct={pos?.sectionPnLPct}
                   watchlistEntries={watchlistRows.filter(
                     (row) =>
                       !!row.symbol?.trim() &&
@@ -5018,8 +5021,8 @@ export default function Home() {
                         row.owners.includes(ownerName)),
                   )}
                   cloudSyncKey={cloudSyncKey}
-                />
-              ))}
+                />;
+              })}
             </div>
           </section>
           </div>

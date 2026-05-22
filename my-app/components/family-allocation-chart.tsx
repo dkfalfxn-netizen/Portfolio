@@ -873,22 +873,9 @@ export function PortfolioAllOwnersTodayProfitCard({
               {/* 보유자 합계 헤더 */}
               <div className="mb-1 border-b border-white/[0.06] pb-1">
                 <span className="block text-[11px] font-semibold text-zinc-200">{owner.ownerName}</span>
-                {owner.sectionPnL !== undefined && (
-                  <div className={`flex flex-wrap items-baseline gap-x-1 tabular-nums ${krwTone(owner.sectionPnL)}`}>
-                    <span className="text-sm font-bold">
-                      {owner.sectionPnL > 0 ? "+" : ""}₩{fmtInt(owner.sectionPnL)}
-                    </span>
-                    {owner.sectionPnLPct !== undefined && owner.sectionPnL !== 0 && (
-                      <span className="text-xs font-bold">
-                        ({owner.sectionPnLPct > 0 ? "+" : ""}
-                        {owner.sectionPnLPct.toFixed(2)}%)
-                      </span>
-                    )}
-                  </div>
-                )}
-                <div className={`flex flex-wrap items-baseline gap-x-1 text-[10px] tabular-nums ${krwTone(owner.totalDailyKrw)}`}>
-                  <span className="font-semibold">
-                    오늘 {owner.totalDailyKrw > 0 ? "+" : ""}₩{fmtInt(owner.totalDailyKrw)}
+                <div className={`flex flex-wrap items-baseline gap-x-1 text-[11px] tabular-nums ${krwTone(owner.totalDailyKrw)}`}>
+                  <span className="font-bold">
+                    {owner.totalDailyKrw > 0 ? "+" : ""}₩{fmtInt(owner.totalDailyKrw)}
                   </span>
                   {owner.totalDailyPct !== null && owner.totalDailyKrw !== 0 && (
                     <span className="font-semibold">
@@ -1425,6 +1412,8 @@ export function FamilyAllocationDonut({
   total,
   watchlistEntries,
   cloudSyncKey = "",
+  sectionPnL,
+  sectionPnLPct,
 }: {
   ownerName: string;
   data: AllocationSlice[];
@@ -1432,6 +1421,8 @@ export function FamilyAllocationDonut({
   watchlistEntries?: Array<{ symbol: string; name: string; group?: string }>;
   /** 동기화 키(8자 이상) — 목표 비중을 서버에도 남길 때 사용 */
   cloudSyncKey?: string;
+  sectionPnL?: number;
+  sectionPnLPct?: number;
 }) {
   const chartData = useMemo(
     () => [...data].sort((a, b) => b.weight - a.weight || b.value - a.value),
@@ -1560,9 +1551,17 @@ export function FamilyAllocationDonut({
     >
       {/* ── 소유자 헤더 + 현재 비중 범례 ── */}
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <div className="flex items-baseline gap-2">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <p className="text-sm font-bold text-zinc-100">{ownerName}</p>
           <p className="text-[11px] tabular-nums text-zinc-400">{formatKrw(total)}</p>
+          {sectionPnL !== undefined && (
+            <p className={`text-sm font-bold tabular-nums ${sectionPnL > 0 ? "text-red-400" : sectionPnL < 0 ? "text-blue-400" : "text-zinc-500"}`}>
+              ({sectionPnL > 0 ? "+" : ""}{formatKrw(Math.round(sectionPnL))}
+              {sectionPnLPct !== undefined && sectionPnL !== 0 && (
+                <span className="ml-0.5">{sectionPnLPct > 0 ? " +" : " "}{sectionPnLPct.toFixed(2)}%</span>
+              )})
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           {chartData.map((d, i) => {
