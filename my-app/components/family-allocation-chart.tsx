@@ -221,7 +221,11 @@ function fmtCurrentVersusPortfolioTargetTooltip(
 ): string {
   const c = `${currentSlicePct.toFixed(1)}%`;
   if (portfolioTargetPct === null || !Number.isFinite(portfolioTargetPct)) return `현재 ${c}`;
-  return `현재 ${c} · 목표 ${portfolioTargetPct.toFixed(1)}%`;
+  const ratio = portfolioTargetPct > 0
+    ? Math.round((currentSlicePct / portfolioTargetPct) * 100) / 100
+    : null;
+  const ratioStr = ratio !== null ? ` (${ratio.toFixed(2)})` : "";
+  return `현재 ${c}${ratioStr} · 목표 ${portfolioTargetPct.toFixed(1)}%`;
 }
 
 /** 복수 종목 그룹: 계산기 분배·모드와 동일 규칙으로 종목별 포트 전체 목표 % */
