@@ -778,15 +778,35 @@ function loadSellLog(): Record<string, SellLogEntry[]> {
     const out: Record<string, SellLogEntry[]> = {};
     for (const [owner, entries] of Object.entries(parsed as Record<string, unknown>)) {
       if (!Array.isArray(entries)) continue;
-      out[owner] = entries.filter(
-        (e): e is SellLogEntry =>
-          e !== null &&
-          typeof e === "object" &&
-          typeof (e as SellLogEntry).id === "string" &&
-          typeof (e as SellLogEntry).symbol === "string" &&
-          typeof (e as SellLogEntry).qty === "number" &&
-          typeof (e as SellLogEntry).realizedKrw === "number",
-      );
+      out[owner] = entries
+        .filter(
+          (e): e is Record<string, unknown> =>
+            e !== null &&
+            typeof e === "object" &&
+            typeof (e as Record<string, unknown>).id === "string" &&
+            typeof (e as Record<string, unknown>).symbol === "string" &&
+            typeof (e as Record<string, unknown>).qty === "number" &&
+            typeof (e as Record<string, unknown>).realizedKrw === "number",
+        )
+        .map((e): SellLogEntry => {
+          const currency =
+            e.currency === "USD" || e.currency === "EUR" || e.currency === "KRW"
+              ? e.currency
+              : "KRW";
+          return {
+            id: e.id as string,
+            date: typeof e.date === "string" ? e.date : "",
+            symbol: e.symbol as string,
+            name: typeof e.name === "string" && e.name ? e.name : (e.symbol as string),
+            qty: e.qty as number,
+            sellPrice: typeof e.sellPrice === "number" ? e.sellPrice : 0,
+            avgPrice: typeof e.avgPrice === "number" ? e.avgPrice : 0,
+            currency,
+            fxRate: typeof e.fxRate === "number" && e.fxRate > 0 ? e.fxRate : 1,
+            realizedKrw: e.realizedKrw as number,
+            note: typeof e.note === "string" ? e.note : undefined,
+          };
+        });
     }
     return out;
   } catch {
@@ -1409,22 +1429,37 @@ function normalizeSellLogStrict(
       base[name] = [];
       continue;
     }
-    base[name] = entries.filter(
-      (e): e is SellLogEntry =>
-        e !== null &&
-        typeof e === "object" &&
-        typeof (e as SellLogEntry).id === "string" &&
-        typeof (e as SellLogEntry).symbol === "string" &&
-        typeof (e as SellLogEntry).name === "string" &&
-        typeof (e as SellLogEntry).qty === "number" &&
-        typeof (e as SellLogEntry).sellPrice === "number" &&
-        typeof (e as SellLogEntry).avgPrice === "number" &&
-        ((e as SellLogEntry).currency === "USD" ||
-          (e as SellLogEntry).currency === "EUR" ||
-          (e as SellLogEntry).currency === "KRW") &&
-        typeof (e as SellLogEntry).fxRate === "number" &&
-        typeof (e as SellLogEntry).realizedKrw === "number",
-    );
+    // 필수 최소 필드(id, symbol, qty, realizedKrw)만 확인하고, 누락 필드는 기본값으로 복원.
+    // 이전에 fxRate 등이 없던 구버전 항목도 조용히 삭제되지 않도록 방어.
+    base[name] = entries
+      .filter(
+        (e): e is Record<string, unknown> =>
+          e !== null &&
+          typeof e === "object" &&
+          typeof (e as Record<string, unknown>).id === "string" &&
+          typeof (e as Record<string, unknown>).symbol === "string" &&
+          typeof (e as Record<string, unknown>).qty === "number" &&
+          typeof (e as Record<string, unknown>).realizedKrw === "number",
+      )
+      .map((e): SellLogEntry => {
+        const currency =
+          e.currency === "USD" || e.currency === "EUR" || e.currency === "KRW"
+            ? e.currency
+            : "KRW";
+        return {
+          id: e.id as string,
+          date: typeof e.date === "string" ? e.date : "",
+          symbol: e.symbol as string,
+          name: typeof e.name === "string" && e.name ? e.name : (e.symbol as string),
+          qty: e.qty as number,
+          sellPrice: typeof e.sellPrice === "number" ? e.sellPrice : 0,
+          avgPrice: typeof e.avgPrice === "number" ? e.avgPrice : 0,
+          currency,
+          fxRate: typeof e.fxRate === "number" && e.fxRate > 0 ? e.fxRate : 1,
+          realizedKrw: e.realizedKrw as number,
+          note: typeof e.note === "string" ? e.note : undefined,
+        };
+      });
   }
   return base;
 }
