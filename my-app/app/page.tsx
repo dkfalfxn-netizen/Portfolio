@@ -1476,6 +1476,10 @@ export default function Home() {
   const [sellLogListViewOwner, setSellLogListViewOwner] = useState<string>("김승주");
   /** 기록 목록 UI 접힘(기본 접힘) */
   const [sellLogListExpanded, setSellLogListExpanded] = useState(false);
+  /** 종목별 합산 패널 접힘 */
+  const [sellLogSymSummaryExpanded, setSellLogSymSummaryExpanded] = useState(false);
+  /** 종목별 합산 보유자 필터: 빈 배열 = 전체 선택 */
+  const [sellLogSymOwnerFilter, setSellLogSymOwnerFilter] = useState<string[]>([]);
   /** 실현손익 티커 검색 combobox: owner별 검색어 */
   const [sellTickerSearch, setSellTickerSearch] = useState<Record<string, string>>({});
   /** 실현손익 티커 검색 combobox: owner별 드롭다운 열림 여부 */
@@ -7494,6 +7498,33 @@ export default function Home() {
               }
               const listDailyRealized = (d: string) =>
                 (listByDate.get(d) ?? []).reduce((s, e) => s + calcSellRealizedKrw(e), 0);
+
+              // ── 종목별 합산 ────────────────────────────────────────────
+              const symActiveOwners = sellLogSymOwnerFilter.length === 0 ? ownerNames : sellLogSymOwnerFilter;
+              const symFilteredEntries = symActiveOwners.flatMap((o) => sellLog[o] ?? []);
+              type SymSummaryRow = { symbol: string; name: string; count: number; totalQty: number; totalRealizedKrw: number };
+              const symSummaryMap = new Map<string, SymSummaryRow>();
+              for (const e of symFilteredEntries) {
+                const prev = symSummaryMap.get(e.symbol) ?? { symbol: e.symbol, name: e.name, count: 0, totalQty: 0, totalRealizedKrw: 0 };
+                symSummaryMap.set(e.symbol, {
+                  ...prev,
+                  count: prev.count + 1,
+                  totalQty: prev.totalQty + e.qty,
+                  totalRealizedKrw: prev.totalRealizedKrw + calcSellRealizedKrw(e),
+                });
+              }
+              const symSummaryRows = [...symSummaryMap.values()].sort((a, b) => b.totalRealizedKrw - a.totalRealizedKrw);
+              const symSummaryTotal = symSummaryRows.reduce((s, r) => s + r.totalRealizedKrw, 0);
+              const toggleSymOwner = (name: string) => {
+                setSellLogSymOwnerFilter((prev) => {
+                  const current = prev.length === 0 ? ownerNames : prev;
+                  const next = current.includes(name) ? current.filter((n) => n !== name) : [...current, name];
+                  if (next.length === 0) return prev; // 최소 1명 유지
+                  return next.length === ownerNames.length ? [] : next; // 전체 선택이면 빈 배열(=전체)
+                });
+              };
+              // ────────────────────────────────────────────────────────────
+
               const ownerTickerOptions = Array.from(
                 new Map(
                   positions.map((p) => [
@@ -8267,6 +8298,86 @@ export default function Home() {
                         <p className="text-[11px] text-muted-foreground">이 보유자의 매도 기록이 없습니다.</p>
                       )
                     ) : null}
+                  </div>
+
+                  {/* 종목별 합산 패널 */}
+                  <div className="overflow-x-auto rounded-lg border bg-muted/20 p-2">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs font-semibold">종목별 합산</p>
+                        {/* 보유자 필터 토글 버튼 */}
+                        <div className="flex flex-wrap gap-1">
+                          {ownerNames.map((name) => {
+                            const active = sellLogSymOwnerFilter.length === 0 || sellLogSymOwnerFilter.includes(name);
+                            return (
+                              <button
+                                key={name}
+                                type="button"
+                                onClick={() => toggleSymOwner(name)}
+                                className={`rounded border px-2 py-0.5 text-[10px] transition-colors ${
+                                  active
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border text-muted-foreground hover:bg-muted"
+                                }`}
+                              >
+                                {name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {symSummaryRows.length > 0 && (
+                          <span className={`text-[10px] tabular-nums font-semibold ${symSummaryTotal > 0 ? "text-red-500" : symSummaryTotal < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                            합산 {symSummaryTotal >= 0 ? "+" : ""}₩{fmtInt(Math.round(symSummaryTotal))}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="w-fit rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
+                        onClick={() => setSellLogSymSummaryExpanded((v) => !v)}
+                      >
+                        {sellLogSymSummaryExpanded ? "접기 ▲" : "펼치기 ▼"}
+                      </button>
+                    </div>
+                    {sellLogSymSummaryExpanded && (
+                      symSummaryRows.length > 0 ? (
+                        <table className="w-full text-[11px]">
+                          <thead>
+                            <tr className="border-b text-muted-foreground">
+                              <th className="py-1 pr-2 text-left font-medium">종목</th>
+                              <th className="py-1 pr-2 text-right font-medium">거래 횟수</th>
+                              <th className="py-1 pr-2 text-right font-medium">총 수량</th>
+                              <th className="py-1 text-right font-medium">실현손익 합계</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {symSummaryRows.map((row) => (
+                              <tr key={row.symbol} className="border-b border-border/30 last:border-0 hover:bg-muted/30">
+                                <td className="py-1 pr-2">
+                                  <span className="font-medium">{row.name}</span>
+                                  <span className="ml-1 text-[10px] text-muted-foreground">({row.symbol})</span>
+                                </td>
+                                <td className="py-1 pr-2 text-right tabular-nums text-muted-foreground">{row.count}회</td>
+                                <td className="py-1 pr-2 text-right tabular-nums">{row.totalQty}</td>
+                                <td className={`py-1 text-right tabular-nums font-semibold ${row.totalRealizedKrw > 0 ? "text-red-500" : row.totalRealizedKrw < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                                  {row.totalRealizedKrw >= 0 ? "+" : ""}₩{fmtInt(Math.round(row.totalRealizedKrw))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t border-border">
+                              <td className="py-1.5 pr-2 text-xs font-bold text-foreground" colSpan={3}>합계</td>
+                              <td className={`py-1.5 text-right tabular-nums text-xs font-bold ${symSummaryTotal > 0 ? "text-red-500" : symSummaryTotal < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                                {symSummaryTotal >= 0 ? "+" : ""}₩{fmtInt(Math.round(symSummaryTotal))}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground">선택한 보유자의 매도 기록이 없습니다.</p>
+                      )
+                    )}
                   </div>
                 </div>
               );
