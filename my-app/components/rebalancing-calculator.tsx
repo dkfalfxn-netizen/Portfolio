@@ -507,6 +507,7 @@ function RebalancingBarSortableRow({
   resolvedNameBySymbol: Record<string, string>;
 }) {
   const pinned = isPinnedCashPortfolioGroup(row.groupKey);
+  const [membersCollapsed, setMembersCollapsed] = useState(true);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: row.groupKey,
     disabled: pinned,
@@ -578,12 +579,31 @@ function RebalancingBarSortableRow({
         : <span className="mr-0.5 w-5 shrink-0" aria-hidden />}
 
         <div className="flex w-36 shrink-0 items-center gap-0.5 sm:w-44">
-          <span
-            className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-100 sm:text-sm"
-            title={row.displayName || row.groupKey}
-          >
-            {row.displayName || row.groupKey}
-          </span>
+          <div className="flex min-w-0 flex-1 items-center gap-1 truncate">
+            <span
+              className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-100 sm:text-sm"
+              title={row.displayName || row.groupKey}
+            >
+              {row.displayName || row.groupKey}
+            </span>
+            {!pinned && row.members.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setMembersCollapsed((v) => !v)}
+                className="shrink-0 rounded px-1 py-0.5 text-[10px] transition-colors hover:bg-slate-700/60"
+                title={membersCollapsed ? "종목 펼치기" : "종목 접기"}
+              >
+                {membersCollapsed
+                  ? tgtPctMatchesGroup
+                    ? <span className="font-bold text-emerald-400">✓</span>
+                    : tgtPctAllFilled
+                      ? <span className="font-bold text-amber-400">✗</span>
+                      : <span className="text-slate-500">▶</span>
+                  : <span className="text-slate-400">▼</span>
+                }
+              </button>
+            )}
+          </div>
           <div className="flex shrink-0 flex-col items-end gap-0">
             <div className="flex items-center gap-0.5">
               <input
@@ -648,7 +668,7 @@ function RebalancingBarSortableRow({
       </div>
 
       {!pinned && row.members.length > 0 ?
-        <div className="border-t border-dashed border-slate-600/50 pb-2 pt-2">
+        <div className="border-t border-dashed border-slate-600/50 pb-2 pt-2" style={membersCollapsed ? { display: "none" } : undefined}>
           {rebalanceMode !== "buy-only" ?
             <div
               className="mt-2 ml-7 sm:ml-8 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-slate-600/55 bg-slate-900/70 px-2.5 py-2"
