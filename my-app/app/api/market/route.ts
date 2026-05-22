@@ -111,8 +111,8 @@ async function fetchNaverGoldPrice(): Promise<ChartQuote> {
 /** 네이버 증권 모바일 API — 6자리 한국 주식 코드 (거래소 자동 판별) */
 async function fetchNaverStockPrice(code: string): Promise<ChartQuote> {
   try {
-    // A458730 등 거래소 접두사가 붙은 경우 제거 (네이버 API는 순수 숫자 코드 사용)
-    const cleanCode = /^[A-Z][0-9]{6}$/i.test(code.trim()) ? code.trim().slice(1) : code.trim();
+    // A458730, A0051G0 등 거래소 접두사가 붙은 경우 제거 (네이버 API는 접두 없는 코드 사용)
+    const cleanCode = /^[A-Z][0-9A-Z]{6}$/i.test(code.trim()) ? code.trim().slice(1) : code.trim();
     const url = `https://m.stock.naver.com/api/stock/${encodeURIComponent(cleanCode)}/basic`;
     const res = await fetch(url, {
       method: "GET",
