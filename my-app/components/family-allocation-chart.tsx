@@ -753,6 +753,10 @@ export type OwnerDailyPortfolioSummary = {
   totalDailyKrw: number;
   /** 보유 평가(전일 종가 기준 주식·현금 포함) 대비 오늘 등락 % */
   totalDailyPct: number | null;
+  /** 누적 평가손익 (원화) */
+  sectionPnL?: number;
+  /** 누적 평가손익률 (%) */
+  sectionPnLPct?: number;
   groups: {
     label: string;
     dailyChangeKrw: number;
@@ -869,9 +873,22 @@ export function PortfolioAllOwnersTodayProfitCard({
               {/* 보유자 합계 헤더 */}
               <div className="mb-1 border-b border-white/[0.06] pb-1">
                 <span className="block text-[11px] font-semibold text-zinc-200">{owner.ownerName}</span>
-                <div className={`flex flex-wrap items-baseline gap-x-1 text-[11px] tabular-nums ${krwTone(owner.totalDailyKrw)}`}>
-                  <span className="font-bold">
-                    {owner.totalDailyKrw > 0 ? "+" : ""}₩{fmtInt(owner.totalDailyKrw)}
+                {owner.sectionPnL !== undefined && (
+                  <div className={`flex flex-wrap items-baseline gap-x-1 tabular-nums ${krwTone(owner.sectionPnL)}`}>
+                    <span className="text-sm font-bold">
+                      {owner.sectionPnL > 0 ? "+" : ""}₩{fmtInt(owner.sectionPnL)}
+                    </span>
+                    {owner.sectionPnLPct !== undefined && owner.sectionPnL !== 0 && (
+                      <span className="text-xs font-bold">
+                        ({owner.sectionPnLPct > 0 ? "+" : ""}
+                        {owner.sectionPnLPct.toFixed(2)}%)
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className={`flex flex-wrap items-baseline gap-x-1 text-[10px] tabular-nums ${krwTone(owner.totalDailyKrw)}`}>
+                  <span className="font-semibold">
+                    오늘 {owner.totalDailyKrw > 0 ? "+" : ""}₩{fmtInt(owner.totalDailyKrw)}
                   </span>
                   {owner.totalDailyPct !== null && owner.totalDailyKrw !== 0 && (
                     <span className="font-semibold">

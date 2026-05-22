@@ -4992,7 +4992,16 @@ export default function Home() {
             </p>
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <div className="col-span-1 sm:col-span-2">
-                <PortfolioAllOwnersTodayProfitCard owners={ownerGroupDailySummaryForGrid} />
+                <PortfolioAllOwnersTodayProfitCard
+                  owners={ownerGroupDailySummaryForGrid.map((o) => {
+                    const pos = positionsByOwner.find((g) => g.ownerName === o.ownerName);
+                    return {
+                      ...o,
+                      sectionPnL: pos?.sectionPnL ?? 0,
+                      sectionPnLPct: pos?.sectionPnLPct ?? 0,
+                    };
+                  })}
+                />
               </div>
               {allocationByOwnerForGrid.map(({ ownerName, data, total }) => (
                 <FamilyAllocationDonut
