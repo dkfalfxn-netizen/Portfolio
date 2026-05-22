@@ -59,7 +59,9 @@ export function mergeAndPersistOwnerScratchpadsFromServer(server: unknown): void
   const parsed = parseOwnerScratchpadsFromServer(server);
   if (Object.keys(parsed).length === 0) return;
   const local = loadAllOwnerScratchpads();
-  const next = { ...local, ...parsed };
+  // 로컬 메모가 서버 스냅샷(구버전일 수 있음)으로 덮이지 않도록 로컬을 우선(local-wins).
+  // 서버에만 있는 키(다른 기기에서 입력)는 병합, 로컬에 이미 있는 키는 로컬 유지.
+  const next = { ...parsed, ...local };
   try {
     window.localStorage.setItem(OWNER_SCRATCHPAD_STORAGE_KEY, JSON.stringify(next));
   } catch {

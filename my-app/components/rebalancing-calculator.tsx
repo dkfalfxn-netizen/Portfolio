@@ -969,7 +969,8 @@ function RebalancingOwner({
     const out: Record<string, CalculatorMemberSplitMode> = {};
     for (const g of groups) {
       const m = saved[g.groupKey];
-      out[g.groupKey] = m === "targetPct" ? m : "targetPct";
+      // "weight" | "targetPct" 둘 다 유효값. 이전 코드는 조건이 반전돼 "weight"가 항상 "targetPct"로 리셋됐음.
+      out[g.groupKey] = m === "targetPct" || m === "weight" ? m : "targetPct";
     }
     return out;
   });
@@ -977,10 +978,14 @@ function RebalancingOwner({
   useEffect(() => {
     setMemberSplitModes((prev) => {
       const keys = new Set(groups.map((g) => g.groupKey));
+      // LS를 재조회해서 prev에 없는 그룹도 복원 (groups가 비어있다가 나중에 채워질 때 대비)
+      const saved = loadAllCalculatorMemberSplitModes()[ownerName] ?? {};
       const next: Record<string, CalculatorMemberSplitMode> = {};
       for (const g of groups) {
         const gk = g.groupKey;
-        next[gk] = prev[gk] ?? "targetPct";
+        const fromLs = saved[gk];
+        const validLs = fromLs === "targetPct" || fromLs === "weight" ? fromLs : undefined;
+        next[gk] = prev[gk] ?? validLs ?? "targetPct";
       }
       for (const k of Object.keys(next)) {
         if (!keys.has(k)) delete next[k];
@@ -1300,9 +1305,17 @@ function RebalancingOwner({
   const autosaveTimerRef = useRef<number | null>(null);
   const memberSplitAutosaveTimerRef = useRef<number | null>(null);
   const serverCalculatorSyncTimerRef = useRef<number | null>(null);
+  /** 마운트 직후 초기화 효과(groups sync 등)가 유발하는 첫 오토세이브는 건너뜀 */
+  const autosaveReadyRef = useRef(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    // 마운트 후 다음 틱에서 오토세이브 허용 (초기 상태 동기화로 인한 불필요한 LS 덮어쓰기 방지)
+    const id = window.setTimeout(() => { autosaveReadyRef.current = true; }, 0);
+    return () => { clearTimeout(id); autosaveReadyRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !autosaveReadyRef.current) return;
     if (autosaveTimerRef.current != null) window.clearTimeout(autosaveTimerRef.current);
     const id = window.setTimeout(() => {
       autosaveTimerRef.current = null;
@@ -1318,7 +1331,7 @@ function RebalancingOwner({
   }, [targets, ownerName]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !autosaveReadyRef.current) return;
     if (memberSplitAutosaveTimerRef.current != null) {
       window.clearTimeout(memberSplitAutosaveTimerRef.current);
     }

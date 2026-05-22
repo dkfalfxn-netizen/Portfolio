@@ -166,7 +166,9 @@ export function mergeAndPersistTargetStockWeightsFromServer(server: unknown): vo
   const next: TargetStockWeightByOwner = { ...local };
   for (const [owner, row] of Object.entries(parsed)) {
     if (typeof owner !== "string" || !owner.trim()) continue;
-    next[owner.trim()] = { ...row };
+    const o = owner.trim();
+    // 서버에 없는 로컬 티커가 사라지지 않도록 기존 로컬 값 위에 서버 값을 덮음(merge)
+    next[o] = { ...(local[o] ?? {}), ...row };
   }
   try {
     window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(next));
