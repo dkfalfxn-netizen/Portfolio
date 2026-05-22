@@ -7302,7 +7302,6 @@ export default function Home() {
                   type="number"
                   min="0.000001"
                   step="any"
-                  required
                   className="rounded-md border bg-background px-3 py-2 text-sm"
                   placeholder={`매입 USD/KRW (예: ${fmtInt(usdKrw)})`}
                   value={form.purchaseUsdKrw}
@@ -7316,7 +7315,6 @@ export default function Home() {
                   type="number"
                   min="0.000001"
                   step="any"
-                  required
                   className="rounded-md border bg-background px-3 py-2 text-sm"
                   placeholder={`매입 EUR/KRW (예: ${fmtInt(eurKrw)})`}
                   value={form.purchaseEurKrw}
