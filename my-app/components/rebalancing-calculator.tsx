@@ -619,7 +619,7 @@ function RebalancingBarSortableRow({
               />
               <span className="text-xs text-muted-foreground">%</span>
             </div>
-            <span className="text-[10px] tabular-nums text-slate-500 leading-tight">
+            <span className="text-xs font-bold tabular-nums text-slate-300 leading-tight">
               {(() => {
                 const cur = row.currentPct;
                 const tgt = targets[row.groupKey] ? parseFloat(targets[row.groupKey]) : 0;
