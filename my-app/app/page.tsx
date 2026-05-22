@@ -104,7 +104,7 @@ import {
 import { GripVertical } from "lucide-react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { SortableOrStaticTableRow } from "@/components/table-sortable-row";
+import { SortableOrStaticTableRow, SortableTr } from "@/components/table-sortable-row";
 
 const DEFAULT_OWNER_NAMES = ["김승주", "강희진", "김도율", "김찬율", "퇴직연금"] as const;
 /** 포트폴리오 비중 그리드: 기본 순서 후 나머지 보유자 */
@@ -5324,10 +5324,11 @@ export default function Home() {
                   </div>
                   {/* ── 심플 종목 요약 테이블 ── */}
                   {(() => {
-                    const collapsed = holdingsSummaryCollapsed[group.ownerName] ?? false;
+                    const collapsed = holdingsSummaryCollapsed[group.ownerName] ?? true;
                     const isManual = sortMode === "manual";
                     return (
                       <div className="border-b">
+                        {/* 헤더 토글 버튼 */}
                         <button
                           type="button"
                           className="flex w-full items-center gap-1.5 px-4 py-1.5 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/20"
@@ -5340,53 +5341,93 @@ export default function Home() {
                         >
                           <span>{collapsed ? "▶" : "▼"}</span>
                           <span>보유 종목 {displayItems.length}개</span>
-                          {!isManual && (
+                          {!collapsed && isManual && (
+                            <span className="ml-1 text-[10px] text-muted-foreground/60">⋮ 드래그로 순서 변경</span>
+                          )}
+                          {!collapsed && !isManual && (
                             <span className="ml-1 text-[10px] text-muted-foreground/60">(순서 변경은 「입력 순」 정렬에서 가능)</span>
                           )}
                         </button>
                         {!collapsed && (
-                          <div className="overflow-x-auto px-4 pb-2">
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="border-b text-muted-foreground">
-                                  <th className="py-1 pr-3 text-left font-medium">종목명</th>
-                                  <th className="py-1 pr-3 text-left font-medium text-muted-foreground/70">티커</th>
-                                  <th className="py-1 text-right font-medium">수량</th>
-                                  {isManual && <th className="py-1 pl-2 text-center font-medium">순서</th>}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {displayItems.map((position, posIdx) => (
-                                  <tr key={`${position.symbol}-${position.owner}`} className="border-b border-border/30 last:border-0">
-                                    <td className="py-1 pr-3 font-medium">{position.name}</td>
-                                    <td className="py-1 pr-3 font-mono text-muted-foreground">{position.symbol}</td>
-                                    <td className="py-1 text-right tabular-nums">
-                                      {position.quantity % 1 === 0
-                                        ? fmtInt(position.quantity)
-                                        : position.quantity.toFixed(4).replace(/\.?0+$/, "")}
-                                    </td>
-                                    {isManual && (
-                                      <td className="py-1 pl-2">
-                                        <div className="flex justify-center gap-0.5">
-                                          <button
-                                            type="button"
-                                            disabled={posIdx === 0}
-                                            className="rounded border px-1 py-0.5 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
-                                            onClick={() => moveRow(position.sourceIndex, "up")}
-                                          >▲</button>
-                                          <button
-                                            type="button"
-                                            disabled={posIdx === displayItems.length - 1}
-                                            className="rounded border px-1 py-0.5 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
-                                            onClick={() => moveRow(position.sourceIndex, "down")}
-                                          >▼</button>
-                                        </div>
-                                      </td>
-                                    )}
+                          <div className="overflow-x-auto px-4 pb-3">
+                            {isManual ? (
+                              <DndContext
+                                sensors={holdingsDndSensors}
+                                collisionDetection={closestCenter}
+                                onDragEnd={(e) => {
+                                  reorderHoldingsDrag(group.ownerName, e);
+                                  showActionSuccessToast("순서가 저장되었습니다.");
+                                }}
+                              >
+                                <SortableContext
+                                  items={displayItems.map((p) => p.sourceIndex)}
+                                  strategy={verticalListSortingStrategy}
+                                >
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="border-b text-muted-foreground">
+                                        <th className="w-5 py-1 pr-1" />
+                                        <th className="py-1 pr-3 text-left font-medium">종목명</th>
+                                        <th className="py-1 pr-3 text-left font-medium text-muted-foreground/70">티커</th>
+                                        <th className="py-1 text-right font-medium">수량</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {displayItems.map((position) => (
+                                        <SortableTr
+                                          key={position.sourceIndex}
+                                          id={position.sourceIndex}
+                                          className="border-b border-border/30 last:border-0"
+                                        >
+                                          {({ attributes, listeners }) => (
+                                            <>
+                                              <td className="py-1 pr-1 text-muted-foreground/50">
+                                                <span
+                                                  {...attributes}
+                                                  {...listeners}
+                                                  className="cursor-grab touch-none select-none active:cursor-grabbing"
+                                                  title="드래그로 순서 변경"
+                                                >⋮</span>
+                                              </td>
+                                              <td className="py-1 pr-3 font-medium">{position.name}</td>
+                                              <td className="py-1 pr-3 font-mono text-muted-foreground">{position.symbol}</td>
+                                              <td className="py-1 text-right tabular-nums">
+                                                {position.quantity % 1 === 0
+                                                  ? fmtInt(position.quantity)
+                                                  : position.quantity.toFixed(4).replace(/\.?0+$/, "")}
+                                              </td>
+                                            </>
+                                          )}
+                                        </SortableTr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </SortableContext>
+                              </DndContext>
+                            ) : (
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="border-b text-muted-foreground">
+                                    <th className="py-1 pr-3 text-left font-medium">종목명</th>
+                                    <th className="py-1 pr-3 text-left font-medium text-muted-foreground/70">티커</th>
+                                    <th className="py-1 text-right font-medium">수량</th>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {displayItems.map((position) => (
+                                    <tr key={position.sourceIndex} className="border-b border-border/30 last:border-0">
+                                      <td className="py-1 pr-3 font-medium">{position.name}</td>
+                                      <td className="py-1 pr-3 font-mono text-muted-foreground">{position.symbol}</td>
+                                      <td className="py-1 text-right tabular-nums">
+                                        {position.quantity % 1 === 0
+                                          ? fmtInt(position.quantity)
+                                          : position.quantity.toFixed(4).replace(/\.?0+$/, "")}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
                           </div>
                         )}
                       </div>

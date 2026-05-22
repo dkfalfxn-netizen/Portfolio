@@ -7,6 +7,27 @@ import type { CSSProperties, ReactNode } from "react";
 
 import { TableRow } from "@/components/ui/table";
 
+type SortableTrProps = {
+  id: UniqueIdentifier;
+  children: (drag: { attributes: DraggableAttributes; listeners: DraggableSyntheticListeners }, isDragging: boolean) => ReactNode;
+  className?: string;
+};
+
+/** 심플 summary 테이블용 드래그 가능한 <tr> */
+export function SortableTr({ id, children, className }: SortableTrProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { opacity: 0.7, zIndex: 2, position: "relative" as const } : {}),
+  };
+  return (
+    <tr ref={setNodeRef} style={style} className={className}>
+      {children({ attributes, listeners }, isDragging)}
+    </tr>
+  );
+}
+
 export type SortableDragHandleProps = {
   attributes: DraggableAttributes;
   listeners: DraggableSyntheticListeners;
