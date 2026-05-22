@@ -624,7 +624,7 @@ function RebalancingBarSortableRow({
                 const cur = row.currentPct;
                 const tgt = targets[row.groupKey] ? parseFloat(targets[row.groupKey]) : 0;
                 const ratio = tgt > 0 ? Math.round((cur / tgt) * 100) / 100 : null;
-                return `(${cur.toFixed(1)}/${tgt.toFixed(1)}%${ratio !== null ? ` · ${ratio.toFixed(2)}` : ""})`;
+                return ratio !== null ? ratio.toFixed(2) : `${cur.toFixed(1)}%`;
               })()}
             </span>
           </div>
