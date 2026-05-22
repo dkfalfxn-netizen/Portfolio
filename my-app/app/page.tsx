@@ -1539,6 +1539,8 @@ export default function Home() {
   const skipSellLogLocalChangedRef = useRef(0);
   const [holdingsSortByOwner, setHoldingsSortByOwner] =
     useState<Record<OwnerName, HoldingsSortMode>>(defaultHoldingsSort);
+  /** 보유자별 심플 종목 요약 테이블 접힘 여부 */
+  const [holdingsSummaryCollapsed, setHoldingsSummaryCollapsed] = useState<Record<string, boolean>>({});
 
   const [telegramTestBusy, setTelegramTestBusy] = useState(false);
   const [telegramTestResult, setTelegramTestResult] = useState<{
@@ -5320,6 +5322,76 @@ export default function Home() {
                       </p>
                     </div>
                   </div>
+                  {/* ── 심플 종목 요약 테이블 ── */}
+                  {(() => {
+                    const collapsed = holdingsSummaryCollapsed[group.ownerName] ?? false;
+                    const isManual = sortMode === "manual";
+                    return (
+                      <div className="border-b">
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-1.5 px-4 py-1.5 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/20"
+                          onClick={() =>
+                            setHoldingsSummaryCollapsed((prev) => ({
+                              ...prev,
+                              [group.ownerName]: !collapsed,
+                            }))
+                          }
+                        >
+                          <span>{collapsed ? "▶" : "▼"}</span>
+                          <span>보유 종목 {displayItems.length}개</span>
+                          {!isManual && (
+                            <span className="ml-1 text-[10px] text-muted-foreground/60">(순서 변경은 「입력 순」 정렬에서 가능)</span>
+                          )}
+                        </button>
+                        {!collapsed && (
+                          <div className="overflow-x-auto px-4 pb-2">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="border-b text-muted-foreground">
+                                  <th className="py-1 pr-3 text-left font-medium">종목명</th>
+                                  <th className="py-1 pr-3 text-left font-medium text-muted-foreground/70">티커</th>
+                                  <th className="py-1 text-right font-medium">수량</th>
+                                  {isManual && <th className="py-1 pl-2 text-center font-medium">순서</th>}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {displayItems.map((position, posIdx) => (
+                                  <tr key={`${position.symbol}-${position.owner}`} className="border-b border-border/30 last:border-0">
+                                    <td className="py-1 pr-3 font-medium">{position.name}</td>
+                                    <td className="py-1 pr-3 font-mono text-muted-foreground">{position.symbol}</td>
+                                    <td className="py-1 text-right tabular-nums">
+                                      {position.quantity % 1 === 0
+                                        ? fmtInt(position.quantity)
+                                        : position.quantity.toFixed(4).replace(/\.?0+$/, "")}
+                                    </td>
+                                    {isManual && (
+                                      <td className="py-1 pl-2">
+                                        <div className="flex justify-center gap-0.5">
+                                          <button
+                                            type="button"
+                                            disabled={posIdx === 0}
+                                            className="rounded border px-1 py-0.5 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
+                                            onClick={() => moveRow(position.sourceIndex, "up")}
+                                          >▲</button>
+                                          <button
+                                            type="button"
+                                            disabled={posIdx === displayItems.length - 1}
+                                            className="rounded border px-1 py-0.5 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
+                                            onClick={() => moveRow(position.sourceIndex, "down")}
+                                          >▼</button>
+                                        </div>
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="flex flex-wrap items-end gap-3 border-b bg-muted/10 px-4 py-2 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">현금</span>
                     <label className="flex flex-col gap-0.5">
