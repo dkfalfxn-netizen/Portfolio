@@ -4860,20 +4860,6 @@ export default function Home() {
             aria-hidden={activeTopNav !== "dashboard"}
           >
           <div className="space-y-4 font-sans sm:space-y-6">
-            <header
-              id="section-dashboard-top"
-              className="rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-3 sm:px-4"
-            >
-              <p className="text-sm font-bold tabular-nums text-white sm:text-base">
-                가족(담당자)별·계좌별 자산과 종목별 수익률을 한눈에 확인합니다.
-              </p>
-              <p className="mt-0.5 text-[10px] font-medium text-slate-500 sm:text-[11px]">
-                환율 USD/KRW: {usdKrw.toLocaleString(MONEY_INT_LOCALE)} · EUR/KRW: {eurKrw.toLocaleString(MONEY_INT_LOCALE)} · 시세 갱신:{" "}
-                {marketQuery.data?.fetchedAt
-                  ? new Date(marketQuery.data.fetchedAt).toLocaleTimeString()
-                  : "대기 중"}
-              </p>
-            </header>
 
             <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {(
