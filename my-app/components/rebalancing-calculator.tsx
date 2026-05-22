@@ -620,7 +620,12 @@ function RebalancingBarSortableRow({
               <span className="text-xs text-muted-foreground">%</span>
             </div>
             <span className="text-[10px] tabular-nums text-slate-500 leading-tight">
-              ({row.currentPct.toFixed(1)}/{targets[row.groupKey] ? parseFloat(targets[row.groupKey]).toFixed(1) : "0"}%)
+              {(() => {
+                const cur = row.currentPct;
+                const tgt = targets[row.groupKey] ? parseFloat(targets[row.groupKey]) : 0;
+                const ratio = tgt > 0 ? Math.round((cur / tgt) * 100) / 100 : null;
+                return `(${cur.toFixed(1)}/${tgt.toFixed(1)}%${ratio !== null ? ` · ${ratio.toFixed(2)}` : ""})`;
+              })()}
             </span>
           </div>
         </div>
