@@ -938,6 +938,18 @@ function RebalancingOwner({
                 ? String(n)
                 : "";
         }
+        // LS에 저장된 심볼 중 현재 groups에 없는 것도 보존 (일시적 그룹 누락으로 값이 지워지는 것 방지)
+        for (const [sym, val] of Object.entries(saved[gk] ?? {})) {
+          if (!(sym in row)) {
+            const prevV = prev[gk]?.[sym];
+            row[sym] =
+              prevV !== undefined && prevV !== ""
+                ? prevV
+                : val != null && Number.isFinite(val)
+                  ? String(val)
+                  : "";
+          }
+        }
         if (Object.keys(row).length > 0) next[gk] = row;
       }
       return next;

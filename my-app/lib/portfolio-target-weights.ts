@@ -405,8 +405,18 @@ export function mergeAndPersistRebalanceCalculatorFromServer(server: unknown): v
     const o = owner.trim();
     if (!o) continue;
     targets[o] = { ...(targets[o] ?? {}), ...(bundle.groupTargets ?? {}) };
-    if (Object.keys(bundle.memberSplits).length > 0) splits[o] = bundle.memberSplits;
-    else delete splits[o];
+    // memberSplits: 서버 데이터로 통째로 교체하지 않고, 로컬에만 있는 심볼(예: GOOGL)이 지워지지
+    // 않도록 그룹 단위로 병합. 서버에 존재하는 심볼은 서버 값이 우선.
+    if (Object.keys(bundle.memberSplits).length > 0) {
+      const localSplits = splits[o] ?? {};
+      const merged: Record<string, Record<string, number>> = { ...localSplits };
+      for (const [gk, serverGrp] of Object.entries(bundle.memberSplits)) {
+        merged[gk] = { ...(localSplits[gk] ?? {}), ...serverGrp };
+      }
+      splits[o] = merged;
+    } else {
+      delete splits[o];
+    }
     if (Object.keys(bundle.memberSplitModes).length > 0) modes[o] = bundle.memberSplitModes;
     else delete modes[o];
   }
