@@ -5042,7 +5042,9 @@ export default function Home() {
                   })}
                 />
               </div>
-              {allocationByOwnerForGrid.map(({ ownerName, data, total }) => {
+              {/* 트리맵(ResponsiveContainer)은 dashboard 탭이 활성이고 클라이언트 하이드레이션이 완료된 이후에만 마운트
+                  — display:none 상태에서 width/height=-1 오류 방지, SSR↔CSR Recharts 불일치(hydration #418) 방지 */}
+              {activeTopNav === "dashboard" && isHydrated && allocationByOwnerForGrid.map(({ ownerName, data, total }) => {
                 const pos = positionsByOwner.find((g) => g.ownerName === ownerName);
                 return <FamilyAllocationDonut
                   key={ownerName}
@@ -5072,6 +5074,9 @@ export default function Home() {
             )}
             aria-hidden={activeTopNav !== "section-trend"}
           >
+          {/* 차트는 섹션이 활성일 때만 마운트 — display:none 컨테이너에서 ResponsiveContainer가 width/height=-1을 보고하는 문제 방지 */}
+          {activeTopNav === "section-trend" && (
+            <>
           {/* 일별 자산 추이 — 총 평가금액 추이 */}
           <section id="section-trend" className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-3 shadow-sm sm:p-4">
             <h2 className="mb-1 text-base font-semibold text-slate-100 sm:text-lg">
@@ -5090,6 +5095,8 @@ export default function Home() {
             </div>
           </section>
           <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
+            </>
+          )}
 
           </div>
           <div
