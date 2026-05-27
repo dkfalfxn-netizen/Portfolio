@@ -419,8 +419,12 @@ export function mergeAndPersistRebalanceCalculatorFromServer(server: unknown): v
     } else {
       delete splits[o];
     }
-    if (Object.keys(bundle.memberSplitModes).length > 0) modes[o] = bundle.memberSplitModes;
-    else delete modes[o];
+    // memberSplitModes: 서버에 있는 그룹만 업데이트하고 로컬에만 있는 그룹 모드는 유지
+    if (Object.keys(bundle.memberSplitModes).length > 0) {
+      modes[o] = { ...(modes[o] ?? {}), ...bundle.memberSplitModes };
+    } else {
+      delete modes[o];
+    }
   }
   try {
     window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(targets));

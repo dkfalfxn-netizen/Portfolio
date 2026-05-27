@@ -1493,7 +1493,9 @@ function isLocalPortfolioCacheCleared(): boolean {
 }
 
 export default function Home() {
-  const [ownerNames, setOwnerNames] = useState<OwnerName[]>(() => loadOwnerNames());
+  // SSR과 클라이언트 첫 렌더에서 동일한 초기값을 보장(hydration 불일치 방지).
+  // localStorage에서 실제 값을 읽는 것은 아래 init useEffect에서 처리.
+  const [ownerNames, setOwnerNames] = useState<OwnerName[]>(DEFAULT_OWNER_NAMES);
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -3324,6 +3326,7 @@ export default function Home() {
     const cash = loadCashByOwner();
     const log = loadSellLog();
     const buyJ = loadBuyJournal();
+    const owners = loadOwnerNames(); // SSR 불일치 방지로 useState 초기값은 DEFAULT — 여기서 실제 로컬 값 로드
     skipMarkLocalChangedRef.current = 2; // 디스크→state 재적용은 "수정"이 아님
     skipSellLogLocalChangedRef.current = 1;
     skipOwnerLocalChangedRef.current = 1; // 초기 로드 시 ownerNames 효과가 로컬 변경으로 오인되는 것을 방지
@@ -3331,6 +3334,7 @@ export default function Home() {
     setCashByOwner(cash);
     setBuyJournal(buyJ);
     setSellLog(log);
+    setOwnerNames(owners);
     const loadedAlerts = loadAlertThresholdsFromStorage();
     skipAlertThresholdsHydrateRef.current = 1;
     setAlertThresholdsByKey(loadedAlerts);
@@ -3739,6 +3743,8 @@ export default function Home() {
       owner_scratchpad_by_owner: loadAllOwnerScratchpads(),
       rebalance_calculator_by_owner: buildRebalanceCalculatorByOwnerFromLocal(),
       alert_thresholds_by_position: getAlertThresholdsForSync(),
+      // 매수 일지는 로컬 전용이므로 메인 sync에는 없지만 백업에는 포함(브라우저 캐시 삭제 대비)
+      buy_journal_entries: buyJournal,
       source_updated_at: lastSyncedAt ?? new Date().toISOString(),
     };
   }, [
@@ -3747,6 +3753,7 @@ export default function Home() {
     holdingsSortByOwner,
     sellLog,
     ownerNames,
+    buyJournal,
     alertThresholdsByKey,
     lastSyncedAt,
   ]);
@@ -3994,6 +4001,11 @@ export default function Home() {
       if (!r.ok) {
         setSyncMessage(j.error ?? "복원(서버 반영)에 실패했습니다.");
         return;
+      }
+      // 매수 일지는 메인 sync에 없으므로 백업에서 직접 localStorage 복원
+      if (Array.isArray(s.buy_journal_entries) && s.buy_journal_entries.length > 0) {
+        safeSetItem(BUY_JOURNAL_KEY, JSON.stringify(s.buy_journal_entries));
+        setBuyJournal(loadBuyJournal());
       }
       setPendingBackups(null);
       await handlePullCloud();
@@ -7475,9 +7487,10 @@ export default function Home() {
               const owner = sellLogOwnerForSection;
               const listViewOwner = sellLogListViewOwner;
               const listLog = sellLog[listViewOwner] ?? [];
-              const listTotalRealizedKrw = listLog.reduce((s, e) => s + calcSellRealizedKrw(e), 0);
+              // 기록 목록 표에서 e.realizedKrw를 표시하므로 합계도 동일 기준으로 통일
+              const listTotalRealizedKrw = listLog.reduce((s, e) => s + e.realizedKrw, 0);
               const log = sellLog[owner] ?? [];
-              const totalRealized = log.reduce((s, e) => s + calcSellRealizedKrw(e), 0);
+              const totalRealized = log.reduce((s, e) => s + e.realizedKrw, 0);
               const allSellLogEntries: SellLogEntry[] = Object.values(sellLog).flat();
               type SymPnlRow = {
                 date: string;
@@ -7490,7 +7503,7 @@ export default function Home() {
               const symPnlByDateSymbol = new Map<string, SymPnlRow>();
               const dailyRealizedAllOwners = new Map<string, number>();
               for (const e of allSellLogEntries) {
-                const rk = calcSellRealizedKrw(e);
+                const rk = e.realizedKrw; // 저장된 값 사용(목록 표와 동일 기준)
                 dailyRealizedAllOwners.set(e.date, (dailyRealizedAllOwners.get(e.date) ?? 0) + rk);
                 const dsKey = `${e.date}::${e.symbol}`;
                 const prev =
@@ -7539,7 +7552,7 @@ export default function Home() {
                 listByDate.get(d)!.sort((a, b) => b.id.localeCompare(a.id));
               }
               const listDailyRealized = (d: string) =>
-                (listByDate.get(d) ?? []).reduce((s, e) => s + calcSellRealizedKrw(e), 0);
+                (listByDate.get(d) ?? []).reduce((s, e) => s + e.realizedKrw, 0);
 
               // ── 종목별 합산 ────────────────────────────────────────────
               const symActiveOwners = sellLogSymOwnerFilter.length === 0 ? ownerNames : sellLogSymOwnerFilter;
@@ -7552,7 +7565,7 @@ export default function Home() {
                   ...prev,
                   count: prev.count + 1,
                   totalQty: prev.totalQty + e.qty,
-                  totalRealizedKrw: prev.totalRealizedKrw + calcSellRealizedKrw(e),
+                  totalRealizedKrw: prev.totalRealizedKrw + e.realizedKrw,
                 });
               }
               const symSummaryRows = [...symSummaryMap.values()].sort((a, b) => b.totalRealizedKrw - a.totalRealizedKrw);

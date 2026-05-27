@@ -130,26 +130,20 @@ function sanitizeSellLogForOwners(
     for (const item of entries) {
       if (!item || typeof item !== "object") continue;
       const e = item as Record<string, unknown>;
-      const currency = parseSellLogCurrency(e.currency);
+      // 클라이언트와 동일한 최소 기준(id·symbol·qty·realizedKrw)으로만 검증.
+      // name·fxRate 등 누락 필드는 기본값으로 복원해 서버 저장 시 소실 방지.
       const id = typeof e.id === "string" ? e.id.trim() : "";
-      const date = typeof e.date === "string" ? e.date.trim() : "";
       const symbol = typeof e.symbol === "string" ? e.symbol.trim() : "";
-      const name = typeof e.name === "string" ? e.name.trim() : "";
       const qty = Number(e.qty);
-      const sellPrice = Number(e.sellPrice);
-      const avgPrice = Number(e.avgPrice);
-      const fxRate = Number(e.fxRate);
       const realizedKrw = Number(e.realizedKrw);
-      if (!currency || !id || !date || !symbol || !name) continue;
-      if (
-        !Number.isFinite(qty) ||
-        !Number.isFinite(sellPrice) ||
-        !Number.isFinite(avgPrice) ||
-        !Number.isFinite(fxRate) ||
-        !Number.isFinite(realizedKrw)
-      ) {
-        continue;
-      }
+      if (!id || !symbol || !Number.isFinite(qty) || !Number.isFinite(realizedKrw)) continue;
+
+      const currency = parseSellLogCurrency(e.currency) ?? "KRW";
+      const date = typeof e.date === "string" ? e.date.trim() : "";
+      const name = typeof e.name === "string" && e.name.trim() ? e.name.trim() : symbol;
+      const sellPrice = typeof e.sellPrice === "number" && Number.isFinite(e.sellPrice) ? e.sellPrice : 0;
+      const avgPrice = typeof e.avgPrice === "number" && Number.isFinite(e.avgPrice) ? e.avgPrice : 0;
+      const fxRate = typeof e.fxRate === "number" && Number.isFinite(e.fxRate) && (e.fxRate as number) > 0 ? e.fxRate : 1;
       const note = typeof e.note === "string" && e.note.trim() ? e.note.trim() : undefined;
       cleaned.push({
         id,

@@ -12,6 +12,8 @@ export type PortfolioBackupSnapshot = {
   owner_scratchpad_by_owner: unknown;
   rebalance_calculator_by_owner: unknown;
   alert_thresholds_by_position: unknown;
+  /** 매수 일지(차트 마커용) — 로컬 전용이므로 백업에만 포함, 메인 sync에는 없음 */
+  buy_journal_entries?: unknown;
   source_updated_at: string | null;
 };
 
@@ -54,6 +56,8 @@ export function normalizePortfolioBackupSnapshot(raw: unknown): PortfolioBackupS
     owner_scratchpad_by_owner: obj(s.owner_scratchpad_by_owner),
     rebalance_calculator_by_owner: obj(s.rebalance_calculator_by_owner),
     alert_thresholds_by_position: obj(s.alert_thresholds_by_position),
+    // buy_journal_entries는 없어도 괜찮음(구버전 백업 호환)
+    ...(Array.isArray(s.buy_journal_entries) ? { buy_journal_entries: s.buy_journal_entries } : {}),
     source_updated_at: source,
   };
 }
