@@ -1495,7 +1495,8 @@ function isLocalPortfolioCacheCleared(): boolean {
 export default function Home() {
   // SSR과 클라이언트 첫 렌더에서 동일한 초기값을 보장(hydration 불일치 방지).
   // localStorage에서 실제 값을 읽는 것은 아래 init useEffect에서 처리.
-  const [ownerNames, setOwnerNames] = useState<OwnerName[]>(DEFAULT_OWNER_NAMES);
+  // DEFAULT_OWNER_NAMES는 as const(readonly)이므로 스프레드로 mutable 배열로 변환
+  const [ownerNames, setOwnerNames] = useState<OwnerName[]>([...DEFAULT_OWNER_NAMES]);
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const [cashByOwner, setCashByOwner] = useState<CashByOwner>(DEFAULT_CASH_BY_OWNER);
   const [isHydrated, setIsHydrated] = useState(false);
