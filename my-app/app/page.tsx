@@ -7489,8 +7489,13 @@ export default function Home() {
               const listLog = sellLog[listViewOwner] ?? [];
               // 기록 목록 표에서 e.realizedKrw를 표시하므로 합계도 동일 기준으로 통일
               const listTotalRealizedKrw = listLog.reduce((s, e) => s + e.realizedKrw, 0);
+              // 총이익(손실 미차감): 이익 항목만 합산
+              const listGrossRealizedKrw = listLog.reduce((s, e) => s + (e.realizedKrw > 0 ? e.realizedKrw : 0), 0);
               const log = sellLog[owner] ?? [];
+              // 순손익(손실 차감): 이익 - 손실
               const totalRealized = log.reduce((s, e) => s + e.realizedKrw, 0);
+              // 총이익(손실 미차감): 이익 항목만 합산
+              const grossRealized = log.reduce((s, e) => s + (e.realizedKrw > 0 ? e.realizedKrw : 0), 0);
               const allSellLogEntries: SellLogEntry[] = Object.values(sellLog).flat();
               type SymPnlRow = {
                 date: string;
@@ -7570,6 +7575,7 @@ export default function Home() {
               }
               const symSummaryRows = [...symSummaryMap.values()].sort((a, b) => b.totalRealizedKrw - a.totalRealizedKrw);
               const symSummaryTotal = symSummaryRows.reduce((s, r) => s + r.totalRealizedKrw, 0);
+              const symSummaryGrossTotal = symSummaryRows.reduce((s, r) => s + (r.totalRealizedKrw > 0 ? r.totalRealizedKrw : 0), 0);
               const toggleSymOwner = (name: string) => {
                 setSellLogSymOwnerFilter((prev) => {
                   const current = prev.length === 0 ? ownerNames : prev;
@@ -7960,10 +7966,18 @@ export default function Home() {
                     </span>
                     <button
                       type="button"
-                      className={`text-xs font-bold underline-offset-2 hover:underline ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}
+                      className="text-xs underline-offset-2 hover:underline text-right leading-relaxed"
                       onClick={() => setSellLogDetailOpenOwner(owner)}
                     >
-                      누적 실현손익: {totalRealized >= 0 ? "+" : ""}₩{fmtInt(totalRealized)}
+                      <span className="text-muted-foreground">총이익 </span>
+                      <span className={`font-semibold tabular-nums ${grossRealized > 0 ? "text-red-500" : "text-muted-foreground"}`}>
+                        {grossRealized >= 0 ? "+" : ""}₩{fmtInt(grossRealized)}
+                      </span>
+                      <span className="mx-1 text-muted-foreground">/</span>
+                      <span className="text-muted-foreground">순손익 </span>
+                      <span className={`font-bold tabular-nums ${totalRealized > 0 ? "text-red-500" : totalRealized < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
+                        {totalRealized >= 0 ? "+" : ""}₩{fmtInt(totalRealized)}
+                      </span>
                     </button>
                   </div>
                   <div className="rounded-xl border border-slate-700/50 bg-slate-900/30 p-3 space-y-3 text-xs">
@@ -8247,7 +8261,11 @@ export default function Home() {
                         <span className="text-[10px] text-muted-foreground tabular-nums">({listLog.length}건)</span>
                         {listLog.length > 0 ? (
                           <span className="text-[10px] text-muted-foreground">
-                            · 총 실현손익{" "}
+                            · 총이익{" "}
+                            <span className={`tabular-nums font-semibold ${listGrossRealizedKrw > 0 ? "text-red-500" : "text-muted-foreground"}`}>
+                              {listGrossRealizedKrw >= 0 ? "+" : ""}₩{fmtInt(listGrossRealizedKrw)}
+                            </span>
+                            {" / "}순손익{" "}
                             <span
                               className={`tabular-nums font-semibold ${
                                 listTotalRealizedKrw > 0
@@ -8259,9 +8277,9 @@ export default function Home() {
                             >
                               {listTotalRealizedKrw >= 0 ? "+" : ""}₩{fmtInt(listTotalRealizedKrw)}
                             </span>
-                            <span className="opacity-80">
+                            <span className="opacity-70">
                               {" "}
-                              (매도 {(TRADING_FEE_RATE * 100).toFixed(1)}% 반영)
+                              (수수료 {(TRADING_FEE_RATE * 100).toFixed(1)}% 반영)
                             </span>
                           </span>
                         ) : null}
@@ -8422,7 +8440,13 @@ export default function Home() {
                           </tbody>
                           <tfoot>
                             <tr className="border-t border-border">
-                              <td className="py-1.5 pr-2 text-xs font-bold text-foreground" colSpan={3}>합계</td>
+                              <td className="py-1.5 pr-2 text-[10px] text-muted-foreground" colSpan={3}>총이익 (손실 미차감)</td>
+                              <td className={`py-1.5 text-right tabular-nums text-xs font-semibold ${symSummaryGrossTotal > 0 ? "text-red-500" : "text-muted-foreground"}`}>
+                                {symSummaryGrossTotal >= 0 ? "+" : ""}₩{fmtInt(Math.round(symSummaryGrossTotal))}
+                              </td>
+                            </tr>
+                            <tr className="border-t border-border/50">
+                              <td className="py-1.5 pr-2 text-xs font-bold text-foreground" colSpan={3}>순손익 (손실 차감)</td>
                               <td className={`py-1.5 text-right tabular-nums text-xs font-bold ${symSummaryTotal > 0 ? "text-red-500" : symSummaryTotal < 0 ? "text-blue-500" : "text-muted-foreground"}`}>
                                 {symSummaryTotal >= 0 ? "+" : ""}₩{fmtInt(Math.round(symSummaryTotal))}
                               </td>
