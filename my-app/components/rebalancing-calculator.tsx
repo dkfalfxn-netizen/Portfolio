@@ -485,6 +485,103 @@ function orderPortfolioGroupsVisual(
   return [...orderedNc, ...pinned.sort(sortFallback)];
 }
 
+/** 그룹 내 종목 한 행 — 드래그 정렬 가능 */
+function SortableMemberRow({
+  m,
+  groupKey,
+  totalKrw,
+  memberSplitsForGroup,
+  onMemberSplitChange,
+  resolvedNameBySymbol,
+}: {
+  m: { symbol: string; name: string; valueKrw: number; priceKrw: number };
+  groupKey: string;
+  totalKrw: number;
+  memberSplitsForGroup: Record<string, string>;
+  onMemberSplitChange: (groupKey: string, symbol: string, raw: string) => void;
+  resolvedNameBySymbol: Record<string, string>;
+}) {
+  const isUndecided = isUndecidedSlotMemberSymbol(m.symbol);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: m.symbol,
+    disabled: isUndecided,
+  });
+  const portPct = currentPortfolioPctOfMember(m.valueKrw, totalKrw);
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { opacity: 0.85, zIndex: 10, position: "relative" as const } : {}),
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="grid grid-cols-1 gap-y-1 py-2 pr-1 first:pt-1.5 last:pb-1.5 sm:grid-cols-[1.25rem_12rem_4.75rem_9.5rem_6.25rem] sm:items-center sm:gap-x-2 sm:gap-y-0 sm:py-1.5"
+    >
+      {/* 드래그 핸들 (sm+) */}
+      <div className="hidden sm:flex items-center justify-center">
+        {!isUndecided ? (
+          <button
+            type="button"
+            className="touch-none cursor-grab rounded p-0.5 text-slate-600 hover:text-slate-400 active:cursor-grabbing"
+            title="순서 이동 (드래그)"
+            {...attributes}
+            {...listeners}
+            aria-label={`${m.symbol} 순서 변경`}
+          >
+            <GripVertical className="h-3 w-3" />
+          </button>
+        ) : (
+          <span className="w-3 shrink-0" aria-hidden />
+        )}
+      </div>
+      {/* 종목명 */}
+      <span
+        className={`min-w-0 truncate text-[10px] font-medium leading-tight text-slate-100 sm:text-[11px] ${
+          isUndecided ? "italic text-slate-400" : ""
+        }`}
+        title={allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
+      >
+        {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
+      </span>
+      {/* 현재% */}
+      <div className="flex items-baseline justify-start gap-0.5 sm:justify-end">
+        <span className="text-[9px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">현재 </span>
+        <span className="text-[11px] font-semibold tabular-nums leading-none text-slate-200 sm:text-xs">
+          {portPct.toFixed(2)}
+        </span>
+        <span className="text-[9px] font-medium text-slate-400">%</span>
+      </div>
+      {/* 평가액 */}
+      <div className="text-left sm:text-right">
+        <span className="text-[9px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">평가 </span>
+        <span className="text-[9px] tabular-nums text-slate-400/85 sm:text-[10px]">{fmtKrw(m.valueKrw)}</span>
+      </div>
+      {/* 목표% 입력 */}
+      <label className="flex w-full max-w-[8rem] items-center gap-1.5 sm:w-[6.25rem] sm:max-w-none sm:justify-self-end">
+        <span className="hidden w-9 shrink-0 text-right text-[9px] font-semibold uppercase tracking-wide text-slate-500 sm:inline sm:w-10">
+          목표
+        </span>
+        <span className="shrink-0 text-[9px] font-semibold text-slate-500 sm:hidden">목표%</span>
+        <span className="sr-only">{m.symbol} 포트폴리오 목표 비중 퍼센트</span>
+        <input
+          type="number"
+          min={0}
+          max={100}
+          step={0.1}
+          placeholder="—"
+          className="h-7 w-full min-w-[2.5rem] max-w-[4rem] rounded border border-slate-500/80 bg-slate-950/90 px-1 py-0.5 text-center text-[11px] font-semibold tabular-nums text-slate-50 shadow-inner outline-none ring-slate-600/25 transition-[border-color,box-shadow] focus:border-primary focus:ring-1 focus:ring-primary/35 sm:max-w-[3.25rem] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          value={memberSplitsForGroup[m.symbol] ?? ""}
+          onChange={(e) => onMemberSplitChange(groupKey, m.symbol, e.target.value)}
+          aria-label={`${groupKey} · ${m.symbol} 포트폴리오 목표 %`}
+          title="포트폴리오 목표 %. 비운 칸은 0%. 입력 합이 그룹 목표에 맞게 스케일되어 상세 매매액에 반영됩니다."
+        />
+      </label>
+    </div>
+  );
+}
+
 function RebalancingBarSortableRow({
   row,
   targets,
@@ -508,6 +605,49 @@ function RebalancingBarSortableRow({
 }) {
   const pinned = isPinnedCashPortfolioGroup(row.groupKey);
   const [membersCollapsed, setMembersCollapsed] = useState(true);
+
+  // ── 그룹 내 종목 순서 (인메모리) ─────────────────────────────────────────
+  const memberSymbolsKey = row.members.map((m) => m.symbol).join("\0");
+  const [memberOrder, setMemberOrder] = useState<string[]>(() =>
+    row.members.map((m) => m.symbol),
+  );
+  useEffect(() => {
+    setMemberOrder((prev) => {
+      const current = memberSymbolsKey.split("\0").filter(Boolean);
+      const filtered = prev.filter((s) => current.includes(s));
+      const added = current.filter((s) => !filtered.includes(s));
+      const next = [...filtered, ...added];
+      if (next.join("\0") === prev.join("\0")) return prev;
+      return next;
+    });
+  }, [memberSymbolsKey]);
+
+  const orderedMembers = useMemo(() => {
+    const map = new Map(row.members.map((m) => [m.symbol, m]));
+    const out: typeof row.members = [];
+    for (const sym of memberOrder) {
+      const m = map.get(sym);
+      if (m) { out.push(m); map.delete(sym); }
+    }
+    for (const m of map.values()) out.push(m);
+    return out;
+  }, [row.members, memberOrder]);
+
+  const memberSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const handleMemberDragEnd = useCallback((e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const a = String(active.id);
+    const o = String(over.id);
+    setMemberOrder((prev) => {
+      const oldIdx = prev.indexOf(a);
+      const newIdx = prev.indexOf(o);
+      if (oldIdx < 0 || newIdx < 0) return prev;
+      return arrayMove(prev, oldIdx, newIdx);
+    });
+  }, []);
+
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: row.groupKey,
     disabled: pinned,
@@ -742,72 +882,36 @@ function RebalancingBarSortableRow({
           <div className="-mx-0.5 mt-2 overflow-x-auto pl-7 sm:pl-8">
             <div className="min-w-0 sm:min-w-[36rem]">
               <div
-                className="mb-0.5 hidden border-b border-slate-700/50 px-2 pb-1 text-[9px] font-bold uppercase tracking-wide text-slate-500 sm:grid sm:grid-cols-[13rem_4.75rem_9.5rem_6.25rem] sm:gap-x-2 sm:px-2.5"
+                className="mb-0.5 hidden border-b border-slate-700/50 px-2 pb-1 text-[9px] font-bold uppercase tracking-wide text-slate-500 sm:grid sm:grid-cols-[1.25rem_12rem_4.75rem_9.5rem_6.25rem] sm:gap-x-2 sm:px-2.5"
                 aria-hidden
               >
+                <span />
                 <span>종목</span>
                 <span className="text-right">현재%</span>
                 <span className="text-right">평가액</span>
                 <span className="text-right">목표</span>
               </div>
-              <div className="divide-y divide-slate-700/55 rounded-md border border-slate-700/35 bg-slate-900/20 px-2 sm:px-2.5">
-              {row.members.map((m) => {
-                const portPct = currentPortfolioPctOfMember(m.valueKrw, totalKrw);
-                return (
-                  <div
-                    key={`${row.groupKey}:${m.symbol}`}
-                    className="grid grid-cols-1 gap-y-1 py-2 pr-1 first:pt-1.5 last:pb-1.5 sm:grid-cols-[13rem_4.75rem_9.5rem_6.25rem] sm:items-center sm:gap-x-2 sm:gap-y-0 sm:py-1.5"
-                  >
-                    <span
-                      className={`min-w-0 truncate text-[10px] font-medium leading-tight text-slate-100 sm:text-[11px] ${
-                        isUndecidedSlotMemberSymbol(m.symbol) ? "italic text-slate-400" : ""
-                      }`}
-                      title={allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
-                    >
-                      {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}
-                    </span>
-                    <div className="flex items-baseline justify-start gap-0.5 sm:justify-end">
-                      <span className="text-[9px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">
-                        현재{" "}
-                      </span>
-                      <span className="text-[11px] font-semibold tabular-nums leading-none text-slate-200 sm:text-xs">
-                        {portPct.toFixed(2)}
-                      </span>
-                      <span className="text-[9px] font-medium text-slate-400">%</span>
-                    </div>
-                    <div className="text-left sm:text-right">
-                      <span className="text-[9px] font-medium uppercase tracking-wide text-slate-500 sm:hidden">
-                        평가{" "}
-                      </span>
-                      <span className="text-[9px] tabular-nums text-slate-400/85 sm:text-[10px]">
-                        {fmtKrw(m.valueKrw)}
-                      </span>
-                    </div>
-                    <label className="flex w-full max-w-[8rem] items-center gap-1.5 sm:w-[6.25rem] sm:max-w-none sm:justify-self-end">
-                      <span className="hidden w-9 shrink-0 text-right text-[9px] font-semibold uppercase tracking-wide text-slate-500 sm:inline sm:w-10">
-                        목표
-                      </span>
-                      <span className="shrink-0 text-[9px] font-semibold text-slate-500 sm:hidden">목표%</span>
-                      <span className="sr-only">
-                        {m.symbol} 포트폴리오 목표 비중 퍼센트
-                      </span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={0.1}
-                        placeholder="—"
-                        className="h-7 w-full min-w-[2.5rem] max-w-[4rem] rounded border border-slate-500/80 bg-slate-950/90 px-1 py-0.5 text-center text-[11px] font-semibold tabular-nums text-slate-50 shadow-inner outline-none ring-slate-600/25 transition-[border-color,box-shadow] focus:border-primary focus:ring-1 focus:ring-primary/35 sm:max-w-[3.25rem] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        value={memberSplitsForGroup[m.symbol] ?? ""}
-                        onChange={(e) => onMemberSplitChange(row.groupKey, m.symbol, e.target.value)}
-                        aria-label={`${row.displayName || row.groupKey} · ${m.symbol} 포트폴리오 목표 %`}
-                        title="포트폴리오 목표 %. 비운 칸은 0%. 입력 합이 그룹 목표에 맞게 스케일되어 상세 매매액에 반영됩니다."
+              <DndContext
+                sensors={memberSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleMemberDragEnd}
+              >
+                <SortableContext items={memberOrder} strategy={verticalListSortingStrategy}>
+                  <div className="divide-y divide-slate-700/55 rounded-md border border-slate-700/35 bg-slate-900/20 px-2 sm:px-2.5">
+                    {orderedMembers.map((m) => (
+                      <SortableMemberRow
+                        key={`${row.groupKey}:${m.symbol}`}
+                        m={m}
+                        groupKey={row.groupKey}
+                        totalKrw={totalKrw}
+                        memberSplitsForGroup={memberSplitsForGroup}
+                        onMemberSplitChange={onMemberSplitChange}
+                        resolvedNameBySymbol={resolvedNameBySymbol}
                       />
-                    </label>
+                    ))}
                   </div>
-                );
-              })}
-              </div>
+                </SortableContext>
+              </DndContext>
             </div>
           </div>
         </div>
