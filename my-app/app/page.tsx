@@ -4695,11 +4695,12 @@ export default function Home() {
     <div className="min-h-screen bg-[#0f172a] text-slate-100">
       {actionSuccessToast ? (
         <div
-          className="pointer-events-none fixed bottom-6 left-1/2 z-[60] max-w-[min(90vw,24rem)] -translate-x-1/2 rounded-lg border border-emerald-500/45 bg-emerald-950/95 px-4 py-2.5 text-center text-sm font-medium text-emerald-100 shadow-lg shadow-emerald-950/50"
+          className="center-toast-enter pointer-events-none fixed left-1/2 top-1/2 z-[60] w-max max-w-[min(88vw,26rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-slate-900/72 px-7 py-5 text-center shadow-2xl backdrop-blur-md"
           role="status"
           aria-live="polite"
         >
-          {actionSuccessToast}
+          <div className="mb-2 text-3xl leading-none text-emerald-400">✓</div>
+          <p className="text-sm font-medium leading-snug text-slate-100">{actionSuccessToast}</p>
         </div>
       ) : null}
       {actionErrorToast ? (
