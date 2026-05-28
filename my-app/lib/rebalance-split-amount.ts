@@ -1,4 +1,4 @@
-export type SplitAmountMode = "remainder" | "milestone";
+export type SplitAmountMode = "remainder" | "milestone" | "member-milestone";
 
 /** {@link perSplitKrwCore} 선택 인자 */
 export type PerSplitKrwOptions = {

@@ -1680,7 +1680,8 @@ function RebalancingOwner({
               title="남은액÷n·매도는 균등 분할. 목표 단계별은 매수만 목표평가의 k/n까지 이번 회에 맞춤(k 선택). 분할 1회면 동일."
             >
               <option value="remainder">남은 금액 ÷ n</option>
-              <option value="milestone">목표÷n 단계별</option>
+              <option value="milestone">목표÷n 단계별 (그룹)</option>
+              <option value="member-milestone">종목별 k/n 단계</option>
             </select>
           </label>
           <div className="flex items-center gap-1.5 text-xs">
@@ -1697,7 +1698,7 @@ function RebalancingOwner({
             />
             <span className="text-muted-foreground shrink-0">회</span>
           </div>
-          {splitAmountMode === "milestone" && splitCount > 1 ?
+          {(splitAmountMode === "milestone" || splitAmountMode === "member-milestone") && splitCount > 1 ?
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               목표까지
               <select
@@ -1786,20 +1787,43 @@ function RebalancingOwner({
                 const isCash =
                   r.groupKey === "현금" || r.groupKey.toLowerCase().includes("cash");
 
+                // ── 종목별 k/n 단계 모드: 각 종목 독립 계산 ──────────────────────
+                const memberMilestoneBySymbol = new Map<string, number>();
+                if (
+                  splitAmountMode === "member-milestone" &&
+                  significant &&
+                  splitCount > 1 &&
+                  !isCash &&
+                  effectiveTotalKrw > 0
+                ) {
+                  const splits = memberSplits[r.groupKey] ?? {};
+                  for (const m of r.memberAdjustments) {
+                    if (isUndecidedSlotMemberSymbol(m.symbol)) continue;
+                    const rawPct = (splits[m.symbol] ?? "").trim().replace(",", ".");
+                    if (!rawPct) continue;
+                    const mTargetPct = parseFloat(rawPct);
+                    if (!Number.isFinite(mTargetPct) || mTargetPct <= 0) continue;
+                    const mTargetKrw = (mTargetPct / 100) * effectiveTotalKrw;
+                    const mFullDiff = mTargetKrw - m.valueKrw;
+                    const mMilestoneKrw = mTargetKrw * (milestoneStepK / splitCount);
+                    const thisRound = Math.max(0, Math.min(mMilestoneKrw - m.valueKrw, mFullDiff));
+                    memberMilestoneBySymbol.set(m.symbol, thisRound);
+                  }
+                }
+                const memberMilestoneTotalKrw = [...memberMilestoneBySymbol.values()].reduce(
+                  (s, v) => s + v, 0,
+                );
+
                 const perSplitRowKrw =
-                  significant && splitCount > 1 ?
-                    perSplitKrwCore(
+                  !significant || splitCount <= 1 ? 0
+                  : splitAmountMode === "member-milestone" ? memberMilestoneTotalKrw
+                  : perSplitKrwCore(
                       splitAmountMode,
                       splitCount,
-                      {
-                        diffKrw: r.diffKrw,
-                        targetPct: r.targetPct,
-                        valueKrw: r.valueKrw,
-                      },
+                      { diffKrw: r.diffKrw, targetPct: r.targetPct, valueKrw: r.valueKrw },
                       effectiveTotalKrw,
                       { milestoneStep: milestoneStepK },
-                    )
-                  : 0;
+                    );
 
                 const rowPctAfterSplit =
                   significant && splitCount > 1 && effectiveTotalKrw > 0 ?
@@ -1807,7 +1831,7 @@ function RebalancingOwner({
                   : null;
 
                 const trancheBySymbol =
-                  significant && splitCount > 1 && !isCash ?
+                  significant && splitCount > 1 && !isCash && splitAmountMode !== "member-milestone" ?
                     memberTrancheKrwBySymbol(
                       r,
                       perSplitRowKrw,
@@ -1870,6 +1894,9 @@ function RebalancingOwner({
                           )}
                           {splitAmountMode === "milestone" && (
                             <span className="font-normal text-muted-foreground">{`·${milestoneStepK}/${splitCount}`}</span>
+                          )}
+                          {splitAmountMode === "member-milestone" && (
+                            <span className="font-normal text-muted-foreground">{`·종목별 ${milestoneStepK}/${splitCount}`}</span>
                           )}
                           {rowPctAfterSplit != null ?
                             <span className="font-normal text-muted-foreground">{` (→ ${rowPctAfterSplit.toFixed(2)}%)`}</span>
@@ -1950,6 +1977,50 @@ function RebalancingOwner({
                             <span className="text-muted-foreground">{` (→ ${rowPctAfterSplit.toFixed(2)}%)`}</span>
                           : null}
                         </span>
+                      ) : splitAmountMode === "member-milestone" ? (
+                        // 종목별 k/n 단계: 각 종목 독립 계산 금액 표시
+                        <div className="space-y-0.5">
+                          {r.memberAdjustments
+                            .filter((m) => !isUndecidedSlotMemberSymbol(m.symbol))
+                            .map((m) => {
+                              const splits = memberSplits[r.groupKey] ?? {};
+                              const rawPct = (splits[m.symbol] ?? "").trim().replace(",", ".");
+                              const mTargetPct = rawPct ? parseFloat(rawPct) : NaN;
+                              const mPer = memberMilestoneBySymbol.get(m.symbol) ?? 0;
+                              const mTargetKrw = Number.isFinite(mTargetPct) && mTargetPct > 0
+                                ? (mTargetPct / 100) * effectiveTotalKrw : 0;
+                              const mMilestoneKrw = mTargetKrw * (milestoneStepK / splitCount);
+                              const mPctAfter =
+                                approxPortfolioPctAfterDelta(m.valueKrw, mPer, effectiveTotalKrw);
+                              if (!rawPct) {
+                                return (
+                                  <p key={`${m.symbol}-mm`} className="tabular-nums text-muted-foreground">
+                                    {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}{" "}
+                                    <span className="text-slate-600">목표% 미입력</span>
+                                  </p>
+                                );
+                              }
+                              return (
+                                <p key={`${m.symbol}-mm`} className="tabular-nums">
+                                  <span className="text-muted-foreground">
+                                    {allocationMemberDisplayLabel(m.symbol, m.name, resolvedNameBySymbol)}{" "}
+                                    <span className="tabular-nums">{`현재 ${currentPortfolioPctOfMember(m.valueKrw, totalKrw).toFixed(2)}% · 목표×${milestoneStepK}/${splitCount}=${mMilestoneKrw > 0 ? (mMilestoneKrw / effectiveTotalKrw * 100).toFixed(2) : "—"}%`}</span>
+                                  </span>{" "}
+                                  <span
+                                    title={m.priceKrw <= 0 ? "종목 시세 없음 · 매매 차액만 표시" : undefined}
+                                    className={mPer > 0 ? "text-rose-400" : "text-muted-foreground"}
+                                  >
+                                    {mPer >= 10000
+                                      ? formatMemberSharesOrAmount(mPer, m.priceKrw)
+                                      : "—"}
+                                    {mPctAfter != null && mPer >= 10000 ?
+                                      <span className="text-muted-foreground">{` (→ ${mPctAfter.toFixed(2)}%)`}</span>
+                                    : null}
+                                  </span>
+                                </p>
+                              );
+                            })}
+                        </div>
                       ) : (
                         <div className="space-y-0.5">
                           {r.memberAdjustments
