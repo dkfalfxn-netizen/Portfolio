@@ -1535,6 +1535,7 @@ export default function Home() {
     editingId: string | null;
   }>>({});
   const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
+  const [pendingSaveConfirm, setPendingSaveConfirm] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<{ type: "edit" | "delete"; rowIndex: number; position: Position } | null>(null);
   const [editSymbol, setEditSymbol] = useState("");
   const [editName, setEditName] = useState("");
@@ -4471,6 +4472,7 @@ export default function Home() {
 
   function cancelEditRow() {
     setEditingRowIndex(null);
+    setPendingSaveConfirm(false);
     setEditSymbol("");
     setEditName("");
     setEditChartGroup("");
@@ -5999,28 +6001,49 @@ export default function Home() {
                           </TableCell>
                           <TableCell className="px-3 py-1.5">
                             {isEditing ? (
-                              <div className="flex flex-col gap-1">
-                                <button
-                                  type="button"
-                                  className="cursor-pointer rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
-                                  onClick={saveEditRow}
-                                >
-                                  저장
-                                </button>
-                                <button
-                                  type="button"
-                                  className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
-                                  onClick={cancelEditRow}
-                                >
-                                  취소
-                                </button>
-                              </div>
+                              pendingSaveConfirm ? (
+                                /* ── 저장 최종 확인 ── */
+                                <div className="flex flex-col gap-1">
+                                  <p className="text-[11px] font-semibold text-slate-300">저장할까요?</p>
+                                  <div className="flex gap-1">
+                                    <button
+                                      type="button"
+                                      className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
+                                      onClick={() => setPendingSaveConfirm(false)}
+                                    >
+                                      취소
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="cursor-pointer rounded-md border border-primary bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
+                                      onClick={() => { saveEditRow(); setPendingSaveConfirm(false); }}
+                                    >
+                                      저장
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col gap-1">
+                                  <button
+                                    type="button"
+                                    className="cursor-pointer rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
+                                    onClick={() => setPendingSaveConfirm(true)}
+                                  >
+                                    저장
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
+                                    onClick={cancelEditRow}
+                                  >
+                                    취소
+                                  </button>
+                                </div>
+                              )
                             ) : pendingConfirm?.rowIndex === rowIndex ? (
                               /* ── 인라인 확인 UI ── */
                               <div className="flex flex-col gap-1">
-                                <p className="text-[11px] font-semibold text-slate-300">
-                                  {pendingConfirm.type === "delete" ? "삭제할까요?" : "수정할까요?"}
-                                </p>
+                                <p className="text-[11px] font-semibold text-slate-300">삭제할까요?</p>
                                 <div className="flex gap-1">
                                   <button
                                     type="button"
@@ -6031,21 +6054,13 @@ export default function Home() {
                                   </button>
                                   <button
                                     type="button"
-                                    className={`cursor-pointer rounded-md border px-2 py-1 text-xs font-semibold transition-all duration-100 active:scale-95 ${
-                                      pendingConfirm.type === "delete"
-                                        ? "border-destructive text-destructive hover:bg-destructive/10"
-                                        : "bg-primary text-primary-foreground hover:bg-primary/90 border-primary"
-                                    }`}
+                                    className="cursor-pointer rounded-md border border-destructive px-2 py-1 text-xs font-semibold text-destructive transition-all duration-100 hover:bg-destructive/10 active:scale-95"
                                     onClick={() => {
-                                      if (pendingConfirm.type === "delete") {
-                                        handleDeleteRow(pendingConfirm.rowIndex);
-                                      } else {
-                                        startEditRow(pendingConfirm.position, pendingConfirm.rowIndex);
-                                      }
+                                      handleDeleteRow(pendingConfirm.rowIndex);
                                       setPendingConfirm(null);
                                     }}
                                   >
-                                    {pendingConfirm.type === "delete" ? "삭제" : "수정"}
+                                    삭제
                                   </button>
                                 </div>
                               </div>
@@ -6085,7 +6100,7 @@ export default function Home() {
                                 <button
                                   type="button"
                                   className="cursor-pointer rounded-md border px-2 py-1 text-xs transition-all duration-100 hover:bg-muted active:scale-95"
-                                  onClick={() => setPendingConfirm({ type: "edit", rowIndex, position })}
+                                  onClick={() => startEditRow(position, rowIndex)}
                                 >
                                   수정
                                 </button>
