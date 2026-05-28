@@ -1779,6 +1779,10 @@ export default function Home() {
   const addFormFxManualRef = useRef(false);
   const [purchaseFxAutoBusy, setPurchaseFxAutoBusy] = useState(false);
   const [addPositionError, setAddPositionError] = useState("");
+  /** 종목 추가 누락 보유자 추적: 최근 입력한 티커와 완료한 보유자 목록 */
+  const [addOwnerTracker, setAddOwnerTracker] = useState<{ symbol: string; doneOwners: string[] } | null>(null);
+  /** 실현손익 누락 보유자 추적: 최근 입력한 티커·날짜와 완료한 보유자 목록 */
+  const [sellOwnerTracker, setSellOwnerTracker] = useState<{ symbol: string; date: string; doneOwners: string[] } | null>(null);
   const [focusSymbolTrigger, setFocusSymbolTrigger] = useState(0);
   const actionSuccessToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [actionSuccessToast, setActionSuccessToast] = useState("");
@@ -1816,6 +1820,26 @@ export default function Home() {
     },
     [],
   );
+
+  // 종목 추가 추적: 전원 완료 시 2.5초 후 자동 닫힘
+  useEffect(() => {
+    if (!addOwnerTracker) return;
+    if (ownerNames.some((n) => !addOwnerTracker.doneOwners.includes(n))) return;
+    const t = setTimeout(() => setAddOwnerTracker(null), 2500);
+    return () => clearTimeout(t);
+  }, [addOwnerTracker, ownerNames]);
+
+  // 실현손익 추적: 관련 보유자 전원 완료 시 2.5초 후 자동 닫힘
+  useEffect(() => {
+    if (!sellOwnerTracker) return;
+    const holders = ownerNames.filter((n) =>
+      positions.some((p) => p.owner === n && p.symbol === sellOwnerTracker.symbol),
+    );
+    if (holders.length === 0) return;
+    if (holders.some((n) => !sellOwnerTracker.doneOwners.includes(n))) return;
+    const t = setTimeout(() => setSellOwnerTracker(null), 2500);
+    return () => clearTimeout(t);
+  }, [sellOwnerTracker, ownerNames, positions]);
 
   /** 상단 내비 활성 항목(스크롤 앵커 id 또는 dashboard) */
   const [activeTopNav, setActiveTopNav] = useState<string>("dashboard");
@@ -4351,6 +4375,12 @@ export default function Home() {
     } else {
       showActionSuccessToast("종목이 정상적으로 반영되었습니다.");
     }
+
+    // 누락 보유자 추적 업데이트
+    setAddOwnerTracker((prev) => {
+      const prevDone = prev?.symbol === symbol ? prev.doneOwners : [];
+      return { symbol, doneOwners: [...new Set([...prevDone, ...ownersOrdered])] };
+    });
 
     requestAnimationFrame(() => {
       window.scrollTo({ top: savedScrollY, behavior: "instant" });
@@ -7478,6 +7508,43 @@ export default function Home() {
                 </button>
               </div>
             </form>
+
+            {/* ── 종목 추가 누락 보유자 알림 ──────────────────────────────────── */}
+            {addOwnerTracker && (() => {
+              const missing = ownerNames.filter((n) => !addOwnerTracker.doneOwners.includes(n));
+              const allDone = missing.length === 0;
+              return (
+                <div
+                  className={`mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+                    allDone
+                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                      : "border-amber-500/35 bg-amber-500/8 text-amber-200"
+                  }`}
+                >
+                  <span className="shrink-0 text-sm">{allDone ? "✓" : "⚠️"}</span>
+                  <span className="font-semibold">{addOwnerTracker.symbol}</span>
+                  {allDone ? (
+                    <span className="text-emerald-400">— 모든 보유자 입력 완료</span>
+                  ) : (
+                    <span>
+                      — 아직 미입력:{" "}
+                      <strong className="text-amber-300">{missing.join(", ")}</strong>
+                    </span>
+                  )}
+                  {!allDone && (
+                    <button
+                      type="button"
+                      onClick={() => setAddOwnerTracker(null)}
+                      className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label="알림 닫기"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+
             <p className="mt-2 text-xs text-muted-foreground">
               현금(USD·KRW)은 아래 각 보유 종목 표 상단에서 입력합니다. 전체 현금
               합계(원화): ₩{fmtInt(totalCashKrw)}
@@ -7830,6 +7897,15 @@ export default function Home() {
                 if (form.editingId || newRealizedSaveOk) {
                   showActionSuccessToast("실현손익이 정상적으로 반영되었습니다.");
                 }
+                // 누락 보유자 추적 업데이트 (신규 저장만)
+                if (newRealizedSaveOk) {
+                  setSellOwnerTracker((prev) => {
+                    const sym = symbol;
+                    const dt = form.date;
+                    const prevDone = prev?.symbol === sym && prev?.date === dt ? prev.doneOwners : [];
+                    return { symbol: sym, date: dt, doneOwners: [...new Set([...prevDone, targetOwner])] };
+                  });
+                }
                 setForm2({
                   symbol: "", name: "", qty: "", sellPrice: "", avgPrice: "",
                   currency: "USD", fxRate: String(Math.round(usdKrw)),
@@ -8163,6 +8239,46 @@ export default function Home() {
                       </span>
                       <span className="text-[10px] text-muted-foreground">(매도 {(TRADING_FEE_RATE * 100).toFixed(1)}% 반영)</span>
                     </div>
+
+                    {/* ── 실현손익 누락 보유자 알림 ──────────────────────────── */}
+                    {sellOwnerTracker && (() => {
+                      const holders = ownerNames.filter((n) =>
+                        positions.some((p) => p.owner === n && p.symbol === sellOwnerTracker.symbol),
+                      );
+                      const missing = holders.filter((n) => !sellOwnerTracker.doneOwners.includes(n));
+                      const allDone = missing.length === 0;
+                      return (
+                        <div
+                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+                            allDone
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                              : "border-amber-500/35 bg-amber-500/8 text-amber-200"
+                          }`}
+                        >
+                          <span className="shrink-0 text-sm">{allDone ? "✓" : "⚠️"}</span>
+                          <span className="font-semibold">{sellOwnerTracker.symbol}</span>
+                          <span className="text-[10px] text-muted-foreground">{sellOwnerTracker.date}</span>
+                          {allDone ? (
+                            <span className="text-emerald-400">— 보유자 전원 입력 완료</span>
+                          ) : (
+                            <span>
+                              — 아직 미입력:{" "}
+                              <strong className="text-amber-300">{missing.join(", ")}</strong>
+                            </span>
+                          )}
+                          {!allDone && (
+                            <button
+                              type="button"
+                              onClick={() => setSellOwnerTracker(null)}
+                              className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+                              aria-label="알림 닫기"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {symPnlList.length > 0 && (
                     <div className="overflow-x-auto rounded-lg border bg-muted/20 p-2">
