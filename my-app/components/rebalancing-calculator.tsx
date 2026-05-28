@@ -1282,41 +1282,93 @@ function RebalancingOwner({
     [mode, totalKrw, newMoneyKrw],
   );
 
-  // ── 현금 활용 리밸런싱 플랜 ──────────────────────────────────────────────
+  // ── 현금 활용 리밸런싱 플랜 (이번 회 기준) ──────────────────────────────
   const cashPlan = useMemo(() => {
     if (mode !== "buy-sell") return null;
+    const effectiveTotalKrw = totalKrw;
+
+    /** 한 row의 이번 회 매수/매도 금액 계산 (상세 표와 동일 로직) */
+    function calcPerSplitKrw(r: ComputedRow): number {
+      const significant = Math.abs(r.diffKrw) >= 10000;
+      if (!significant) return 0;
+      if (splitCount <= 1) return r.diffKrw;
+      if (splitAmountMode === "member-milestone" && effectiveTotalKrw > 0) {
+        const splits = memberSplits[r.groupKey] ?? {};
+        let total = 0;
+        for (const m of r.memberAdjustments) {
+          if (isUndecidedSlotMemberSymbol(m.symbol)) continue;
+          const rawPct = (splits[m.symbol] ?? "").trim().replace(",", ".");
+          if (!rawPct) continue;
+          const mTargetPct = parseFloat(rawPct);
+          if (!Number.isFinite(mTargetPct) || mTargetPct <= 0) continue;
+          const mTargetKrw = (mTargetPct / 100) * effectiveTotalKrw;
+          const mFullDiff = mTargetKrw - m.valueKrw;
+          const mMilestoneKrw = mTargetKrw * (milestoneStepK / splitCount);
+          total += Math.max(0, Math.min(mMilestoneKrw - m.valueKrw, mFullDiff));
+        }
+        return total;
+      }
+      return perSplitKrwCore(
+        splitAmountMode,
+        splitCount,
+        { diffKrw: r.diffKrw, targetPct: r.targetPct, valueKrw: r.valueKrw },
+        effectiveTotalKrw,
+        { milestoneStep: milestoneStepK },
+      );
+    }
+
+    // 현금 그룹 보유액
     const cashRows = rows.filter((r) => isPinnedCashPortfolioGroup(r.groupKey));
     const cashAvailable = cashRows.reduce((s, r) => s + r.valueKrw, 0);
-    const buyRows = rows.filter(
-      (r) => !isPinnedCashPortfolioGroup(r.groupKey) && r.diffKrw > 10000,
-    );
-    const totalBuyNeeded = buyRows.reduce((s, r) => s + r.diffKrw, 0);
-    if (!(totalBuyNeeded >= 10000)) return null;
+
+    // 이번 회 매수 필요 그룹 (비현금, buy 방향)
+    const thisRoundBuyRows = rows
+      .filter((r) => !isPinnedCashPortfolioGroup(r.groupKey) && r.diffKrw > 10000)
+      .map((r) => ({ ...r, perSplitKrw: calcPerSplitKrw(r) }))
+      .filter((r) => r.perSplitKrw > 1000);
+
+    const totalThisRoundBuy = thisRoundBuyRows.reduce((s, r) => s + r.perSplitKrw, 0);
+    if (totalThisRoundBuy < 10000) return null;
+
+    const shortfall = Math.max(0, totalThisRoundBuy - cashAvailable);
+    const cashLeft = Math.max(0, cashAvailable - totalThisRoundBuy);
+
+    // 목표 0% 그룹 (매도 후보)
     const sellableRows = rows.filter(
       (r) => !isPinnedCashPortfolioGroup(r.groupKey) && r.targetPct === 0 && r.valueKrw >= 10000,
     );
     const totalSellableKrw = sellableRows.reduce((s, r) => s + r.valueKrw, 0);
-    const shortfall = Math.max(0, totalBuyNeeded - cashAvailable);
-    const cashLeft = Math.max(0, cashAvailable - totalBuyNeeded);
     const sellPlan = sellableRows.map((r) => ({
       groupKey: r.groupKey,
       displayName: r.displayName || r.groupKey,
       valueKrw: r.valueKrw,
+      thisRoundSellKrw: Math.abs(calcPerSplitKrw(r)),
       recommendedSellKrw:
         totalSellableKrw > 0 && shortfall > 0
           ? Math.min(r.valueKrw, (r.valueKrw / totalSellableKrw) * shortfall)
           : 0,
     }));
+
+    const splitLabel =
+      splitCount > 1
+        ? splitAmountMode === "member-milestone"
+          ? `종목별 ${milestoneStepK}/${splitCount}회차`
+          : splitAmountMode === "milestone"
+            ? `${milestoneStepK}/${splitCount}회차`
+            : `${splitCount}회 분할 1회차`
+        : "전액";
+
     return {
       cashAvailable,
-      totalBuyNeeded,
+      totalThisRoundBuy,
       shortfall,
       cashLeft,
       sellPlan,
       totalSellableKrw,
       canCoverWithSell: shortfall <= totalSellableKrw,
+      splitLabel,
     };
-  }, [rows, mode]);
+  }, [rows, mode, totalKrw, splitCount, splitAmountMode, milestoneStepK, memberSplits]);
 
   const stockQuickOptions = useMemo(() => {
     const out: Array<{
@@ -1705,11 +1757,15 @@ function RebalancingOwner({
       {/* ── 현금 활용 리밸런싱 플랜 ────────────────────────────────────────────── */}
       {cashPlan && (
         <div className="rounded-lg border border-slate-700/50 bg-slate-900/25 p-3 space-y-2.5">
-          <h3 className="text-[11px] font-semibold text-slate-200 sm:text-xs">현금 활용 리밸런싱 플랜</h3>
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <h3 className="text-[11px] font-semibold text-slate-200 sm:text-xs">현금 활용 리밸런싱 플랜</h3>
+            <span className="text-[10px] text-muted-foreground tabular-nums">({cashPlan.splitLabel} 기준)</span>
+          </div>
+
           <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 text-xs">
             <div>
-              <p className="text-[10px] text-muted-foreground">매수 필요 총액</p>
-              <p className="font-semibold tabular-nums text-rose-400">▲ {fmtKrw(cashPlan.totalBuyNeeded)}</p>
+              <p className="text-[10px] text-muted-foreground">이번 회 매수 총액</p>
+              <p className="font-semibold tabular-nums text-rose-400">▲ {fmtKrw(cashPlan.totalThisRoundBuy)}</p>
             </div>
             <div>
               <p className="text-[10px] text-muted-foreground">보유 현금</p>
@@ -1723,32 +1779,43 @@ function RebalancingOwner({
                 </>
               ) : (
                 <>
-                  <p className="text-[10px] text-muted-foreground">잔여 현금</p>
+                  <p className="text-[10px] text-muted-foreground">매수 후 잔여 현금</p>
                   <p className="font-semibold tabular-nums text-emerald-400">{fmtKrw(cashPlan.cashLeft)}</p>
                 </>
               )}
             </div>
           </div>
 
+          {/* ✓ 현금으로 전액 커버 */}
           {cashPlan.shortfall <= 0 && (
-            <p className="text-[11px] text-emerald-400/80">
-              ✓ 보유 현금으로 전액 매수 가능합니다.
-            </p>
+            <div className="rounded-md border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 space-y-0.5">
+              <p className="text-[11px] font-semibold text-emerald-400">
+                ✓ 보유 현금으로 이번 회 매수 전액 충당 가능
+              </p>
+              {cashPlan.sellPlan.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  목표 0% 그룹({cashPlan.sellPlan.map((s) => s.displayName).join(", ")})을
+                  이번 회에 굳이 매도하지 않아도 됩니다.
+                </p>
+              )}
+            </div>
           )}
 
+          {/* 현금 부족 → 0% 그룹 매도 권장 */}
           {cashPlan.shortfall > 0 && (
             <div className="space-y-1.5">
               <p className="text-[11px] leading-snug text-muted-foreground">
                 {cashPlan.canCoverWithSell ? (
                   <>
-                    목표 <strong className="text-slate-300">0%</strong> 그룹을 아래 비율로 매도하면 부족분을 충당할 수 있습니다.
-                    {" "}(매도 가능 총액{" "}
-                    <span className="tabular-nums text-slate-300">{fmtKrw(cashPlan.totalSellableKrw)}</span>)
+                    현금이 부족합니다. 목표{" "}
+                    <strong className="text-slate-300">0%</strong> 그룹 중 아래 금액을 매도하면
+                    이번 회 부족분을 충당할 수 있습니다.
                   </>
                 ) : (
                   <>
-                    목표 <strong className="text-slate-300">0%</strong> 그룹을 전부 매도해도{" "}
-                    <span className="tabular-nums text-amber-400">
+                    현금이 부족하고, 목표{" "}
+                    <strong className="text-slate-300">0%</strong> 그룹을 전부 매도해도{" "}
+                    <span className="tabular-nums text-amber-400 font-semibold">
                       {fmtKrw(cashPlan.shortfall - cashPlan.totalSellableKrw)}
                     </span>{" "}
                     부족합니다.
@@ -1762,7 +1829,8 @@ function RebalancingOwner({
                       <tr className="border-b border-slate-700/50 text-muted-foreground">
                         <th className="py-1.5 pl-3 pr-2 text-left font-medium">그룹</th>
                         <th className="py-1.5 px-2 text-right font-medium">보유액</th>
-                        <th className="py-1.5 pl-2 pr-3 text-right font-medium">권장 매도</th>
+                        <th className="py-1.5 px-2 text-right font-medium">이번 회 매도 예정</th>
+                        <th className="py-1.5 pl-2 pr-3 text-right font-medium">권장 추가 매도</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1771,6 +1839,9 @@ function RebalancingOwner({
                           <td className="py-1.5 pl-3 pr-2 font-medium text-slate-200">{sp.displayName}</td>
                           <td className="py-1.5 px-2 text-right tabular-nums text-muted-foreground">
                             {fmtKrw(sp.valueKrw)}
+                          </td>
+                          <td className="py-1.5 px-2 text-right tabular-nums text-blue-400/70">
+                            {sp.thisRoundSellKrw > 0 ? `▼ ${fmtKrw(sp.thisRoundSellKrw)}` : "—"}
                           </td>
                           <td className={`py-1.5 pl-2 pr-3 text-right tabular-nums font-semibold ${sp.recommendedSellKrw > 0 ? "text-blue-400" : "text-muted-foreground"}`}>
                             {sp.recommendedSellKrw > 0 ? `▼ ${fmtKrw(sp.recommendedSellKrw)}` : "—"}
@@ -1782,7 +1853,7 @@ function RebalancingOwner({
                 </div>
               ) : (
                 <p className="text-[11px] text-amber-400/80">
-                  목표 0% 그룹이 없어 추가 매도 불가합니다. 다른 방법으로 자금을 조달하세요.
+                  목표 0% 그룹이 없어 추가 매도 불가합니다.
                 </p>
               )}
             </div>
