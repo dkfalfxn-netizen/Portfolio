@@ -1282,6 +1282,42 @@ function RebalancingOwner({
     [mode, totalKrw, newMoneyKrw],
   );
 
+  // ── 현금 활용 리밸런싱 플랜 ──────────────────────────────────────────────
+  const cashPlan = useMemo(() => {
+    if (mode !== "buy-sell") return null;
+    const cashRows = rows.filter((r) => isPinnedCashPortfolioGroup(r.groupKey));
+    const cashAvailable = cashRows.reduce((s, r) => s + r.valueKrw, 0);
+    const buyRows = rows.filter(
+      (r) => !isPinnedCashPortfolioGroup(r.groupKey) && r.diffKrw > 10000,
+    );
+    const totalBuyNeeded = buyRows.reduce((s, r) => s + r.diffKrw, 0);
+    if (!(totalBuyNeeded >= 10000)) return null;
+    const sellableRows = rows.filter(
+      (r) => !isPinnedCashPortfolioGroup(r.groupKey) && r.targetPct === 0 && r.valueKrw >= 10000,
+    );
+    const totalSellableKrw = sellableRows.reduce((s, r) => s + r.valueKrw, 0);
+    const shortfall = Math.max(0, totalBuyNeeded - cashAvailable);
+    const cashLeft = Math.max(0, cashAvailable - totalBuyNeeded);
+    const sellPlan = sellableRows.map((r) => ({
+      groupKey: r.groupKey,
+      displayName: r.displayName || r.groupKey,
+      valueKrw: r.valueKrw,
+      recommendedSellKrw:
+        totalSellableKrw > 0 && shortfall > 0
+          ? Math.min(r.valueKrw, (r.valueKrw / totalSellableKrw) * shortfall)
+          : 0,
+    }));
+    return {
+      cashAvailable,
+      totalBuyNeeded,
+      shortfall,
+      cashLeft,
+      sellPlan,
+      totalSellableKrw,
+      canCoverWithSell: shortfall <= totalSellableKrw,
+    };
+  }, [rows, mode]);
+
   const stockQuickOptions = useMemo(() => {
     const out: Array<{
       key: string;
@@ -1664,6 +1700,94 @@ function RebalancingOwner({
         <p className="rounded-lg border border-slate-700/40 bg-slate-900/20 px-3 py-2 text-xs text-muted-foreground">
           투자할 금액을 입력하면 목표 비중에 맞게 매수 배분을 계산합니다.
         </p>
+      )}
+
+      {/* ── 현금 활용 리밸런싱 플랜 ────────────────────────────────────────────── */}
+      {cashPlan && (
+        <div className="rounded-lg border border-slate-700/50 bg-slate-900/25 p-3 space-y-2.5">
+          <h3 className="text-[11px] font-semibold text-slate-200 sm:text-xs">현금 활용 리밸런싱 플랜</h3>
+          <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 text-xs">
+            <div>
+              <p className="text-[10px] text-muted-foreground">매수 필요 총액</p>
+              <p className="font-semibold tabular-nums text-rose-400">▲ {fmtKrw(cashPlan.totalBuyNeeded)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-muted-foreground">보유 현금</p>
+              <p className="font-semibold tabular-nums text-slate-200">{fmtKrw(cashPlan.cashAvailable)}</p>
+            </div>
+            <div>
+              {cashPlan.shortfall > 0 ? (
+                <>
+                  <p className="text-[10px] text-muted-foreground">현금 부족분</p>
+                  <p className="font-semibold tabular-nums text-amber-400">▼ {fmtKrw(cashPlan.shortfall)}</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-[10px] text-muted-foreground">잔여 현금</p>
+                  <p className="font-semibold tabular-nums text-emerald-400">{fmtKrw(cashPlan.cashLeft)}</p>
+                </>
+              )}
+            </div>
+          </div>
+
+          {cashPlan.shortfall <= 0 && (
+            <p className="text-[11px] text-emerald-400/80">
+              ✓ 보유 현금으로 전액 매수 가능합니다.
+            </p>
+          )}
+
+          {cashPlan.shortfall > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {cashPlan.canCoverWithSell ? (
+                  <>
+                    목표 <strong className="text-slate-300">0%</strong> 그룹을 아래 비율로 매도하면 부족분을 충당할 수 있습니다.
+                    {" "}(매도 가능 총액{" "}
+                    <span className="tabular-nums text-slate-300">{fmtKrw(cashPlan.totalSellableKrw)}</span>)
+                  </>
+                ) : (
+                  <>
+                    목표 <strong className="text-slate-300">0%</strong> 그룹을 전부 매도해도{" "}
+                    <span className="tabular-nums text-amber-400">
+                      {fmtKrw(cashPlan.shortfall - cashPlan.totalSellableKrw)}
+                    </span>{" "}
+                    부족합니다.
+                  </>
+                )}
+              </p>
+              {cashPlan.sellPlan.length > 0 ? (
+                <div className="overflow-x-auto rounded-md border border-slate-700/35 bg-slate-900/20">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-700/50 text-muted-foreground">
+                        <th className="py-1.5 pl-3 pr-2 text-left font-medium">그룹</th>
+                        <th className="py-1.5 px-2 text-right font-medium">보유액</th>
+                        <th className="py-1.5 pl-2 pr-3 text-right font-medium">권장 매도</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cashPlan.sellPlan.map((sp) => (
+                        <tr key={sp.groupKey} className="border-b border-slate-700/25 last:border-0 hover:bg-slate-800/20">
+                          <td className="py-1.5 pl-3 pr-2 font-medium text-slate-200">{sp.displayName}</td>
+                          <td className="py-1.5 px-2 text-right tabular-nums text-muted-foreground">
+                            {fmtKrw(sp.valueKrw)}
+                          </td>
+                          <td className={`py-1.5 pl-2 pr-3 text-right tabular-nums font-semibold ${sp.recommendedSellKrw > 0 ? "text-blue-400" : "text-muted-foreground"}`}>
+                            {sp.recommendedSellKrw > 0 ? `▼ ${fmtKrw(sp.recommendedSellKrw)}` : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-[11px] text-amber-400/80">
+                  목표 0% 그룹이 없어 추가 매도 불가합니다. 다른 방법으로 자금을 조달하세요.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── 상세 수치 (항상 표시) ─────────────────────────────────────────────── */}
