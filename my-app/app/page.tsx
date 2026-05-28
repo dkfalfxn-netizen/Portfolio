@@ -42,6 +42,7 @@ import { mergeAndPersistOwnerScratchpadsFromServer, loadAllOwnerScratchpads } fr
 import {
   ALERT_THRESHOLDS_STORAGE_KEY,
   evaluateAlertRule,
+  getAlertThresholdsPayload,
   getAlertThresholdsForSync,
   loadAlertThresholdsFromStorage,
   mergeAlertThresholdsFromServer,
@@ -1703,7 +1704,7 @@ export default function Home() {
         targetStockWeightByOwner: loadAllTargetStockWeights(),
         ownerScratchpadByOwner: loadAllOwnerScratchpads(),
         rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
-        alertThresholdsByPosition: getAlertThresholdsForSync(),
+        ...getAlertThresholdsPayload(),
       }),
     });
     if (r.ok) {
@@ -3264,7 +3265,7 @@ export default function Home() {
               targetStockWeightByOwner: loadAllTargetStockWeights(),
               ownerScratchpadByOwner: loadAllOwnerScratchpads(),
               rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
-              alertThresholdsByPosition: getAlertThresholdsForSync(),
+              ...getAlertThresholdsPayload(),
             }),
           });
           const jPush = (await rPush.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -3311,7 +3312,7 @@ export default function Home() {
             targetStockWeightByOwner: loadAllTargetStockWeights(),
             ownerScratchpadByOwner: loadAllOwnerScratchpads(),
             rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
-            alertThresholdsByPosition: getAlertThresholdsForSync(),
+            ...getAlertThresholdsPayload(),
           }),
         });
         const j2 = (await r2.json()) as { ok?: boolean; updated_at?: string; error?: string };
@@ -3597,7 +3598,7 @@ export default function Home() {
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
           rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
-          alertThresholdsByPosition: getAlertThresholdsForSync(),
+          ...getAlertThresholdsPayload(),
         }),
       }).then(async (r) => {
         if (r.ok) {
@@ -3732,7 +3733,7 @@ export default function Home() {
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
           rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
-          alertThresholdsByPosition: getAlertThresholdsForSync(),
+          ...getAlertThresholdsPayload(),
         }),
       });
       const j = (await r.json()) as { error?: string };

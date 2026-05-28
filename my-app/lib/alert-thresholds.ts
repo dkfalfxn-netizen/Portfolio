@@ -209,6 +209,17 @@ export function getAlertThresholdsForSync(): AlertThresholdsByKey {
   return loadAlertThresholdsFromStorage();
 }
 
+/**
+ * push body 스프레드용: 로컬에 기준선 데이터가 있을 때만 alertThresholdsByPosition 키를 포함한다.
+ * 빈 객체를 push하면 서버의 기존 데이터를 덮어쓰므로, 로컬이 비어있으면 키 자체를 생략한다.
+ */
+export function getAlertThresholdsPayload():
+  | { alertThresholdsByPosition: AlertThresholdsByKey }
+  | Record<never, never> {
+  const thresholds = loadAlertThresholdsFromStorage();
+  return Object.keys(thresholds).length > 0 ? { alertThresholdsByPosition: thresholds } : {};
+}
+
 type EnrichedForAlert = {
   currency: "USD" | "EUR" | "KRW";
   pnl: number;
