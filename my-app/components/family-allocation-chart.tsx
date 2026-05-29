@@ -259,8 +259,13 @@ function resolvePortfolioTargetPctForTooltip(
   groupedMemberMap: Record<string, number>,
   isGrouped: boolean,
 ): number | null {
-  const dir = directSavedPortfolioTargetPct(entrySymbol, saved);
-  if (dir !== null) return dir;
+  // 단독 슬라이스(단일 종목)만 심볼 키 직접 저장값 우선 적용.
+  // 복수 종목 그룹(isGrouped)에서는 그룹 분배 계산이 우선이므로 직접 저장값을 무시한다.
+  // (예: IBM이 ATTACK 그룹 안에 있는데 saved["IBM"] = 0 이 남아있는 경우 0으로 표시되는 버그 방지)
+  if (!isGrouped) {
+    const dir = directSavedPortfolioTargetPct(entrySymbol, saved);
+    if (dir !== null) return dir;
+  }
   const hasGroupRow = Object.prototype.hasOwnProperty.call(saved, slice.ticker);
   if (!hasGroupRow) return null;
   const gTar = saved[slice.ticker] ?? 0;
