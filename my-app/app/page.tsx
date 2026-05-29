@@ -1780,8 +1780,10 @@ export default function Home() {
   const addFormFxManualRef = useRef(false);
   const [purchaseFxAutoBusy, setPurchaseFxAutoBusy] = useState(false);
   const [addPositionError, setAddPositionError] = useState("");
-  /** 종목 추가 누락 보유자 추적: 최근 입력한 티커와 완료한 보유자 목록 */
-  const [addOwnerTracker, setAddOwnerTracker] = useState<{ symbol: string; doneOwners: string[] } | null>(null);
+  /** 종목 추가 누락 보유자 추적: 입력한 종목 목록과 완료한 보유자 목록 */
+  const [addOwnerTracker, setAddOwnerTracker] = useState<
+    { symbol: string; name: string; isKorean: boolean; doneOwners: string[] }[]
+  >([]);
   /** 실현손익 누락 보유자 추적: 최근 입력한 티커·날짜와 완료한 보유자 목록 */
   const [sellOwnerTracker, setSellOwnerTracker] = useState<{ symbol: string; date: string; doneOwners: string[] } | null>(null);
   const [focusSymbolTrigger, setFocusSymbolTrigger] = useState(0);
@@ -1821,14 +1823,6 @@ export default function Home() {
     },
     [],
   );
-
-  // 종목 추가 추적: 전원 완료 시 2.5초 후 자동 닫힘
-  useEffect(() => {
-    if (!addOwnerTracker) return;
-    if (ownerNames.some((n) => !addOwnerTracker.doneOwners.includes(n))) return;
-    const t = setTimeout(() => setAddOwnerTracker(null), 2500);
-    return () => clearTimeout(t);
-  }, [addOwnerTracker, ownerNames]);
 
   // 실현손익 추적: 관련 보유자 전원 완료 시 2.5초 후 자동 닫힘
   useEffect(() => {
@@ -4379,8 +4373,16 @@ export default function Home() {
 
     // 누락 보유자 추적 업데이트
     setAddOwnerTracker((prev) => {
-      const prevDone = prev?.symbol === symbol ? prev.doneOwners : [];
-      return { symbol, doneOwners: [...new Set([...prevDone, ...ownersOrdered])] };
+      const idx = prev.findIndex((e) => e.symbol === symbol);
+      const prevDone = idx >= 0 ? prev[idx].doneOwners : [];
+      const updated = {
+        symbol,
+        name: nameTrimmed,
+        isKorean: form.currency === "KRW",
+        doneOwners: [...new Set([...prevDone, ...ownersOrdered])],
+      };
+      if (idx >= 0) return prev.map((e, i) => (i === idx ? updated : e));
+      return [...prev, updated];
     });
 
     requestAnimationFrame(() => {
@@ -7512,40 +7514,48 @@ export default function Home() {
             </form>
 
             {/* ── 종목 추가 누락 보유자 알림 ──────────────────────────────────── */}
-            {addOwnerTracker && (() => {
-              const missing = ownerNames.filter((n) => !addOwnerTracker.doneOwners.includes(n));
-              const allDone = missing.length === 0;
-              return (
-                <div
-                  className={`mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
-                    allDone
-                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                      : "border-amber-500/35 bg-amber-500/8 text-amber-200"
-                  }`}
-                >
-                  <span className="shrink-0 text-sm">{allDone ? "✓" : "⚠️"}</span>
-                  <span className="font-semibold">{addOwnerTracker.symbol}</span>
-                  {allDone ? (
-                    <span className="text-emerald-400">— 모든 보유자 입력 완료</span>
-                  ) : (
-                    <span>
-                      — 아직 미입력:{" "}
-                      <strong className="text-amber-300">{missing.join(", ")}</strong>
-                    </span>
-                  )}
-                  {!allDone && (
-                    <button
-                      type="button"
-                      onClick={() => setAddOwnerTracker(null)}
-                      className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
-                      aria-label="알림 닫기"
+            {addOwnerTracker.length > 0 && (
+              <div className="mt-3 flex flex-col gap-1.5">
+                {addOwnerTracker.map((item) => {
+                  const missing = ownerNames.filter((n) => !item.doneOwners.includes(n));
+                  const allDone = missing.length === 0;
+                  const displayLabel = item.isKorean ? item.name : item.symbol;
+                  return (
+                    <div
+                      key={item.symbol}
+                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+                        allDone
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                          : "border-amber-500/35 bg-amber-500/8 text-amber-200"
+                      }`}
                     >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
+                      <span className="shrink-0 text-sm">{allDone ? "✓" : "⚠️"}</span>
+                      <span className="font-semibold">{displayLabel}</span>
+                      {allDone ? (
+                        <span className="text-emerald-400">— 모든 보유자 입력 완료</span>
+                      ) : (
+                        <span>
+                          — 아직 미입력:{" "}
+                          <strong className="text-amber-300">{missing.join(", ")}</strong>
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAddOwnerTracker((prev) =>
+                            prev.filter((e) => e.symbol !== item.symbol),
+                          )
+                        }
+                        className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+                        aria-label="알림 닫기"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <p className="mt-2 text-xs text-muted-foreground">
               현금(USD·KRW)은 아래 각 보유 종목 표 상단에서 입력합니다. 전체 현금
