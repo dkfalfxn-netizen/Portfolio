@@ -29,6 +29,8 @@ import {
 } from "@/lib/portfolio-target-weights";
 import {
   loadVisualOrderKeysForOwner,
+  loadMemberOrderForOwnerGroup,
+  persistMemberOrderForOwnerGroup,
   persistVisualOrderForOwner,
   REBALANCE_VISUAL_ORDER_REFRESH_EVENT,
 } from "@/lib/rebalance-visual-order";
@@ -584,6 +586,7 @@ function SortableMemberRow({
 
 function RebalancingBarSortableRow({
   row,
+  ownerName,
   targets,
   setTargets,
   maxScale,
@@ -594,6 +597,7 @@ function RebalancingBarSortableRow({
   resolvedNameBySymbol,
 }: {
   row: ComputedRow;
+  ownerName: string;
   targets: Record<string, string>;
   setTargets: Dispatch<SetStateAction<Record<string, string>>>;
   maxScale: number;
@@ -606,11 +610,17 @@ function RebalancingBarSortableRow({
   const pinned = isPinnedCashPortfolioGroup(row.groupKey);
   const [membersCollapsed, setMembersCollapsed] = useState(true);
 
-  // ── 그룹 내 종목 순서 (인메모리) ─────────────────────────────────────────
+  // ── 그룹 내 종목 순서 (localStorage 영속화) ─────────────────────────────
   const memberSymbolsKey = row.members.map((m) => m.symbol).join("\0");
-  const [memberOrder, setMemberOrder] = useState<string[]>(() =>
-    row.members.map((m) => m.symbol),
-  );
+  const [memberOrder, setMemberOrder] = useState<string[]>(() => {
+    const saved = loadMemberOrderForOwnerGroup(ownerName, row.groupKey);
+    const defaults = row.members.map((m) => m.symbol);
+    if (!saved) return defaults;
+    const set = new Set(defaults);
+    const filtered = saved.filter((s) => set.has(s));
+    const added = defaults.filter((s) => !filtered.includes(s));
+    return [...filtered, ...added];
+  });
   useEffect(() => {
     setMemberOrder((prev) => {
       const current = memberSymbolsKey.split("\0").filter(Boolean);
@@ -644,9 +654,11 @@ function RebalancingBarSortableRow({
       const oldIdx = prev.indexOf(a);
       const newIdx = prev.indexOf(o);
       if (oldIdx < 0 || newIdx < 0) return prev;
-      return arrayMove(prev, oldIdx, newIdx);
+      const next = arrayMove(prev, oldIdx, newIdx);
+      persistMemberOrderForOwnerGroup(ownerName, row.groupKey, next);
+      return next;
     });
-  }, []);
+  }, [ownerName, row.groupKey]);
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: row.groupKey,
@@ -1733,6 +1745,7 @@ function RebalancingOwner({
                 <RebalancingBarSortableRow
                   key={r.groupKey}
                   row={r}
+                  ownerName={ownerName}
                   targets={targets}
                   setTargets={setTargets}
                   maxScale={maxScale}
