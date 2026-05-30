@@ -3189,12 +3189,47 @@ export default function Home() {
         const hasLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) === "1";
 
         const cacheMissing = isLocalPortfolioCacheCleared();
-        if (
+        const serverNewer = isServerSnapshotNewerThanLocal(serverTs, lastSyncTs);
+
+        // ── 충돌 감지: 이 기기에 미저장 변경이 있고(서버에 안 올라감) 서버가 더 최신 ──
+        //   = 다른 기기가 마지막 동기화 이후 서버에 새 데이터를 올렸음.
+        //   이 기기 데이터로 그냥 push하면 다른 기기의 변경이 유실되므로
+        //   (C) 덮어쓰기 전 서버 상태를 자동 백업하고 (A) 사용자에게 방향을 확인한다.
+        let conflictChoice: "push" | "applyServer" | null = null;
+        if (hasLocalChanges && serverNewer && !forcePull) {
+          // C: 덮어쓰기로 사라질 "현재 서버 상태"를 백업 테이블에 자동 저장 (snapshot 생략 = 서버가 자기 상태를 백업)
+          try {
+            await fetch("/api/backup", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sync_key: key }),
+            });
+          } catch {
+            // 백업 실패해도 동기화 흐름은 계속 (아래 확인에서 사용자가 판단)
+          }
+          // A: 어느 쪽을 살릴지 확인
+          const overwrite = window.confirm(
+            [
+              "⚠️ 동기화 충돌",
+              "",
+              "서버에 다른 기기에서 저장한 더 최신 데이터가 있습니다.",
+              "이 기기에도 아직 서버에 올리지 않은 변경이 있습니다.",
+              "",
+              "[확인] 이 기기 데이터로 서버를 덮어씁니다.",
+              "         (직전 서버 상태는 방금 자동 백업되어 복원 가능)",
+              "[취소] 서버의 최신 데이터를 이 기기로 불러옵니다.",
+              "         (이 기기의 미저장 변경은 버려집니다)",
+            ].join("\n"),
+          );
+          conflictChoice = overwrite ? "push" : "applyServer";
+        }
+
+        const shouldApplyServer =
           forcePull ||
-          (!hasLocalChanges &&
-            (isServerSnapshotNewerThanLocal(serverTs, lastSyncTs) ||
-              (lastSyncTs.length > 0 && cacheMissing)))
-        ) {
+          conflictChoice === "applyServer" ||
+          (!hasLocalChanges && (serverNewer || (lastSyncTs.length > 0 && cacheMissing)));
+
+        if (shouldApplyServer) {
           // ─ forcePull(키 변경 시) 또는 서버가 더 최신이고 로컬 미반영 변경 없음 → 서버 데이터를 적용
           //   (동기 시각만 남고 positions/owner_names 키는 지운 경우에도 서버 스냅샷을 다시 적용)
           setSyncMessage("서버에서 최신 잔고를 불러왔습니다.");
@@ -3243,8 +3278,9 @@ export default function Home() {
             safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
           }
         } else if (hasLocalChanges) {
-          // ─ 로컬에 미반영 변경이 있음 → 서버 타임스탬프와 무관하게 로컬을 서버에 올림
-          // (서버가 더 최신이더라도 사용자가 방금 입력한 데이터를 잃지 않는 것이 우선)
+          // ─ 로컬에 미반영 변경이 있고 충돌이 없거나(서버가 더 최신이 아님)
+          //   충돌 시 사용자가 "이 기기로 덮어쓰기"를 선택한 경우 → 로컬을 서버에 올림.
+          //   (충돌 시 직전 서버 상태는 위에서 자동 백업됨)
           const rPush = await fetch("/api/sync", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
