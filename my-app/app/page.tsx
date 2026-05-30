@@ -3013,6 +3013,14 @@ export default function Home() {
     if (!isHydrated) return;
     const hasRealPrices = positionsByOwner.some((g) => g.sectionTotal > 0);
     if (!hasRealPrices) return;
+    // 환율 미확보(폴백 상수 1350/1450 사용 중) + 해당 통화 보유 시 → 스냅샷 저장 보류.
+    // 폴백 환율로 미국·유럽 평가액이 통째로 왜곡돼 가짜 등락이 기록되는 것을 막는다.
+    const hasUsdHolding = positions.some((p) => p.currency === "USD");
+    const hasEurHolding = positions.some((p) => p.currency === "EUR");
+    const fxMissing =
+      (hasUsdHolding && marketQuery.data?.usdKrw == null) ||
+      (hasEurHolding && marketQuery.data?.eurKrw == null);
+    if (fxMissing) return;
     const today = todayKST();
     const ownerValues: Record<string, number> = {};
     const breakdownValues: Record<string, number> = {};

@@ -35,12 +35,19 @@ async function calcOwnerValues(
   totalValue: number;
   usdKrw: number;
   stalePriceOwners: string[];
+  /** 환율 조회 실패로 폴백 상수(1400/1500)를 써서 평가액이 왜곡됐는지 — 보유 통화가 있을 때만 true */
+  fxFallbackUsed: boolean;
 }> {
   const symbols = [...new Set(positions.map((p) => p.symbol))];
   const { quotes, usdKrw: fetchedUsd, eurKrw: fetchedEur } = await fetchPrices(symbols);
 
   const usdKrw = fetchedUsd ?? FALLBACK_USD_KRW;
   const eurKrw = fetchedEur ?? FALLBACK_EUR_KRW;
+
+  // 환율 조회 실패(null) + 해당 통화 보유 시 → 폴백 상수로 전체가 왜곡됨. 호출부에서 저장 건너뜀.
+  const hasUsd = positions.some((p) => p.currency === "USD");
+  const hasEur = positions.some((p) => p.currency === "EUR");
+  const fxFallbackUsed = (hasUsd && fetchedUsd == null) || (hasEur && fetchedEur == null);
 
   const ownerValues: Record<string, number> = {};
   const breakdownValues: BreakdownValues = {};
@@ -93,7 +100,7 @@ async function calcOwnerValues(
   }
 
   const totalValue = Object.values(ownerValues).reduce((s, v) => s + v, 0);
-  return { ownerValues, breakdownValues, totalValue, usdKrw, stalePriceOwners };
+  return { ownerValues, breakdownValues, totalValue, usdKrw, stalePriceOwners, fxFallbackUsed };
 }
 
 
@@ -300,7 +307,15 @@ export async function POST(req: NextRequest) {
       { status: 502 },
     );
   }
-  const { ownerValues, breakdownValues, totalValue, usdKrw, stalePriceOwners } = calcResult;
+  const { ownerValues, breakdownValues, totalValue, usdKrw, stalePriceOwners, fxFallbackUsed } = calcResult;
+
+  // 환율 조회 실패 시 저장 거부 — 폴백 상수로 미국·유럽 평가액이 통째로 왜곡돼 가짜 등락을 만든다.
+  if (fxFallbackUsed) {
+    return NextResponse.json(
+      { error: "환율 조회 실패(폴백 감지) — 평가액 왜곡 방지를 위해 스냅샷 저장을 건너뜁니다. 잠시 후 다시 시도하세요." },
+      { status: 503 },
+    );
+  }
 
   const today = todayKST();
   const upsertPayload: Record<string, unknown> = {
@@ -377,11 +392,17 @@ export async function saveAllSnapshots(): Promise<SaveAllSnapshotsResult> {
       try {
         const positions = Array.isArray(snap.positions) ? (snap.positions as Position[]) : [];
         const cashByOwner = ((snap.cash_by_owner as Record<string, CashEntry>) ?? {});
-        const { ownerValues, breakdownValues, totalValue, usdKrw, stalePriceOwners } = await calcOwnerValues(positions, cashByOwner);
+        const { ownerValues, breakdownValues, totalValue, usdKrw, stalePriceOwners, fxFallbackUsed } = await calcOwnerValues(positions, cashByOwner);
 
         if (!(totalValue > 0)) {
           result.failed++;
           result.errors.push({ syncKey: snap.sync_key, reason: "totalValue가 0 이하 (시세 조회 실패 추정)" });
+          return;
+        }
+        // 환율 폴백 시 저장 거부 — 폴백 상수로 평가액이 통째로 왜곡돼 가짜 등락을 만든다.
+        if (fxFallbackUsed) {
+          result.failed++;
+          result.errors.push({ syncKey: snap.sync_key, reason: "환율 조회 실패(폴백) — 평가액 왜곡 방지 위해 저장 건너뜀" });
           return;
         }
         if (stalePriceOwners.length > 0) {
