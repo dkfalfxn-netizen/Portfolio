@@ -7844,18 +7844,20 @@ export default function Home() {
                     };
                     return { ...prev, [targetOwner]: [...(prev[targetOwner] ?? []), e2] };
                   });
-                  // 매도대금 현금 자동 반영
+                  // 매도대금 현금 자동 반영 — 매도 수수료(0.2%) 차감한 순입금액 기준
+                  // (매수는 수수료 포함 차감, 실현손익도 수수료 차감하므로 입금도 net로 통일)
                   setCashByOwner((prev) => {
                     let next = { ...prev };
+                    const formFx = Number(form.fxRate) || eurKrw; // EUR 원화 환산은 입력 환율 우선
                     for (const [targetOwner, q] of reduceByOwner) {
                       const currentCash = next[targetOwner] ?? { usd: 0, krw: 0 };
-                      const grossProceeds = q * sell;
+                      const netProceeds = q * sell * (1 - TRADING_FEE_RATE);
                       if (form.currency === "KRW") {
                         next = {
                           ...next,
                           [targetOwner]: {
                             ...currentCash,
-                            krw: currentCash.krw + grossProceeds,
+                            krw: currentCash.krw + netProceeds,
                           },
                         };
                       } else if (form.currency === "USD") {
@@ -7863,16 +7865,16 @@ export default function Home() {
                           ...next,
                           [targetOwner]: {
                             ...currentCash,
-                            usd: currentCash.usd + grossProceeds,
+                            usd: currentCash.usd + netProceeds,
                           },
                         };
                       } else {
-                        // 원화 입금만 현재 EUR/KRW(실현손익 폼 환율과 별도)
+                        // EUR: 입력 환율(form.fxRate)로 원화 환산해 입금
                         next = {
                           ...next,
                           [targetOwner]: {
                             ...currentCash,
-                            krw: currentCash.krw + grossProceeds * eurKrw,
+                            krw: currentCash.krw + netProceeds * formFx,
                           },
                         };
                       }
