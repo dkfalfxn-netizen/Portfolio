@@ -593,7 +593,6 @@ function parseBrokerNotification(text: string): BrokerNotificationParsed | null 
 }
 
 // 하위 호환: 기존 타입명 유지
-type MiraeAssetParsed = BrokerNotificationParsed;
 
 function calcSellRealizedKrw(entry: Pick<SellLogEntry, "qty" | "sellPrice" | "avgPrice" | "currency" | "fxRate">): number {
   const qty = Number(entry.qty);
@@ -914,20 +913,6 @@ function buildHoldingsGroupBlocks<
 }
 
 /** 그룹 헤더 툴팁: 포함 종목(이름·티커), 줄바꿈 목록 */
-function formatGroupHoldingsTooltip(items: Array<{ name?: string; symbol?: string }>): string {
-  const lines: string[] = [];
-  const seen = new Set<string>();
-  for (const p of items) {
-    const sym = typeof p.symbol === "string" ? p.symbol.trim() : "";
-    const nm = typeof p.name === "string" ? p.name.trim() : "";
-    const key = sym || nm;
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    if (nm && sym && nm !== sym) lines.push(`${nm} (${sym})`);
-    else lines.push(sym || nm);
-  }
-  return lines.length > 0 ? lines.join("\n") : "(포함 종목 없음)";
-}
 
 /** 강희진 실제 보유 기준 시드 — 김도율·김찬율도 동일 수량·평단가로 복제 */
 const SEED_강희진_보유: Omit<Position, "owner">[] = [
@@ -4432,7 +4417,7 @@ export default function Home() {
       if (!symbol || !nameTrimmed || t.qty <= 0 || t.price <= 0 || ownersOrdered.length === 0) continue;
 
       setPositions((prev) => {
-        let next = [...prev];
+        const next = [...prev];
         for (const owner of ownersOrdered) {
           const idx = next.findIndex(
             (p) => p.owner === owner && p.symbol === symbol && p.currency === t.currency,

@@ -68,7 +68,7 @@ export function proportionalAllocateWithCaps(
   const n = weights.length;
   if (n === 0 || !(total > EPS) || caps.length !== n) return new Array(Math.max(n, 0)).fill(0);
   const out = new Array(n).fill(0);
-  let remCap = caps.map((c) => Math.max(0, c));
+  const remCap = caps.map((c) => Math.max(0, c));
   let budget = total;
 
   while (budget > EPS) {
