@@ -330,15 +330,17 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate, cronRecordedA
           </button>
         </div>
       </div>
-      {/* 기준 시각 안내 */}
-      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
-        <span>📸 기준: 매일 KST 16:00 이후 종가 (한국장 마감 후 서버 자동 기록)</span>
-        {cronRecordedAt ? (
-          <span className="text-slate-400">
-            · 최근 서버 기록 <span className="font-medium text-slate-300">{fmtKstShort(cronRecordedAt)}</span>
-          </span>
-        ) : (
-          <span className="text-slate-500">· 오늘 실시간 칸은 현재가 기준</span>
+      {/* 기준 시각 안내 — 어느 시점 값으로 추이를 계산하는지 명시 */}
+      <div className="mb-2 flex flex-col gap-0.5 text-[10px] leading-relaxed text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-1.5">
+          <span className="rounded bg-muted px-1 py-0.5 font-medium text-foreground/80">기준 시점</span>
+          <span>지난 날짜 = <span className="font-medium text-slate-300">매일 KST 16:00 한국장 마감 종가</span> (서버 자동 기록)</span>
+          <span className="text-slate-500">· 오늘 칸 = <span className="font-medium text-slate-400">실시간 현재가</span></span>
+        </div>
+        {cronRecordedAt && (
+          <div className="text-slate-500">
+            최근 서버 기록 시각: <span className="font-medium text-slate-300">{fmtKstShort(cronRecordedAt)}</span>
+          </div>
         )}
       </div>
 

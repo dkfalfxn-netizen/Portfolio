@@ -3115,14 +3115,15 @@ export default function Home() {
       }
     }
 
-    // 서버 저장: KST 16시(오후 4시) 이후에만 push
-    // → 한국 장 마감(15:30) 후 종가 기준으로 저장해 일별 비교가 정확해짐
-    // → 미국 장 시작(22:30 KST) 전이라 전일 미국 종가 기준도 충족
+    // 서버 저장: KST 16~18시(장 마감 직후)에만 push
+    // → 한국 장 마감(15:30) 후 종가 + 전일 미국 종가 기준으로, 매일 동일 시점(종가)으로 기록.
+    // → 18시 이후(미국장 진행 중) push를 막아, 저녁 중간 시세가 그 날 값으로 굳는 것을 방지.
+    //   (서버 크론도 KST 16·17시에 같은 종가 기준으로 기록하므로 시점이 일치함)
     try {
       const key = window.localStorage.getItem(SYNC_KEY_STORAGE) ?? "";
       const nowKstHour = new Date(Date.now() + 9 * 60 * 60 * 1000).getUTCHours();
-      const isAfterKoreanClose = nowKstHour >= 16; // KST 16:00 이후
-      if (key.length >= 8 && isAfterKoreanClose) {
+      const isKoreanCloseWindow = nowKstHour >= 16 && nowKstHour < 18; // KST 16:00~17:59
+      if (key.length >= 8 && isKoreanCloseWindow) {
         // 오늘 스냅샷 push
         const pushedDate = window.localStorage.getItem(SNAPSHOT_PUSHED_DATE_KEY) ?? "";
         const pushedTotal = Number(window.localStorage.getItem(SNAPSHOT_PUSHED_TOTAL_KEY) ?? "0");
@@ -3552,6 +3553,7 @@ export default function Home() {
         //   (effect 시작 이후 saveDailySnapshot으로 새로 저장된 데이터를 포함시키기 위함)
         const freshLocal = loadDailySnapshots();
         const localMap = new Map(freshLocal.map((s) => [s.date, s]));
+        const mergeToday = todayKST();
         for (const s of snaps) {
           const existing = localMap.get(s.date);
 
@@ -3569,14 +3571,17 @@ export default function Home() {
 
           if (serverLooksEmpty && localLooksValid) continue;
 
-          // LWW: updated_at(서버) vs savedAt(로컬). 베이스에 없는 owner는 상대에서 보충.
-          const serverTs = s.updatedAt ? new Date(s.updatedAt).getTime() : 0;
-          const localTs = existing?.savedAt ?? 0;
-          const serverIsNewer = serverTs > 0 && serverTs >= localTs;
+          // 시점 일관성: 과거 날짜는 서버(크론 KST 16:00 종가)를 신뢰하고,
+          // 오늘은 로컬(실시간)을 우선한다.
+          //  - 과거를 로컬 우선으로 두면, 저녁(미국장)에 앱을 켰을 때의 중간 시세가
+          //    그 날 값으로 굳어 종가 기준과 어긋난 가짜 변동이 생긴다.
+          //  - 오늘은 아직 진행 중이라 실시간 로컬값이 더 최신이라 우선.
+          const isPastDay = s.date < mergeToday;
+          const preferServer = isPastDay;
 
           if (localLooksValid && !serverLooksEmpty) {
-            const base = serverIsNewer ? s : existing!;
-            const other = serverIsNewer ? existing! : s;
+            const base = preferServer ? s : existing!;
+            const other = preferServer ? existing! : s;
             const baseOwners = new Set(Object.keys(base.ownerValues ?? {}));
             const extraOwnerValues: Record<string, number> = {};
             const extraBreakdown: Record<string, number> = {};
@@ -3656,6 +3661,9 @@ export default function Home() {
     return () => {
       if (pushDebounceRef.current) clearTimeout(pushDebounceRef.current);
     };
+    // marketQuery.data?.quotes는 의도적으로 deps에서 제외 — 시세 틱마다 push가 트리거되면 안 됨.
+    // push 시점에 클로저로 현재 시세를 읽어 currentPrice만 실어 보낸다(데이터 변경 시에만 push).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames, alertThresholdsByKey, isHydrated, syncReady, autoSync, cloudSyncKey]);
 
   async function handlePullCloud() {
