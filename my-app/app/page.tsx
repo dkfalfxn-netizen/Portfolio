@@ -395,8 +395,6 @@ const LAST_SYNC_TS_KEY = "portfolio_last_sync_ts_v1";
  */
 const SNAPSHOT_PUSHED_DATE_KEY = "portfolio_snapshot_pushed_date_v1";
 const SNAPSHOT_PUSHED_TOTAL_KEY = "portfolio_snapshot_pushed_total_v1";
-const SNAPSHOT_PREV_PUSHED_DATE_KEY = "portfolio_snapshot_prev_pushed_date_v1";
-const SNAPSHOT_PREV_PUSHED_TOTAL_KEY = "portfolio_snapshot_prev_pushed_total_v1";
 const SELL_LOG_KEY = "portfolio_sell_log_v1";
 /** 「종목 추가」체결을 일별 차트 마커용으로만 로컬 저장(서버 동기화 없음) */
 const BUY_JOURNAL_KEY = "portfolio_buy_journal_v1";
@@ -3052,28 +3050,21 @@ export default function Home() {
     saveDailySnapshot(snap);
     setDailySnapshots(loadDailySnapshots());
 
-    // ── 어제 스냅샷 자동 재계산: 현재 포지션 × 전일 종가 ────────────────────────
-    // 포지션이 바뀌어도 "어제 ↔ 오늘" 비교가 항상 동일한 포지션 기준이 되도록 함
+    // ── 어제 스냅샷 백필(보존 우선) ───────────────────────────────────────────
+    //   어제 값을 매번 "현재 포지션 × 전일 종가 + 현재 현금"으로 덮어쓰면,
+    //   오늘 입금/출금·매매가 어제 칸으로 새어 들어가 자산 추이가 왜곡된다.
+    //   (예: 오늘 현금 1,000만 입금 → 어제 값도 1,000만 부풀려져 입금 점프가 사라짐)
+    //   → 어제 기록이 이미 있으면 그날 실제값을 보존하고, 전혀 없을 때만 추정값으로 채운다.
+    //   "어제 대비 등락률"은 dailyLiveChangeByDate가 실시간 동일포지션 기준으로 별도 계산하므로
+    //   어제 스냅샷을 덮어쓰지 않아도 등락률 표시는 영향받지 않는다.
     const yday = yesterdayKST();
-    const prevOwnerValues: Record<string, number> = {};
-    const prevBreakdownValues: Record<string, number> = {};
-    let prevTotalValue = 0;
-    for (const g of positionsByOwner) {
-      const prevStock = g.items.reduce((s, p) => {
-        const price = (typeof p.previousClose === "number" && p.previousClose > 0)
-          ? p.previousClose : p.currentPrice;
-        const v =
-          p.currency === "USD" ? price * p.quantity * usdKrw
-          : p.currency === "EUR" ? price * p.quantity * eurKrw
-          : price * p.quantity;
-        return s + v;
-      }, 0);
-      const ownerPrevTotal = prevStock + g.sectionCashKrw;
-      prevOwnerValues[g.ownerName] = ownerPrevTotal;
-      prevTotalValue += ownerPrevTotal;
-      const blocks = buildHoldingsGroupBlocks(g.items);
-      for (const block of blocks) {
-        const blockPrev = block.items.reduce((s, p) => {
+    const ydayAlreadyRecorded = loadDailySnapshots().some((s) => s.date === yday);
+    if (!ydayAlreadyRecorded) {
+      const prevOwnerValues: Record<string, number> = {};
+      const prevBreakdownValues: Record<string, number> = {};
+      let prevTotalValue = 0;
+      for (const g of positionsByOwner) {
+        const prevStock = g.items.reduce((s, p) => {
           const price = (typeof p.previousClose === "number" && p.previousClose > 0)
             ? p.previousClose : p.currentPrice;
           const v =
@@ -3082,22 +3073,36 @@ export default function Home() {
             : price * p.quantity;
           return s + v;
         }, 0);
-        prevBreakdownValues[`${g.ownerName} · ${block.label}`] = blockPrev;
+        const ownerPrevTotal = prevStock + g.sectionCashKrw;
+        prevOwnerValues[g.ownerName] = ownerPrevTotal;
+        prevTotalValue += ownerPrevTotal;
+        const blocks = buildHoldingsGroupBlocks(g.items);
+        for (const block of blocks) {
+          const blockPrev = block.items.reduce((s, p) => {
+            const price = (typeof p.previousClose === "number" && p.previousClose > 0)
+              ? p.previousClose : p.currentPrice;
+            const v =
+              p.currency === "USD" ? price * p.quantity * usdKrw
+              : p.currency === "EUR" ? price * p.quantity * eurKrw
+              : price * p.quantity;
+            return s + v;
+          }, 0);
+          prevBreakdownValues[`${g.ownerName} · ${block.label}`] = blockPrev;
+        }
+        if (g.sectionCashKrw > 0) {
+          prevBreakdownValues[`${g.ownerName} · 현금`] = g.sectionCashKrw;
+        }
       }
-      if (g.sectionCashKrw > 0) {
-        prevBreakdownValues[`${g.ownerName} · 현금`] = g.sectionCashKrw;
+      if (prevTotalValue > 0) {
+        saveDailySnapshot({
+          date: yday,
+          ownerValues: prevOwnerValues,
+          breakdownValues: prevBreakdownValues,
+          totalValue: prevTotalValue,
+          savedAt: Date.now(),
+        });
+        setDailySnapshots(loadDailySnapshots());
       }
-    }
-    if (prevTotalValue > 0) {
-      const prevSnap: DailySnapshot = {
-        date: yday,
-        ownerValues: prevOwnerValues,
-        breakdownValues: prevBreakdownValues,
-        totalValue: prevTotalValue,
-        savedAt: Date.now(),
-      };
-      saveDailySnapshot(prevSnap);
-      setDailySnapshots(loadDailySnapshots());
     }
 
     // 서버 저장: KST 16시(오후 4시) 이후에만 push
@@ -3124,24 +3129,9 @@ export default function Home() {
             }
           }).catch(() => {});
         }
-        // 어제 스냅샷 push (포지션 변경 시 자동 수정)
-        if (prevTotalValue > 0) {
-          const pushedPrevDate = window.localStorage.getItem(SNAPSHOT_PREV_PUSHED_DATE_KEY) ?? "";
-          const pushedPrevTotal = Number(window.localStorage.getItem(SNAPSHOT_PREV_PUSHED_TOTAL_KEY) ?? "0");
-          const prevDiff = pushedPrevTotal > 0 ? Math.abs(prevTotalValue - pushedPrevTotal) / pushedPrevTotal : 1;
-          if (pushedPrevDate !== yday || prevDiff >= 0.01) {
-            void fetch("/api/snapshot", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ sync_key: key, date: yday, ownerValues: prevOwnerValues, breakdownValues: prevBreakdownValues, totalValue: prevTotalValue }),
-            }).then((r) => {
-              if (r.ok) {
-                safeSetItem(SNAPSHOT_PREV_PUSHED_DATE_KEY, yday);
-                safeSetItem(SNAPSHOT_PREV_PUSHED_TOTAL_KEY, String(prevTotalValue));
-              }
-            }).catch(() => {});
-          }
-        }
+        // ※ 어제(이전 날짜) 스냅샷은 클라이언트가 push하지 않는다.
+        //   서버 크론(/api/cron/daily-snapshot, KST 16·17시)이 매일 그날의 실제값을 기록하므로,
+        //   클라이언트가 "현재 포지션 × 전일 종가"로 재계산해 덮어쓰면 과거 실제값이 훼손된다.
       }
     } catch {}
   }, [positionsByOwner, isHydrated, usdKrw, eurKrw]);
