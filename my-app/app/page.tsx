@@ -1464,6 +1464,23 @@ function isServerSnapshotNewerThanLocal(serverTsRaw: string, lastSyncTsRaw: stri
   return serverTs > lastSyncTs;
 }
 
+/**
+ * 서버 push용: 라이브 시세가 있으면 currentPrice를 최신값으로 교체.
+ * 클라이언트는 평소 currentPrice를 갱신하지 않아(추가 시점 가격에 고정) 서버 값이 오래되는데,
+ * 이러면 크론이 시세 조회에 실패한 날 폴백(currentPrice)이 매우 stale해져 가짜 등락을 만든다.
+ * push 시점에 최신 시세를 실어 보내면 크론 폴백값이 항상 최신에 가깝게 유지된다.
+ */
+function positionsWithLivePrices(
+  list: Position[],
+  quotes: Record<string, { price?: number | null } | undefined> | undefined,
+): Position[] {
+  if (!quotes) return list;
+  return list.map((p) => {
+    const lp = quotes[p.symbol]?.price;
+    return typeof lp === "number" && Number.isFinite(lp) && lp > 0 ? { ...p, currentPrice: lp } : p;
+  });
+}
+
 /** 포지션·보유자 로컬 캐시가 없으면(부분 삭제) 동기 시각만 남아 pull이 건너뛰어지는 문제를 막기 위함 */
 function isLocalPortfolioCacheCleared(): boolean {
   if (typeof window === "undefined") return false;
@@ -3607,7 +3624,8 @@ export default function Home() {
         body: JSON.stringify({
           action: "push",
           key: cloudSyncKey,
-          positions,
+          // 라이브 시세를 currentPrice에 실어 보내 서버·크론 폴백값을 최신화(가짜 등락 방지)
+          positions: positionsWithLivePrices(positions, marketQuery.data?.quotes),
           cashByOwner,
           holdingsSortByOwner,
           sellLogByOwner: sellLog,
