@@ -3553,10 +3553,14 @@ export default function Home() {
             }
             const mergedOwnerValues = { ...(base.ownerValues ?? {}), ...extraOwnerValues };
             const mergedBreakdown = { ...(base.breakdownValues ?? {}), ...extraBreakdown };
+            // totalValue는 항상 ownerValues의 합과 일치해야 함.
+            // 보충된 보유자(extraOwnerValues)가 있으면 base.totalValue로는 과소 계상되므로 재계산.
+            const mergedTotalValue = Object.values(mergedOwnerValues).reduce((sum, v) => sum + (Number.isFinite(v) ? v : 0), 0);
             localMap.set(s.date, {
               ...base,
               ownerValues: mergedOwnerValues,
               breakdownValues: Object.keys(mergedBreakdown).length > 0 ? mergedBreakdown : undefined,
+              totalValue: mergedTotalValue,
             });
             continue;
           }
