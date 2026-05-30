@@ -136,13 +136,17 @@ function sanitizeSellLogForOwners(
       const symbol = typeof e.symbol === "string" ? e.symbol.trim() : "";
       const qty = Number(e.qty);
       const realizedKrw = Number(e.realizedKrw);
-      if (!id || !symbol || !Number.isFinite(qty) || !Number.isFinite(realizedKrw)) continue;
+      // qty > 0 강제: 0·음수는 무효 거래로 차단
+      if (!id || !symbol || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(realizedKrw)) continue;
 
       const currency = parseSellLogCurrency(e.currency) ?? "KRW";
       const date = typeof e.date === "string" ? e.date.trim() : "";
       const name = typeof e.name === "string" && e.name.trim() ? e.name.trim() : symbol;
-      const sellPrice = typeof e.sellPrice === "number" && Number.isFinite(e.sellPrice) ? e.sellPrice : 0;
-      const avgPrice = typeof e.avgPrice === "number" && Number.isFinite(e.avgPrice) ? e.avgPrice : 0;
+      // Number() 강제 변환: 클라이언트가 문자열로 전송해도 올바르게 파싱
+      const sellPriceRaw = Number(e.sellPrice);
+      const avgPriceRaw = Number(e.avgPrice);
+      const sellPrice = Number.isFinite(sellPriceRaw) && sellPriceRaw >= 0 ? sellPriceRaw : 0;
+      const avgPrice = Number.isFinite(avgPriceRaw) && avgPriceRaw >= 0 ? avgPriceRaw : 0;
       const fxRate = typeof e.fxRate === "number" && Number.isFinite(e.fxRate) && (e.fxRate as number) > 0 ? e.fxRate : 1;
       const note = typeof e.note === "string" && e.note.trim() ? e.note.trim() : undefined;
       cleaned.push({
@@ -637,26 +641,29 @@ export async function POST(req: NextRequest) {
         .from("portfolio_snapshots")
         .upsert(rest, { onConflict: "sync_key" });
     }
-    const error = withOwnerNames.error
-      ? (
-          await admin
-            .from("portfolio_snapshots")
-            .upsert(
-              {
-                sync_key: key,
-                positions: positionsOut,
-                cash_by_owner: cashOut,
-                holdings_sort_by_owner: holdingsSortOut,
-                target_stock_weight_by_owner: targetWeightsOut,
-                owner_scratchpad_by_owner: scratchPadsOut,
-                rebalance_calculator_by_owner: rebalanceCalculatorOut,
-                alert_thresholds_by_position: alertThresholdsOut,
-                updated_at: updatedAt,
-              },
-              { onConflict: "sync_key" },
-            )
-        ).error
-      : null;
+    // owner_names·sell_log_by_owner 컬럼이 없는 구 스키마 폴백.
+    // 스키마 오류일 때만 재시도 — 네트워크 오류 등 다른 원인엔 그대로 실패 반환.
+    const error =
+      withOwnerNames.error && isLikelyMissingColumnError(withOwnerNames.error.message)
+        ? (
+            await admin
+              .from("portfolio_snapshots")
+              .upsert(
+                {
+                  sync_key: key,
+                  positions: positionsOut,
+                  cash_by_owner: cashOut,
+                  holdings_sort_by_owner: holdingsSortOut,
+                  target_stock_weight_by_owner: targetWeightsOut,
+                  owner_scratchpad_by_owner: scratchPadsOut,
+                  rebalance_calculator_by_owner: rebalanceCalculatorOut,
+                  alert_thresholds_by_position: alertThresholdsOut,
+                  updated_at: updatedAt,
+                },
+                { onConflict: "sync_key" },
+              )
+          ).error
+        : withOwnerNames.error;
 
     let resolvedError = error;
     if (resolvedError && isLikelyMissingColumnError(resolvedError.message)) {
