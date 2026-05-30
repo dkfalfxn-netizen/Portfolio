@@ -16,6 +16,8 @@ type LiveChange = {
 type Props = {
   snapshots: DailySnapshot[];
   liveChangeByDate?: Record<string, LiveChange>;
+  /** 서버 크론이 가장 최근 기록한 시각 (ISO string). 달력 헤더에 기준 시각으로 표시. */
+  cronRecordedAt?: string | null;
 };
 
 type OwnerChange = {
@@ -175,7 +177,26 @@ function aggregateOwnerTotals(rows: OwnerChange[]): OwnerChange[] {
     .sort((a, b) => Math.abs(b.changeKrw) - Math.abs(a.changeKrw));
 }
 
-export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
+/** ISO string → "M/D HH:MM KST" 형식으로 변환 */
+function fmtKstShort(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const parts = new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    return `${get("month")}/${get("day")} ${get("hour")}:${get("minute")} KST`;
+  } catch {
+    return "";
+  }
+}
+
+export function DailyChangeCalendar({ snapshots, liveChangeByDate, cronRecordedAt }: Props) {
   const [cursor, setCursor] = useState(() => {
     // KST 기준 연·월로 초기화 (브라우저 TZ와 무관하게 달력이 KST 월을 표시)
     const kst = ymdKST(new Date()); // "YYYY-MM-DD"
@@ -280,7 +301,7 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
 
   return (
     <div ref={containerRef} className="relative rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-1 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">일일 변동 달력</h3>
           {snapshots.length > 0 && (
@@ -308,6 +329,17 @@ export function DailyChangeCalendar({ snapshots, liveChangeByDate }: Props) {
             다음
           </button>
         </div>
+      </div>
+      {/* 기준 시각 안내 */}
+      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+        <span>📸 기준: 매일 KST 16:00 이후 종가 (한국장 마감 후 서버 자동 기록)</span>
+        {cronRecordedAt ? (
+          <span className="text-slate-400">
+            · 최근 서버 기록 <span className="font-medium text-slate-300">{fmtKstShort(cronRecordedAt)}</span>
+          </span>
+        ) : (
+          <span className="text-slate-500">· 오늘 실시간 칸은 현재가 기준</span>
+        )}
       </div>
 
       {!hasAny ? (

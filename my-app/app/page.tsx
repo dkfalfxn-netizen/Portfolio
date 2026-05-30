@@ -5158,7 +5158,7 @@ export default function Home() {
             />
             </div>
           </section>
-          <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} />
+          <DailyChangeCalendar snapshots={dailySnapshots} liveChangeByDate={dailyLiveChangeByDate} cronRecordedAt={cronDailySnapshotRecordedAt} />
             </>
           )}
 
