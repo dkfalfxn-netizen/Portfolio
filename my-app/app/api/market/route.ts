@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isKrxListedEquityCode, toYahooSymbol } from "@/lib/finance-symbols";
+import { resolveFxWithFallback } from "@/lib/market-prices";
 
 type ChartQuote = {
   price: number | null;
@@ -357,9 +358,12 @@ export async function GET(req: NextRequest) {
     }
 
     const fxQuote = byYahooSymbol.get("KRW=X");
-    const usdKrw = typeof fxQuote?.price === "number" ? fxQuote.price : null;
     const eurFx = byYahooSymbol.get("EURKRW=X");
-    const eurKrw = typeof eurFx?.price === "number" ? eurFx.price : null;
+    // Yahoo 환율 실패 시 frankfurter.app(ECB)으로 폴백
+    const { usdKrw, eurKrw } = await resolveFxWithFallback(
+      typeof fxQuote?.price === "number" ? fxQuote.price : null,
+      typeof eurFx?.price === "number" ? eurFx.price : null,
+    );
 
     const [vix, fearGreed] = await macroPromise;
 

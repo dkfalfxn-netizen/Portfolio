@@ -18,6 +18,43 @@ export type PricesResult = {
   eurKrw: number | null;
 };
 
+/**
+ * 환율 보조 소스: frankfurter.app (ECB 기준환율, 무료·키 불필요).
+ * Yahoo 환율 조회 실패 시 폴백으로 사용. 영업일 1회 갱신이라 일별 스냅샷·표시에 충분.
+ */
+async function fetchFrankfurterRate(from: string, to: string): Promise<number | null> {
+  try {
+    // 정식 엔드포인트(.dev). (.app은 .dev로 301 리다이렉트되므로 직접 호출해 홉 제거)
+    const url = `https://api.frankfurter.dev/v1/latest?base=${from}&symbols=${to}`;
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { rates?: Record<string, number> };
+    const v = data?.rates?.[to];
+    return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Yahoo에서 받은 환율이 null이면 frankfurter.app으로 폴백해 메운다.
+ * 두 소스 모두 실패할 때만 null을 반환(호출부에서 저장 보류 등 처리).
+ */
+export async function resolveFxWithFallback(
+  usdKrwFromYahoo: number | null,
+  eurKrwFromYahoo: number | null,
+): Promise<{ usdKrw: number | null; eurKrw: number | null }> {
+  const [usdKrw, eurKrw] = await Promise.all([
+    usdKrwFromYahoo != null ? Promise.resolve(usdKrwFromYahoo) : fetchFrankfurterRate("USD", "KRW"),
+    eurKrwFromYahoo != null ? Promise.resolve(eurKrwFromYahoo) : fetchFrankfurterRate("EUR", "KRW"),
+  ]);
+  return { usdKrw, eurKrw };
+}
+
 async function fetchYahooPrice(yahooSymbol: string): Promise<PriceQuote> {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1m&range=1d`;
@@ -156,8 +193,11 @@ export async function fetchPrices(inputSymbols: string[]): Promise<PricesResult>
     quotes[sym] = q;
   }
 
-  const usdKrw = byYahoo.get("KRW=X")?.price ?? null;
-  const eurKrw = byYahoo.get("EURKRW=X")?.price ?? null;
+  // Yahoo 환율 실패 시 frankfurter.app(ECB)으로 폴백 — 단일 소스 실패로 인한 가짜 등락 방지
+  const { usdKrw, eurKrw } = await resolveFxWithFallback(
+    byYahoo.get("KRW=X")?.price ?? null,
+    byYahoo.get("EURKRW=X")?.price ?? null,
+  );
 
   return { quotes, usdKrw, eurKrw };
 }
