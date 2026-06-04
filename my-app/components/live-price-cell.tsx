@@ -8,18 +8,29 @@ const DOWN_BG = "bg-[#00bfa5]";
 const UP_TEXT = "text-[#ef5350]";
 const DOWN_TEXT = "text-[#00bfa5]";
 
+type MarketState = "REGULAR" | "PRE" | "POST" | "POSTPOST" | "PREPRE" | "CLOSED" | null;
+
+function marketStateLabel(state: MarketState): string | null {
+  if (state === "PRE" || state === "PREPRE") return "프리장";
+  if (state === "POST" || state === "POSTPOST") return "애프터장";
+  return null;
+}
+
 export function LivePriceCell({
   currency,
   price,
   previousClose,
   krwLine,
+  marketState,
 }: {
   currency: "USD" | "EUR" | "KRW";
   price: number;
   previousClose: number | null;
   /** USD/EUR 종목일 때 원화 환산 한 줄 (선택) */
   krwLine?: string;
+  marketState?: MarketState;
 }) {
+  const sessionLabel = marketStateLabel(marketState ?? null);
   const hasDay = previousClose != null && previousClose > 0;
   const change = hasDay ? price - previousClose! : null;
   const changePct = hasDay && change != null ? (change / previousClose!) * 100 : null;
@@ -40,6 +51,11 @@ export function LivePriceCell({
 
   return (
     <div className="ml-auto flex w-fit min-w-0 flex-col items-end gap-1">
+      {sessionLabel && (
+        <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+          {sessionLabel}
+        </span>
+      )}
       <div
         className={`w-fit min-w-0 rounded-xl px-2 py-1.5 text-center text-[16px] font-semibold leading-none tracking-tight text-white tabular-nums ${pillClass}`}
       >

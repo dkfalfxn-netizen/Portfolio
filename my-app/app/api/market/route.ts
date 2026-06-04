@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { isKrxListedEquityCode, toYahooSymbol } from "@/lib/finance-symbols";
 import { resolveFxWithFallback } from "@/lib/market-prices";
 
+type MarketState = "REGULAR" | "PRE" | "POST" | "POSTPOST" | "PREPRE" | "CLOSED" | null;
+
 type ChartQuote = {
   price: number | null;
   currency: string | null;
   previousClose: number | null;
   sparkline: number[];
+  marketState: MarketState;
 };
 
 function readPreviousClose(meta: unknown): number | null {
@@ -19,22 +22,29 @@ function readPreviousClose(meta: unknown): number | null {
   return null;
 }
 
-/** Yahoo chart meta에서 표시용 현재가(장중·장외·전일 종가 순으로 후보) */
-function readChartHeadlinePrice(meta: unknown): number | null {
+/** Yahoo chart meta에서 marketState에 맞는 현재가 선택 */
+function readChartHeadlinePrice(meta: unknown): { price: number | null; marketState: MarketState } {
   const m = meta as Record<string, unknown> | undefined;
-  if (!m) return null;
-  const keys = [
-    "regularMarketPrice",
-    "postMarketPrice",
-    "preMarketPrice",
-    "chartPreviousClose",
-    "previousClose",
-  ] as const;
-  for (const k of keys) {
+  if (!m) return { price: null, marketState: null };
+
+  const state = typeof m.marketState === "string" ? m.marketState as MarketState : null;
+  const num = (k: string) => {
     const v = m[k];
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+  };
+
+  // 장 상태에 따라 적절한 가격 필드 우선 선택
+  if (state === "PRE" || state === "PREPRE") {
+    const price = num("preMarketPrice") ?? num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
+    return { price, marketState: state };
   }
-  return null;
+  if (state === "POST" || state === "POSTPOST") {
+    const price = num("postMarketPrice") ?? num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
+    return { price, marketState: state };
+  }
+  // REGULAR or CLOSED
+  const price = num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
+  return { price, marketState: state };
 }
 
 function extractSparklinePoints(data: unknown): number[] {
@@ -66,6 +76,7 @@ const emptyQuote = (): ChartQuote => ({
   currency: null,
   previousClose: null,
   sparkline: [],
+  marketState: null,
 });
 
 /**
@@ -103,6 +114,7 @@ async function fetchNaverGoldPrice(): Promise<ChartQuote> {
       currency: "KRW",
       previousClose: rows.length >= 2 ? rows[1] : null,
       sparkline: [],
+      marketState: "REGULAR",
     };
   } catch {
     return emptyQuote();
@@ -132,7 +144,7 @@ async function fetchNaverStockPrice(code: string): Promise<ChartQuote> {
       ? parseFloat((d.compareToPreviousClosePrice as string).replace(/,/g, ""))
       : null;
     const previousClose = change !== null && Number.isFinite(change) ? price - change : null;
-    return { price, currency: "KRW", previousClose, sparkline: [] };
+    return { price, currency: "KRW", previousClose, sparkline: [], marketState: "REGULAR" };
   } catch {
     return emptyQuote();
   }
@@ -157,7 +169,7 @@ async function fetchVix(): Promise<number | null> {
     if (!response.ok) return null;
     const data = await response.json();
     const meta = data?.chart?.result?.[0]?.meta;
-    return readChartHeadlinePrice(meta);
+    return readChartHeadlinePrice(meta).price;
   } catch {
     return null;
   }
@@ -224,7 +236,7 @@ export async function GET(req: NextRequest) {
       if (!response.ok) return null;
       const data = await response.json();
       const meta = data?.chart?.result?.[0]?.meta;
-      return readChartHeadlinePrice(meta);
+      return readChartHeadlinePrice(meta).price;
     } catch {
       return null;
     }
@@ -242,7 +254,7 @@ export async function GET(req: NextRequest) {
       if (!response.ok) return null;
       const data = await response.json();
       const meta = data?.chart?.result?.[0]?.meta;
-      return readChartHeadlinePrice(meta);
+      return readChartHeadlinePrice(meta).price;
     } catch {
       return null;
     }
@@ -296,13 +308,13 @@ export async function GET(req: NextRequest) {
 
           const data = await response.json();
           const meta = data?.chart?.result?.[0]?.meta;
-          const price = readChartHeadlinePrice(meta);
+          const { price, marketState } = readChartHeadlinePrice(meta);
           const currency = typeof meta?.currency === "string" ? meta.currency : null;
           const previousClose = readPreviousClose(meta);
           const sparkline = extractSparklinePoints(data);
           return [
             symbol.toUpperCase(),
-            { price, currency, previousClose, sparkline } satisfies ChartQuote,
+            { price, currency, previousClose, sparkline, marketState } satisfies ChartQuote,
           ] as const;
         }),
       ),
@@ -318,7 +330,7 @@ export async function GET(req: NextRequest) {
 
     const quotes: Record<
       string,
-      { price: number | null; currency: string | null; previousClose: number | null }
+      { price: number | null; currency: string | null; previousClose: number | null; marketState: MarketState }
     > = {};
     const intraday: Record<string, number[]> = {};
 
@@ -333,7 +345,7 @@ export async function GET(req: NextRequest) {
       const yahooQ = byYahooSymbol.get(mapItem.yahoo.toUpperCase());
       if (naverQ?.price) {
         // 네이버에서 정확히 조회된 한국 주식/ETF — 현재가는 네이버, 분봉 sparkline은 Yahoo 사용
-        quotes[mapItem.input] = { price: naverQ.price, currency: "KRW", previousClose: naverQ.previousClose };
+        quotes[mapItem.input] = { price: naverQ.price, currency: "KRW", previousClose: naverQ.previousClose, marketState: "REGULAR" };
         const sl = yahooQ?.sparkline;
         if (sl && sl.length >= 2) intraday[mapItem.input] = sl;
       } else {
@@ -342,6 +354,7 @@ export async function GET(req: NextRequest) {
           price: yahooQ?.price ?? null,
           currency: yahooQ?.currency ?? null,
           previousClose: yahooQ?.previousClose ?? null,
+          marketState: yahooQ?.marketState ?? null,
         };
         const sl = yahooQ?.sparkline;
         if (sl && sl.length >= 2) intraday[mapItem.input] = sl;
@@ -353,6 +366,7 @@ export async function GET(req: NextRequest) {
         price: quote.price,
         currency: quote.currency,
         previousClose: quote.previousClose,
+        marketState: "REGULAR",
       };
       if (quote.sparkline.length >= 2) intraday[symbol] = quote.sparkline;
     }

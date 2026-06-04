@@ -342,10 +342,12 @@ type Position = {
   chartGroup?: string;
 };
 
+type MarketState = "REGULAR" | "PRE" | "POST" | "POSTPOST" | "PREPRE" | "CLOSED" | null;
+
 type MarketResponse = {
   quotes: Record<
     string,
-    { price: number | null; currency: string | null; previousClose: number | null }
+    { price: number | null; currency: string | null; previousClose: number | null; marketState?: MarketState }
   >;
   /** 티커별 당일 분봉 종가 시계열 */
   intraday?: Record<string, number[]>;
@@ -2316,6 +2318,7 @@ export default function Home() {
         pnlUsdPct,
         pnlEurPct,
         pnlKrwEquityPct,
+        marketState: q?.marketState ?? null,
       };
     });
   }, [positions, marketQuery.data, usdKrw, eurKrw]);
@@ -5818,6 +5821,7 @@ export default function Home() {
                               currency={position.currency}
                               price={position.currentPrice}
                               previousClose={position.previousClose}
+                              marketState={position.marketState}
                               krwLine={
                                 position.currency === "USD"
                                   ? `₩${fmtInt(
