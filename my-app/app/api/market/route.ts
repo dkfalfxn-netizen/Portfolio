@@ -22,29 +22,68 @@ function readPreviousClose(meta: unknown): number | null {
   return null;
 }
 
-/** Yahoo chart meta에서 marketState에 맞는 현재가 선택 */
-function readChartHeadlinePrice(meta: unknown): { price: number | null; marketState: MarketState } {
+/**
+ * currentTradingPeriod 타임스탬프로 현재 세션 판별.
+ * Yahoo meta에 marketState 필드가 없어서 직접 계산.
+ */
+function resolveMarketState(meta: unknown): MarketState {
+  const m = meta as Record<string, unknown> | undefined;
+  if (!m) return null;
+  // Yahoo가 여전히 marketState를 내려주면 그대로 사용
+  if (typeof m.marketState === "string") return m.marketState as MarketState;
+
+  const periods = m.currentTradingPeriod as
+    | { pre?: { start: number; end: number }; regular?: { start: number; end: number }; post?: { start: number; end: number } }
+    | undefined;
+  if (!periods) return null;
+
+  const now = Date.now() / 1000;
+  if (periods.pre && now >= periods.pre.start && now < periods.pre.end) return "PRE";
+  if (periods.regular && now >= periods.regular.start && now < periods.regular.end) return "REGULAR";
+  if (periods.post && now >= periods.post.start && now < periods.post.end) return "POST";
+  if (periods.regular && now < periods.regular.start) return "PREPRE";
+  if (periods.post && now >= periods.post.end) return "POSTPOST";
+  return "CLOSED";
+}
+
+/**
+ * includePrePost=true로 받은 chart 데이터에서 candle 배열의 마지막 유효가 추출.
+ * 프리/애프터장 포함 가장 최신 체결가.
+ */
+function extractLastCandlePrice(data: unknown): number | null {
+  const result = (data as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as
+    | { indicators?: { quote?: Array<{ close?: unknown[] }> } }
+    | undefined;
+  const closes = result?.indicators?.quote?.[0]?.close;
+  if (!Array.isArray(closes)) return null;
+  for (let i = closes.length - 1; i >= 0; i--) {
+    const v = closes[i];
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  }
+  return null;
+}
+
+/** Yahoo chart meta + candle 데이터로 표시용 현재가 결정 */
+function readChartHeadlinePrice(
+  meta: unknown,
+  lastCandlePrice: number | null,
+): { price: number | null; marketState: MarketState } {
   const m = meta as Record<string, unknown> | undefined;
   if (!m) return { price: null, marketState: null };
 
-  const state = typeof m.marketState === "string" ? m.marketState as MarketState : null;
+  const state = resolveMarketState(meta);
   const num = (k: string) => {
     const v = m[k];
     return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
   };
+  const regularPrice = num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
 
-  // 장 상태에 따라 적절한 가격 필드 우선 선택
-  if (state === "PRE" || state === "PREPRE") {
-    const price = num("preMarketPrice") ?? num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
+  // 프리/애프터장: candle 마지막 가격(includePrePost=true로 장외 봉 포함) 우선
+  if (state === "PRE" || state === "POST") {
+    const price = lastCandlePrice ?? regularPrice;
     return { price, marketState: state };
   }
-  if (state === "POST" || state === "POSTPOST") {
-    const price = num("postMarketPrice") ?? num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
-    return { price, marketState: state };
-  }
-  // REGULAR or CLOSED
-  const price = num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
-  return { price, marketState: state };
+  return { price: regularPrice, marketState: state };
 }
 
 function extractSparklinePoints(data: unknown): number[] {
@@ -169,7 +208,7 @@ async function fetchVix(): Promise<number | null> {
     if (!response.ok) return null;
     const data = await response.json();
     const meta = data?.chart?.result?.[0]?.meta;
-    return readChartHeadlinePrice(meta).price;
+    return readChartHeadlinePrice(meta, extractLastCandlePrice(data)).price;
   } catch {
     return null;
   }
@@ -236,7 +275,7 @@ export async function GET(req: NextRequest) {
       if (!response.ok) return null;
       const data = await response.json();
       const meta = data?.chart?.result?.[0]?.meta;
-      return readChartHeadlinePrice(meta).price;
+      return readChartHeadlinePrice(meta, extractLastCandlePrice(data)).price;
     } catch {
       return null;
     }
@@ -254,7 +293,7 @@ export async function GET(req: NextRequest) {
       if (!response.ok) return null;
       const data = await response.json();
       const meta = data?.chart?.result?.[0]?.meta;
-      return readChartHeadlinePrice(meta).price;
+      return readChartHeadlinePrice(meta, extractLastCandlePrice(data)).price;
     } catch {
       return null;
     }
@@ -308,7 +347,8 @@ export async function GET(req: NextRequest) {
 
           const data = await response.json();
           const meta = data?.chart?.result?.[0]?.meta;
-          const { price, marketState } = readChartHeadlinePrice(meta);
+          const lastCandle = extractLastCandlePrice(data);
+          const { price, marketState } = readChartHeadlinePrice(meta, lastCandle);
           const currency = typeof meta?.currency === "string" ? meta.currency : null;
           const previousClose = readPreviousClose(meta);
           const sparkline = extractSparklinePoints(data);
