@@ -295,7 +295,7 @@ export async function GET(req: NextRequest) {
         yahooSymbols.map(async (symbol) => {
           const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
             symbol,
-          )}?interval=1m&range=1d`;
+          )}?interval=1m&range=1d&includePrePost=true`;
           const response = await fetch(chartUrl, {
             method: "GET",
             cache: "no-store",
