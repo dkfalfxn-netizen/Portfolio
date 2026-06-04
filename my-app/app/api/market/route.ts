@@ -77,10 +77,15 @@ function readChartHeadlinePrice(
     return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
   };
   const regularPrice = num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
+  const postMarketPrice = num("postMarketPrice");
+  const preMarketPrice = num("preMarketPrice");
 
-  // 프리/애프터장: candle 마지막 가격(includePrePost=true로 장외 봉 포함) 우선
-  if (state === "PRE" || state === "POST") {
-    const price = lastCandlePrice ?? regularPrice;
+  if (state === "PRE") {
+    const price = preMarketPrice ?? lastCandlePrice ?? regularPrice;
+    return { price, marketState: state };
+  }
+  if (state === "POST" || state === "POSTPOST" || state === "CLOSED" || state === "PREPRE") {
+    const price = postMarketPrice ?? lastCandlePrice ?? regularPrice;
     return { price, marketState: state };
   }
   return { price: regularPrice, marketState: state };
