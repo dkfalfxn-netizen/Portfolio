@@ -27,5 +27,5 @@ export async function GET(req: NextRequest) {
     acc[k] = meta?.[k] ?? null;
     return acc;
   }, {});
-  return NextResponse.json({ symbol, picked, fetchedAt: new Date().toISOString() });
+  return NextResponse.json({ symbol, picked, fullMeta: meta, fetchedAt: new Date().toISOString() });
 }
