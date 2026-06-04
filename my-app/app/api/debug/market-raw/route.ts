@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 /** 디버그용: Yahoo Finance raw meta 확인 — 배포 후 /api/debug/market-raw?symbol=AAPL 로 접근 */
 export async function GET(req: NextRequest) {
   const symbol = req.nextUrl.searchParams.get("symbol") ?? "AAPL";
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d&includePrePost=true`;
   const res = await fetch(url, {
     cache: "no-store",
     headers: { "User-Agent": "Mozilla/5.0" },
