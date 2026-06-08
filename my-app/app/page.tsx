@@ -4185,7 +4185,7 @@ export default function Home() {
     setSellLog({});
     setBuyJournal([]);
     setWatchlistRows([]);
-    setWatchlistLoaded(false);
+    setWatchlistLoaded(true); // false로 두면 같은 키로 서버에서 재로딩되므로 true 유지
     setPendingClearConfirm(false);
     setSyncMessage("초기화 완료. '서버에서 불러오기'를 누르면 기존 데이터를 복원할 수 있습니다.");
   }
