@@ -1050,23 +1050,11 @@ function positionsForOwner(
   return seed.map((p) => ({ ...p, owner }));
 }
 
-const DEFAULT_POSITIONS: Position[] = [
-  {
-    symbol: "NVDA",
-    name: "NVIDIA",
-    quantity: 36,
-    avgPrice: 795.5,
-    currentPrice: 902.2,
-    currency: "USD",
-    purchaseUsdKrw: 1350,
-    accountType: "해외주식",
-    accountName: "미국주식-주계좌",
-    owner: "김승주",
-  },
-  ...positionsForOwner(SEED_강희진_보유, "강희진"),
-  ...positionsForOwner(SEED_강희진_보유, "김도율"),
-  ...positionsForOwner(SEED_강희진_보유, "김찬율"),
-];
+// 견본/시드 데이터는 사용하지 않는다. 빈 포트폴리오로 시작해야 초기화·새 키가
+// 깨끗하게 비어 보이며, 옛 견본 데이터(NVDA·SEED 보유)가 되살아나지 않는다.
+const DEFAULT_POSITIONS: Position[] = [];
+void SEED_강희진_보유;
+void positionsForOwner;
 
 type CashByOwner = Record<OwnerName, { usd: number; krw: number }>;
 
