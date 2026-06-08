@@ -3756,6 +3756,8 @@ export default function Home() {
         ) {
           safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
         }
+        // 관심종목도 서버에서 다시 불러오기
+        setWatchlistLoaded(false);
       } else {
         setSyncMessage("서버에 아직 데이터가 없습니다. 먼저 이 기기에서 올리기를 해 보세요.");
       }
