@@ -2917,15 +2917,29 @@ export default function Home() {
     });
   }, [positionsByOwner, usdKrw, eurKrw]);
 
+  // 보유자 표시 순서는 ownerNames 배열을 기준으로 한다(드래그 재정렬 시 ownerNames를 바꿔
+  // 요약 카드·보유종목 그리드가 함께 같은 순서로 정렬되게 함). ownerNames는 로컬·서버에 동기화됨.
   const allocationByOwnerForGrid = useMemo(
-    () => sortPortfolioGridRows(allocationByOwner, DEFAULT_OWNER_NAMES),
-    [allocationByOwner],
+    () => sortPortfolioGridRows(allocationByOwner, ownerNames),
+    [allocationByOwner, ownerNames],
   );
 
   const ownerGroupDailySummaryForGrid = useMemo(
-    () => sortPortfolioGridRows(ownerGroupDailySummary, DEFAULT_OWNER_NAMES),
-    [ownerGroupDailySummary],
+    () => sortPortfolioGridRows(ownerGroupDailySummary, ownerNames),
+    [ownerGroupDailySummary, ownerNames],
   );
+
+  const handleReorderOwners = useCallback((orderedOwnerNames: string[]) => {
+    setOwnerNames((prev) => {
+      const inOrder = orderedOwnerNames.filter((n) => prev.includes(n));
+      const rest = prev.filter((n) => !inOrder.includes(n));
+      const next = [...inOrder, ...rest];
+      // 순서가 동일하면 state 갱신 생략(불필요한 재렌더·동기화 방지)
+      if (next.length === prev.length && next.every((n, i) => n === prev[i])) return prev;
+      return next;
+    });
+    safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+  }, []);
 
   const dailyLiveChangeByDate = useMemo<Record<string, DailyLiveChange>>(() => {
     const date = todayKST();
@@ -5258,6 +5272,7 @@ export default function Home() {
                       sectionPnLPct: pos?.sectionPnLPct ?? 0,
                     };
                   })}
+                  onReorder={handleReorderOwners}
                 />
               </div>
               {/* 트리맵(ResponsiveContainer)은 dashboard 탭이 활성이고 클라이언트 하이드레이션이 완료된 이후에만 마운트

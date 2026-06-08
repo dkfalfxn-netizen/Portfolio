@@ -20,7 +20,7 @@ import {
 } from "@/lib/portfolio-owner-scratchpad";
 import { GripVertical } from "lucide-react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, arrayMove, rectSortingStrategy, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
   loadVisualOrderKeysForOwner,
@@ -832,13 +832,115 @@ function GroupLabelWithTooltip({
   );
 }
 
+function SortableOwnerProfitCard({
+  owner,
+  krwTone,
+  draggable,
+}: {
+  owner: OwnerDailyPortfolioSummary;
+  krwTone: (n: number) => string;
+  draggable: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: owner.ownerName,
+    disabled: !draggable,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { opacity: 0.9, zIndex: 3, position: "relative" as const } : {}),
+  };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="rounded-lg border border-white/[0.07] bg-zinc-950/35 px-2 py-1.5"
+    >
+      {/* 보유자 합계 헤더 */}
+      <div className="mb-1 border-b border-white/[0.06] pb-1">
+        <div className="flex items-center gap-1">
+          {draggable && (
+            <button
+              type="button"
+              className="touch-none -ml-0.5 shrink-0 cursor-grab rounded p-0.5 text-zinc-500 hover:text-zinc-200 active:cursor-grabbing"
+              title="순서 이동 (드래그)"
+              aria-label={`${owner.ownerName} 순서 변경`}
+              {...attributes}
+              {...listeners}
+            >
+              <GripVertical className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <span className="block text-[11px] font-semibold text-zinc-200">{owner.ownerName}</span>
+        </div>
+        <div className={`flex flex-wrap items-baseline gap-x-1 text-[11px] tabular-nums ${krwTone(owner.totalDailyKrw)}`}>
+          <span className="font-bold">
+            {owner.totalDailyKrw > 0 ? "+" : ""}₩{fmtInt(owner.totalDailyKrw)}
+          </span>
+          {owner.totalDailyPct !== null && owner.totalDailyKrw !== 0 && (
+            <span className="font-semibold">
+              ({owner.totalDailyPct > 0 ? "+" : ""}
+              {owner.totalDailyPct.toFixed(1)}%)
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 그룹별 행 */}
+      <div className="space-y-0">
+        {owner.groups.map((g) => (
+          <div
+            key={`${owner.ownerName}-${g.label}`}
+            className="flex items-baseline gap-1 border-t border-white/[0.05] py-[2px] text-[10px] first:border-0"
+          >
+            <GroupLabelWithTooltip label={g.label} holdingsItems={g.holdingsItems} />
+            <span className="flex-1" />
+            <span className={`shrink-0 tabular-nums font-semibold whitespace-nowrap ${krwTone(g.dailyChangeKrw)}`}>
+              {g.dailyChangeKrw !== 0
+                ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}`
+                : "—"}
+            </span>
+            <span
+              className={`w-[3rem] shrink-0 text-right tabular-nums whitespace-nowrap ${
+                g.dailyChangePct !== null && g.dailyChangeKrw !== 0
+                  ? krwTone(g.dailyChangeKrw)
+                  : "text-zinc-600/50"
+              }`}
+            >
+              {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
+                ? `${g.dailyChangePct > 0 ? "+" : ""}${g.dailyChangePct.toFixed(1)}%`
+                : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PortfolioAllOwnersTodayProfitCard({
   owners,
+  onReorder,
 }: {
   owners: OwnerDailyPortfolioSummary[];
+  /** 보유자 카드 드래그 재정렬 시 새 순서(보유자명 배열)를 전달 */
+  onReorder?: (orderedOwnerNames: string[]) => void;
 }) {
   const krwTone = (n: number) =>
     n > 0 ? "text-red-400" : n < 0 ? "text-blue-400" : "text-zinc-500";
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const draggable = !!onReorder && owners.length > 1;
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id || !onReorder) return;
+    const ids = owners.map((o) => o.ownerName);
+    const from = ids.indexOf(String(active.id));
+    const to = ids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    onReorder(arrayMove(ids, from, to));
+  };
 
   return (
     <div
@@ -869,59 +971,20 @@ export function PortfolioAllOwnersTodayProfitCard({
       {owners.length === 0 ? (
         <p className="py-4 text-center text-[11px] text-zinc-500">요약 데이터가 없습니다.</p>
       ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-          {owners.map((owner) => (
-            <div
-              key={owner.ownerName}
-              className="rounded-lg border border-white/[0.07] bg-zinc-950/35 px-2 py-1.5"
-            >
-              {/* 보유자 합계 헤더 */}
-              <div className="mb-1 border-b border-white/[0.06] pb-1">
-                <span className="block text-[11px] font-semibold text-zinc-200">{owner.ownerName}</span>
-                <div className={`flex flex-wrap items-baseline gap-x-1 text-[11px] tabular-nums ${krwTone(owner.totalDailyKrw)}`}>
-                  <span className="font-bold">
-                    {owner.totalDailyKrw > 0 ? "+" : ""}₩{fmtInt(owner.totalDailyKrw)}
-                  </span>
-                  {owner.totalDailyPct !== null && owner.totalDailyKrw !== 0 && (
-                    <span className="font-semibold">
-                      ({owner.totalDailyPct > 0 ? "+" : ""}
-                      {owner.totalDailyPct.toFixed(1)}%)
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* 그룹별 행 */}
-              <div className="space-y-0">
-                {owner.groups.map((g) => (
-                  <div
-                    key={`${owner.ownerName}-${g.label}`}
-                    className="flex items-baseline gap-1 border-t border-white/[0.05] py-[2px] text-[10px] first:border-0"
-                  >
-                    <GroupLabelWithTooltip label={g.label} holdingsItems={g.holdingsItems} />
-                    <span className="flex-1" />
-                    <span className={`shrink-0 tabular-nums font-semibold whitespace-nowrap ${krwTone(g.dailyChangeKrw)}`}>
-                      {g.dailyChangeKrw !== 0
-                        ? `${g.dailyChangeKrw > 0 ? "+" : ""}${fmtInt(g.dailyChangeKrw)}`
-                        : "—"}
-                    </span>
-                    <span
-                      className={`w-[3rem] shrink-0 text-right tabular-nums whitespace-nowrap ${
-                        g.dailyChangePct !== null && g.dailyChangeKrw !== 0
-                          ? krwTone(g.dailyChangeKrw)
-                          : "text-zinc-600/50"
-                      }`}
-                    >
-                      {g.dailyChangePct !== null && g.dailyChangeKrw !== 0
-                        ? `${g.dailyChangePct > 0 ? "+" : ""}${g.dailyChangePct.toFixed(1)}%`
-                        : ""}
-                    </span>
-                  </div>
-                ))}
-              </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={owners.map((o) => o.ownerName)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              {owners.map((owner) => (
+                <SortableOwnerProfitCard
+                  key={owner.ownerName}
+                  owner={owner}
+                  krwTone={krwTone}
+                  draggable={draggable}
+                />
+              ))}
             </div>
-          ))}
-        </div>
+          </SortableContext>
+        </DndContext>
       )}
     </div>
   );
