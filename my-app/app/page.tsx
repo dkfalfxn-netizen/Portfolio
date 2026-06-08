@@ -4110,17 +4110,14 @@ export default function Home() {
     }
     const prevKey = cloudSyncKey.trim();
     const isKeyChange = k !== prevKey && prevKey.length >= 8;
-    const isFirstValidKeySave = prevKey.length < 8 && k.length >= 8;
-    const noLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1";
-    const shouldForcePull = isKeyChange || isFirstValidKeySave || noLocalChanges;
 
     if (isKeyChange) {
-      // 키가 바뀌면 로컬 데이터를 초기화해서 새 키의 서버 데이터를 깨끗하게 받음
-      skipMarkLocalChangedRef.current = 10;
-      skipOwnerLocalChangedRef.current = 5;
-      skipSellLogLocalChangedRef.current = 5;
+      // 키가 바뀌는 경우: React state 비동기 갱신·여러 useEffect 타이밍 경쟁으로
+      // 옛 키 데이터가 남거나 빈 데이터가 새어나가는 문제를 원천 차단하기 위해
+      // 로컬 데이터를 모두 지우고 페이지를 새로 로드한다.
+      // 새로 로드되면 hydration 경로가 새 키로 서버에서 깨끗하게 pull한다(검증된 경로).
       const keysToRemove = [
-        STORAGE_KEY, LEGACY_POSITIONS_STORAGE_KEY, CASH_STORAGE_KEY,
+        LEGACY_POSITIONS_STORAGE_KEY, CASH_STORAGE_KEY,
         HOLDINGS_SORT_STORAGE_KEY, DAILY_SNAPSHOTS_KEY, SELL_LOG_KEY,
         BUY_JOURNAL_KEY, LAST_SYNC_TS_KEY, LAST_SELL_LOG_SYNC_TS_KEY,
         SELL_LOG_DIRTY_KEY, HAS_LOCAL_CHANGES_KEY, SNAPSHOT_PUSHED_DATE_KEY,
@@ -4129,13 +4126,20 @@ export default function Home() {
         OWNER_SCRATCHPAD_STORAGE_KEY,
       ];
       keysToRemove.forEach((key) => window.localStorage.removeItem(key));
-      setPositions([]);
-      setCashByOwner(DEFAULT_CASH_BY_OWNER);
-      setSellLog({});
-      setBuyJournal([]);
-      setWatchlistRows([]);
-      setWatchlistLoaded(false);
-    } else if (shouldForcePull) {
+      // STORAGE_KEY는 제거하면 재로드 시 샘플 데이터(DEFAULT_POSITIONS)가 뜨므로 빈 배열로 덮어씀
+      safeSetItem(STORAGE_KEY, "[]");
+      safeSetItem(SYNC_KEY_STORAGE, k);
+      setSyncMessage("동기화 키를 변경했습니다. 새 키 데이터를 불러오는 중…");
+      // 새 키로 페이지 재로드 → hydration이 서버에서 새 키 데이터를 pull
+      window.location.href = `${window.location.pathname}?key=${encodeURIComponent(k)}`;
+      return;
+    }
+
+    // 같은 키 재저장: 로컬 변경이 없으면 서버에서 pull
+    const isFirstValidKeySave = prevKey.length < 8 && k.length >= 8;
+    const noLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1";
+    const shouldForcePull = isFirstValidKeySave || noLocalChanges;
+    if (shouldForcePull) {
       window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
       window.localStorage.removeItem(LAST_SYNC_TS_KEY);
     }
