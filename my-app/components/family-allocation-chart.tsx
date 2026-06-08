@@ -401,7 +401,7 @@ function NeonTreemapNode(props: {
   index?: number;
   name?: string;
   value?: number;
-  payload?: { ticker?: string; weight?: number; value?: number; changePct?: number | null };
+  payload?: { ticker?: string; displayName?: string; weight?: number; value?: number; changePct?: number | null };
   root?: { value?: number };
 }) {
   const x = props.x ?? 0;
@@ -412,6 +412,7 @@ function NeonTreemapNode(props: {
   const fallbackName = props.name ?? "";
   const parsedTicker = fallbackName.startsWith("stk|") ? (fallbackName.split("|")[1] ?? fallbackName) : fallbackName;
   const ticker = props.payload?.ticker ?? parsedTicker;
+  const nodeLabel = rebalanceRowLabel(ticker, props.payload?.displayName ?? "");
   const nodeValue = props.payload?.value ?? props.value ?? 0;
   const rootValue = props.root?.value ?? 0;
   const weight = props.payload?.weight ?? (rootValue > 0 ? (nodeValue / rootValue) * 100 : 0);
@@ -474,7 +475,7 @@ function NeonTreemapNode(props: {
       />
       {width > 40 && height > 22 && (
         <text x={x + 5} y={y + 13} fill="white" fontSize={11} fontWeight={700}>
-          {ticker}
+          {nodeLabel}
         </text>
       )}
       {width > 42 && height > 22 && (
