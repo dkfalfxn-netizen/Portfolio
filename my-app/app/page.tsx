@@ -33,12 +33,14 @@ import {
 } from "@/lib/format-money";
 import {
   HAS_LOCAL_CHANGES_KEY,
+  TARGET_WEIGHT_STORAGE_KEY,
+  CALCULATOR_TARGET_STORAGE_KEY,
   buildRebalanceCalculatorByOwnerFromLocal,
   loadAllTargetStockWeights,
   mergeAndPersistRebalanceCalculatorFromServer,
   mergeAndPersistTargetStockWeightsFromServer,
 } from "@/lib/portfolio-target-weights";
-import { mergeAndPersistOwnerScratchpadsFromServer, loadAllOwnerScratchpads } from "@/lib/portfolio-owner-scratchpad";
+import { OWNER_SCRATCHPAD_STORAGE_KEY, mergeAndPersistOwnerScratchpadsFromServer, loadAllOwnerScratchpads } from "@/lib/portfolio-owner-scratchpad";
 import {
   ALERT_THRESHOLDS_STORAGE_KEY,
   evaluateAlertRule,
@@ -1540,6 +1542,7 @@ export default function Home() {
   const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
   const [pendingSaveConfirm, setPendingSaveConfirm] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<{ type: "edit" | "delete"; rowIndex: number; position: Position } | null>(null);
+  const [pendingClearConfirm, setPendingClearConfirm] = useState(false);
   const [editSymbol, setEditSymbol] = useState("");
   const [editName, setEditName] = useState("");
   const [editChartGroup, setEditChartGroup] = useState("");
@@ -4121,6 +4124,38 @@ export default function Home() {
       ownerNames,
       isKeyChange || isFirstValidKeySave,
     );
+  }
+
+  function handleClearLocalData() {
+    // 서버(Supabase) 데이터는 건드리지 않음 — 동기화 키 재입력 시 복원 가능
+    const keysToRemove = [
+      STORAGE_KEY,
+      LEGACY_POSITIONS_STORAGE_KEY,
+      CASH_STORAGE_KEY,
+      HOLDINGS_SORT_STORAGE_KEY,
+      DAILY_SNAPSHOTS_KEY,
+      SELL_LOG_KEY,
+      BUY_JOURNAL_KEY,
+      LAST_SYNC_TS_KEY,
+      LAST_SELL_LOG_SYNC_TS_KEY,
+      SELL_LOG_DIRTY_KEY,
+      HAS_LOCAL_CHANGES_KEY,
+      SNAPSHOT_PUSHED_DATE_KEY,
+      SNAPSHOT_PUSHED_TOTAL_KEY,
+      ALERT_THRESHOLDS_STORAGE_KEY,
+      TARGET_WEIGHT_STORAGE_KEY,
+      CALCULATOR_TARGET_STORAGE_KEY,
+      OWNER_SCRATCHPAD_STORAGE_KEY,
+    ];
+    keysToRemove.forEach((k) => window.localStorage.removeItem(k));
+    // React state 초기화
+    setPositions([]);
+    setCashByOwner(DEFAULT_CASH_BY_OWNER);
+    setSellLog({});
+    setBuyJournal([]);
+    setWatchlistRows([]);
+    setPendingClearConfirm(false);
+    setSyncMessage("로컬 데이터를 초기화했습니다. 동기화 키를 입력하면 서버에서 복원할 수 있습니다.");
   }
 
   useEffect(() => {
@@ -9040,6 +9075,39 @@ export default function Home() {
                   />
                   변경 시 자동으로 서버에 저장 (2초 후)
                 </label>
+              </div>
+              <div className="border-t pt-3">
+                <p className="mb-2 text-xs text-muted-foreground">
+                  보유자 목록은 유지하고, 보유 종목·현금·관심 종목·목표 비율 등 이 기기의 로컬 데이터만 삭제합니다.{" "}
+                  <strong className="text-foreground">서버 데이터는 보존</strong>되므로 동기화 키를 다시 입력하면 복원할 수 있습니다.
+                </p>
+                {pendingClearConfirm ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-destructive font-medium">정말 초기화하시겠습니까?</span>
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground transition-all duration-100 hover:bg-destructive/90 active:scale-95"
+                      onClick={handleClearLocalData}
+                    >
+                      확인 (초기화)
+                    </button>
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95"
+                      onClick={() => setPendingClearConfirm(false)}
+                    >
+                      취소
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-md border border-destructive/50 px-3 py-1.5 text-sm text-destructive transition-all duration-100 hover:bg-destructive/10 active:scale-95"
+                    onClick={() => setPendingClearConfirm(true)}
+                  >
+                    로컬 데이터 초기화
+                  </button>
+                )}
               </div>
               <p className="text-xs text-muted-foreground">
                 「백업」은 서버에 올라간 잔고를 백업 테이블에 한 줄씩 추가합니다(최대 1년, 500건).
