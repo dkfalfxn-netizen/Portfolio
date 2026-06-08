@@ -95,7 +95,8 @@ function mergeSavedTargetGroupsWithoutHoldings(
     const sym = row.symbol?.trim() || tickerKey;
     extra.push({
       groupKey: tickerKey,
-      displayName: tickerKey,
+      // 종목명을 표시(한국 주식 등 코드만 보이지 않게). 긴 이름은 라벨에서 ...으로 잘림.
+      displayName: name,
       valueKrw: 0,
       currentPct: 0,
       repSymbol: sym,
