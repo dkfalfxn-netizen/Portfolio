@@ -36,6 +36,31 @@ export type ParsedBrokerTrade = ParsedTrade & {
   detectedOwner: string | null;
 };
 
+/** 종목명→티커 매칭에 쓰는 알려진 종목 목록(관심종목·보유종목) */
+export type KnownSecurity = { symbol: string; name: string };
+
+/** 매칭용 정규화: 공백·괄호·특수문자 제거, 소문자 */
+function normName(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, "").replace(/[()[\]·.,'"-]/g, "");
+}
+
+/** 종목명으로 알려진 종목에서 티커를 찾는다(정확·포함 양방향) */
+function lookupSymbolByName(name: string, known: KnownSecurity[]): string {
+  const target = normName(name);
+  if (!target) return "";
+  // 1) 이름 정규화 정확 일치
+  const exact = known.find((k) => normName(k.name) === target);
+  if (exact) return exact.symbol;
+  // 2) 한쪽이 다른 쪽을 포함(긴 이름·축약 대비). 가장 길게 겹치는 것 우선
+  const candidates = known
+    .filter((k) => {
+      const kn = normName(k.name);
+      return kn.length >= 2 && (kn.includes(target) || target.includes(kn));
+    })
+    .sort((a, b) => normName(b.name).length - normName(a.name).length);
+  return candidates[0]?.symbol ?? "";
+}
+
 function toNum(s: string | undefined | null): number {
   if (!s) return 0;
   const n = Number(s.replace(/[,\s원]/g, ""));
@@ -92,7 +117,7 @@ function parseDate(block: string): string {
 }
 
 /** 한 메시지 블록을 거래로 파싱. 종목/수량을 못 찾거나 체결수량 0이면 null */
-function parseBlock(block: string, ownerNames: string[]): ParsedBrokerTrade | null {
+function parseBlock(block: string, ownerNames: string[], known: KnownSecurity[]): ParsedBrokerTrade | null {
   // 종목명: "종목명 : ..." 또는 "■ 종목 : ..."
   const nameMatch = block.match(/(?:종목명|종목)\s*[:：]\s*(.+)/);
   if (!nameMatch) return null;
@@ -107,6 +132,11 @@ function parseBlock(block: string, ownerNames: string[]): ParsedBrokerTrade | nu
   }
   const name = rawName;
   if (!name) return null;
+
+  // 괄호 코드가 없으면 관심종목·보유종목에서 종목명으로 티커를 찾는다
+  if (!symbol) {
+    symbol = lookupSymbolByName(name, known);
+  }
 
   // 매매구분/주문구분: 매수/매도/현금매수/현금매도
   const typeMatch = block.match(/(?:매매구분|주문구분)\s*[:：]\s*(\S+)/);
@@ -149,7 +179,11 @@ function parseBlock(block: string, ownerNames: string[]): ParsedBrokerTrade | nu
 }
 
 /** 여러 증권사 알림 문자를 한꺼번에 붙여넣어도 블록별로 파싱한다. */
-export function parseBrokerText(text: string, ownerNames: string[]): ParsedBrokerTrade[] {
+export function parseBrokerText(
+  text: string,
+  ownerNames: string[],
+  known: KnownSecurity[] = [],
+): ParsedBrokerTrade[] {
   if (!text.trim()) return [];
   // "[XXX증권]" 같은 대괄호 헤더가 나오는 지점에서 블록을 나눈다.
   let blocks: string[];
@@ -162,7 +196,7 @@ export function parseBrokerText(text: string, ownerNames: string[]): ParsedBroke
   const out: ParsedBrokerTrade[] = [];
   for (const b of blocks) {
     if (!b.trim()) continue;
-    const t = parseBlock(b, ownerNames);
+    const t = parseBlock(b, ownerNames, known);
     if (t) out.push(t);
   }
   return out;

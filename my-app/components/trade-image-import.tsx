@@ -17,7 +17,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { ParsedTrade, ParsedTradeCurrency } from "@/app/api/parse-trade-image/route";
-import { parseBrokerText } from "@/lib/parse-broker-text";
+import { parseBrokerText, type KnownSecurity } from "@/lib/parse-broker-text";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
 
@@ -45,6 +45,8 @@ export type ConfirmedSellTrade = {
 
 type Props = {
   ownerNames: string[];
+  /** 종목명→티커 매칭에 쓸 알려진 종목(관심종목·보유종목) */
+  knownSecurities?: KnownSecurity[];
   onBuyConfirm: (trades: ConfirmedBuyTrade[]) => void;
   onSellConfirm: (trades: ConfirmedSellTrade[]) => void;
   onClose: () => void;
@@ -58,7 +60,7 @@ function fmtNum(n: number, digits = 0) {
 
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
 
-export default function TradeImageImport({ ownerNames, onBuyConfirm, onSellConfirm, onClose }: Props) {
+export default function TradeImageImport({ ownerNames, knownSecurities = [], onBuyConfirm, onSellConfirm, onClose }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -82,7 +84,7 @@ export default function TradeImageImport({ ownerNames, onBuyConfirm, onSellConfi
     setError(null);
     setSaved(false);
     setPreviewUrl(null);
-    const parsed = parseBrokerText(brokerText, ownerNames);
+    const parsed = parseBrokerText(brokerText, ownerNames, knownSecurities);
     if (parsed.length === 0) {
       setTrades([]);
       setSelectedOwners({});

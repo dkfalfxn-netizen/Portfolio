@@ -862,13 +862,13 @@ function SortableOwnerProfitCard({
           {draggable && (
             <button
               type="button"
-              className="touch-none -ml-0.5 shrink-0 cursor-grab rounded p-0.5 text-zinc-500 hover:text-zinc-200 active:cursor-grabbing"
-              title="순서 이동 (드래그)"
+              className="touch-none -ml-1 shrink-0 cursor-grab rounded bg-white/[0.06] p-0.5 text-zinc-300 hover:bg-white/15 hover:text-white active:cursor-grabbing"
+              title="여기를 잡고 드래그해서 순서 변경"
               aria-label={`${owner.ownerName} 순서 변경`}
               {...attributes}
               {...listeners}
             >
-              <GripVertical className="h-3.5 w-3.5" />
+              <GripVertical className="h-4 w-4" />
             </button>
           )}
           <span className="block text-[11px] font-semibold text-zinc-200">{owner.ownerName}</span>

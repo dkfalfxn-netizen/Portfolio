@@ -9324,6 +9324,10 @@ export default function Home() {
       {showTradeImageImport && (
         <TradeImageImport
           ownerNames={ownerNames}
+          knownSecurities={[
+            ...watchlistRows.map((w) => ({ symbol: w.symbol, name: w.name })),
+            ...positions.map((p) => ({ symbol: p.symbol, name: p.name })),
+          ].filter((s) => s.symbol && s.name)}
           onBuyConfirm={handleImageBuyConfirm}
           onSellConfirm={handleImageSellConfirm}
           onClose={() => setShowTradeImageImport(false)}
