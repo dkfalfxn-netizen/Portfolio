@@ -62,6 +62,19 @@ function mergeSavedTargetGroupsWithoutHoldings(
     watchlistRows: ctx.watchlistRows,
     watchlistOwnerAllToken: ctx.watchlistOwnerAllToken,
   });
+  // 관심종목 티커키(대문자) → {원본키, 이름, 심볼} 맵 — 저장-목표/관심종목 stub 모두 종목명을 쓰도록 공유
+  const watchlistInfoByKey = new Map<string, { key: string; name: string; symbol: string }>();
+  for (const row of ctx.watchlistRows) {
+    if (!watchlistRowAppliesToOwner(row, ownerName, ctx.watchlistOwnerAllToken)) continue;
+    const tickerKey = watchlistSliceTickerKey(row).trim();
+    if (!tickerKey) continue;
+    const sym = row.symbol?.trim() || tickerKey;
+    const nm = (typeof row.name === "string" && row.name.trim()) ? row.name.trim() : tickerKey;
+    if (!watchlistInfoByKey.has(tickerKey.toUpperCase())) {
+      watchlistInfoByKey.set(tickerKey.toUpperCase(), { key: tickerKey, name: nm, symbol: sym });
+    }
+  }
+
   const seenUpper = new Set(baseGroups.map((g) => g.groupKey.trim().toUpperCase()));
   const extra: GroupAllocation[] = [];
   for (const [key, target] of Object.entries(saved)) {
@@ -72,38 +85,36 @@ function mergeSavedTargetGroupsWithoutHoldings(
     if (!k || !allowedStub.has(ku)) continue;
     if (seenUpper.has(ku)) continue;
     seenUpper.add(ku);
+    const wl = watchlistInfoByKey.get(ku);
+    const name = wl?.name ?? k;
+    const sym = wl?.symbol ?? k;
     extra.push({
       groupKey: k,
-      displayName: k,
-      valueKrw: 0,
-      currentPct: 0,
-      repSymbol: k,
-      repName: k,
-      repPrice: 0,
-      members: [],
-    });
-  }
-  // 관심종목은 목표 비중이 없어도 계산기에 stub 그룹으로 띄운다.
-  //  (안 띄우면 목표 비중을 입력할 수 없어 영영 못 나타나는 악순환이 생김)
-  for (const row of ctx.watchlistRows) {
-    if (!watchlistRowAppliesToOwner(row, ownerName, ctx.watchlistOwnerAllToken)) continue;
-    const tickerKey = watchlistSliceTickerKey(row).trim();
-    const ku = tickerKey.toUpperCase();
-    if (!tickerKey || seenUpper.has(ku)) continue;
-    seenUpper.add(ku);
-    const name = (typeof row.name === "string" && row.name.trim()) ? row.name.trim() : tickerKey;
-    const sym = row.symbol?.trim() || tickerKey;
-    extra.push({
-      groupKey: tickerKey,
-      // 종목명을 표시(한국 주식 등 코드만 보이지 않게). 긴 이름은 라벨에서 ...으로 잘림.
+      // 관심종목이면 종목명 표시(코드 대신). 긴 이름은 라벨에서 ...으로 잘림.
       displayName: name,
       valueKrw: 0,
       currentPct: 0,
       repSymbol: sym,
       repName: name,
       repPrice: 0,
-      // 종목 행(목표 입력란)이 보이도록 자기 자신을 멤버로 넣는다
-      members: [{ symbol: sym, name, valueKrw: 0, priceKrw: 0 }],
+      members: wl ? [{ symbol: sym, name, valueKrw: 0, priceKrw: 0 }] : [],
+      isWatchlistStub: !!wl,
+    });
+  }
+  // 관심종목은 목표 비중이 없어도 계산기에 stub 그룹으로 띄운다.
+  //  (안 띄우면 목표 비중을 입력할 수 없어 영영 못 나타나는 악순환이 생김)
+  for (const [ku, wl] of watchlistInfoByKey) {
+    if (seenUpper.has(ku)) continue;
+    seenUpper.add(ku);
+    extra.push({
+      groupKey: wl.key, // 원본 티커키 유지(목표 저장소 키와 일치)
+      displayName: wl.name,
+      valueKrw: 0,
+      currentPct: 0,
+      repSymbol: wl.symbol,
+      repName: wl.name,
+      repPrice: 0,
+      members: [{ symbol: wl.symbol, name: wl.name, valueKrw: 0, priceKrw: 0 }],
       isWatchlistStub: true,
     });
   }
