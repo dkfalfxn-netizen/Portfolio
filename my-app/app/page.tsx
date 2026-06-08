@@ -3334,7 +3334,13 @@ export default function Home() {
           );
         }
       } else {
-        // ─ 서버에 데이터 없음 → 이 기기 내용을 처음 올림
+        // ─ 서버에 데이터 없음
+        if (forcePull) {
+          // 키 변경·초기화 직후: 빈 state를 서버에 올리지 않음. 새 키로 깨끗하게 시작.
+          setSyncMessage("새 동기화 키입니다. 데이터를 입력하면 자동으로 서버에 저장됩니다.");
+          return;
+        }
+        // ─ 최초 등록: 이 기기 내용을 처음 올림
         const r2 = await fetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
