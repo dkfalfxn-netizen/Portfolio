@@ -149,6 +149,16 @@ function isCashRebalanceTicker(ticker: string): boolean {
   return t === "현금" || t === "USD 현금" || t === "KRW 현금";
 }
 
+/** 비중 목록 라벨: 한국 종목(코드에 숫자 포함, 예 381180·A381180·0173Y0)은 종목명만,
+ *  미국/해외 종목(티커가 영문, 예 SOXX·MU)은 티커만 표시. */
+function rebalanceRowLabel(ticker: string, displayName: string): string {
+  const t = (ticker ?? "").trim();
+  const name = (displayName ?? "").trim();
+  const isKorean = /\d/.test(t); // 한국 종목코드는 숫자를 포함
+  if (isKorean) return name || t;
+  return t || name;
+}
+
 /** 현물 비중(%) 내림차순 — USD/KRW 현금 행은 제외 */
 function nonCashEntriesSortedByWeight(
   allEntries: AllocationSlice["allEntries"],
@@ -657,9 +667,7 @@ function TargetWeightSortableBarRow({
           className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-tight text-zinc-200"
           title={slice.displayName || slice.ticker}
         >
-          {slice.displayName && slice.displayName !== slice.ticker
-            ? `${slice.ticker} (${slice.displayName})`
-            : slice.ticker}
+          {rebalanceRowLabel(slice.ticker, slice.displayName)}
         </span>
         <div className="flex shrink-0 flex-col items-end gap-0">
           <div className="flex items-center gap-0.5">
