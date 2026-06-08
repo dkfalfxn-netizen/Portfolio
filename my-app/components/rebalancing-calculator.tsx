@@ -39,6 +39,8 @@ import {
   allocationTickerMatches,
   allowedCalculatorStubTickerKeysUpper,
   mergeWatchlistSymbolsIntoCalculatorGroups,
+  watchlistRowAppliesToOwner,
+  watchlistSliceTickerKey,
   type WatchlistRowForRebalance,
 } from "@/lib/rebalance-watchlist-groups";
 import { pushTargetWeightsAndScratchpadsToServer } from "@/lib/portfolio-owner-scratchpad";
@@ -77,6 +79,26 @@ function mergeSavedTargetGroupsWithoutHoldings(
       currentPct: 0,
       repSymbol: k,
       repName: k,
+      repPrice: 0,
+      members: [],
+    });
+  }
+  // 관심종목은 목표 비중이 없어도 계산기에 stub 그룹으로 띄운다.
+  //  (안 띄우면 목표 비중을 입력할 수 없어 영영 못 나타나는 악순환이 생김)
+  for (const row of ctx.watchlistRows) {
+    if (!watchlistRowAppliesToOwner(row, ownerName, ctx.watchlistOwnerAllToken)) continue;
+    const tickerKey = watchlistSliceTickerKey(row).trim();
+    const ku = tickerKey.toUpperCase();
+    if (!tickerKey || seenUpper.has(ku)) continue;
+    seenUpper.add(ku);
+    const name = (typeof row.name === "string" && row.name.trim()) ? row.name.trim() : tickerKey;
+    extra.push({
+      groupKey: tickerKey,
+      displayName: tickerKey,
+      valueKrw: 0,
+      currentPct: 0,
+      repSymbol: row.symbol?.trim() || tickerKey,
+      repName: name,
       repPrice: 0,
       members: [],
     });
