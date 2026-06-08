@@ -4102,15 +4102,36 @@ export default function Home() {
     }
     const prevKey = cloudSyncKey.trim();
     const isKeyChange = k !== prevKey && prevKey.length >= 8;
-    /** 이전에 유효 키가 없었던 상태(저장소 삭제 직후 등)에서 첫 저장: 기본 샘플 state가 로컬 변경으로 찍혀 push가 나가 서버를 덮는 것을 막기 위해 항상 pull */
     const isFirstValidKeySave = prevKey.length < 8 && k.length >= 8;
-    // 같은 키여도 로컬 변경 기록이 없으면(초기화 직후 등) 서버에서 pull
     const noLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1";
     const shouldForcePull = isKeyChange || isFirstValidKeySave || noLocalChanges;
-    if (shouldForcePull) {
+
+    if (isKeyChange) {
+      // 키가 바뀌면 로컬 데이터를 초기화해서 새 키의 서버 데이터를 깨끗하게 받음
+      skipMarkLocalChangedRef.current = 10;
+      skipOwnerLocalChangedRef.current = 5;
+      skipSellLogLocalChangedRef.current = 5;
+      const keysToRemove = [
+        STORAGE_KEY, LEGACY_POSITIONS_STORAGE_KEY, CASH_STORAGE_KEY,
+        HOLDINGS_SORT_STORAGE_KEY, DAILY_SNAPSHOTS_KEY, SELL_LOG_KEY,
+        BUY_JOURNAL_KEY, LAST_SYNC_TS_KEY, LAST_SELL_LOG_SYNC_TS_KEY,
+        SELL_LOG_DIRTY_KEY, HAS_LOCAL_CHANGES_KEY, SNAPSHOT_PUSHED_DATE_KEY,
+        SNAPSHOT_PUSHED_TOTAL_KEY, ALERT_THRESHOLDS_STORAGE_KEY,
+        TARGET_WEIGHT_STORAGE_KEY, CALCULATOR_TARGET_STORAGE_KEY,
+        OWNER_SCRATCHPAD_STORAGE_KEY,
+      ];
+      keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+      setPositions([]);
+      setCashByOwner(DEFAULT_CASH_BY_OWNER);
+      setSellLog({});
+      setBuyJournal([]);
+      setWatchlistRows([]);
+      setWatchlistLoaded(false);
+    } else if (shouldForcePull) {
       window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
       window.localStorage.removeItem(LAST_SYNC_TS_KEY);
     }
+
     safeSetItem(SYNC_KEY_STORAGE, k);
     setCloudSyncKey(k);
     setSyncMessage("키를 저장했습니다. 서버와 맞추는 중…");
