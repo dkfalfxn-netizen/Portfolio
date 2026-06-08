@@ -4104,11 +4104,10 @@ export default function Home() {
     const isKeyChange = k !== prevKey && prevKey.length >= 8;
     /** 이전에 유효 키가 없었던 상태(저장소 삭제 직후 등)에서 첫 저장: 기본 샘플 state가 로컬 변경으로 찍혀 push가 나가 서버를 덮는 것을 막기 위해 항상 pull */
     const isFirstValidKeySave = prevKey.length < 8 && k.length >= 8;
-    if (isKeyChange) {
-      // 키가 바뀌는 경우: 로컬 변경 플래그·타임스탬프를 초기화해 새 키의 서버 데이터를 항상 pull
-      window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
-      window.localStorage.removeItem(LAST_SYNC_TS_KEY);
-    } else if (isFirstValidKeySave) {
+    // 같은 키여도 로컬 변경 기록이 없으면(초기화 직후 등) 서버에서 pull
+    const noLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1";
+    const shouldForcePull = isKeyChange || isFirstValidKeySave || noLocalChanges;
+    if (shouldForcePull) {
       window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
       window.localStorage.removeItem(LAST_SYNC_TS_KEY);
     }
@@ -4122,7 +4121,7 @@ export default function Home() {
       holdingsSortByOwner,
       sellLog,
       ownerNames,
-      isKeyChange || isFirstValidKeySave,
+      shouldForcePull,
     );
   }
 
@@ -4193,8 +4192,9 @@ export default function Home() {
     setSellLog({});
     setBuyJournal([]);
     setWatchlistRows([]);
+    setWatchlistLoaded(false);
     setPendingClearConfirm(false);
-    setSyncMessage("서버에 저장 완료 후 로컬을 초기화했습니다. '서버에서 불러오기'로 언제든 복원할 수 있습니다.");
+    setSyncMessage("초기화 완료. '서버에서 불러오기'를 누르면 기존 데이터를 복원할 수 있습니다.");
   }
 
   useEffect(() => {
