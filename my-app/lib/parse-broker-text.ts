@@ -14,6 +14,14 @@
 
 import type { ParsedTrade, ParsedTradeCurrency } from "@/app/api/parse-trade-image/route";
 
+/** 계좌번호로 보유자를 구분한다(이름이 마스킹돼 같아 보이는 경우 등). 최우선 적용.
+ *  test는 "계좌번호" 줄에서 뽑은 번호 문자열에 대해 검사한다.
+ *  예: 메리츠 3066**27-01 → 김도율, 3066**62-01 → 김찬율 */
+const ACCOUNT_RULES: { test: RegExp; owner: string }[] = [
+  { test: /27-?01\b/, owner: "김도율" },
+  { test: /62-?01\b/, owner: "김찬율" },
+];
+
 /** (우선순위 순) 텍스트에 이 정규식이 맞으면 해당 토큰의 보유자로 매핑한다.
  *  하나증권은 IRP/DC 둘 다 쓰므로 계좌 종류 키워드를 증권사보다 먼저 본다. */
 const OWNER_RULES: { test: RegExp; token: string }[] = [
@@ -47,6 +55,18 @@ function resolveOwner(token: string, ownerNames: string[]): string | null {
 }
 
 function detectOwner(block: string, ownerNames: string[]): string | null {
+  // 1) 계좌번호 우선 — 이름이 마스킹돼 같아 보여도 계좌번호로 구분
+  const acctMatch = block.match(/계좌번호\s*[:：]\s*([A-Za-z0-9*\-]+)/);
+  const acctNo = acctMatch?.[1] ?? "";
+  if (acctNo) {
+    for (const rule of ACCOUNT_RULES) {
+      if (rule.test.test(acctNo)) {
+        const owner = resolveOwner(rule.owner, ownerNames);
+        if (owner) return owner;
+      }
+    }
+  }
+  // 2) 증권사·계좌 종류 키워드
   for (const rule of OWNER_RULES) {
     if (rule.test.test(block)) {
       const owner = resolveOwner(rule.token, ownerNames);
