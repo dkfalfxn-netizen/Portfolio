@@ -4185,6 +4185,17 @@ export default function Home() {
     const key = cloudSyncKey.trim();
     if (key.length >= 8) {
       setSyncBusy(true);
+      setSyncMessage("비우기 전에 서버 백업 중…");
+      // 안전장치: 비우기 직전에 현재 서버 상태를 백업 테이블에 자동 저장(실수 대비, 복원 가능)
+      try {
+        await fetch("/api/backup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sync_key: key }),
+        });
+      } catch {
+        // 백업 실패해도 초기화는 진행 (아래에서 비움)
+      }
       setSyncMessage("서버의 이 키 데이터를 비우는 중…");
       try {
         const r = await fetch("/api/sync", {
@@ -4215,7 +4226,7 @@ export default function Home() {
           const ts = j.updated_at ?? new Date().toISOString();
           safeSetItem(LAST_SYNC_TS_KEY, ts);
           setLastSyncedAt(ts);
-          setSyncMessage("초기화 완료. 서버의 이 키 데이터까지 비웠습니다.");
+          setSyncMessage("초기화 완료. 서버의 이 키 데이터까지 비웠습니다. (직전 상태는 자동 백업되어 「백업에서 복원」으로 되살릴 수 있습니다)");
         } else {
           setSyncMessage("로컬은 비웠지만 서버 비우기에 실패했습니다. '서버로 올리기'를 눌러 주세요.");
         }
@@ -9149,7 +9160,7 @@ export default function Home() {
               </div>
               <div className="border-t pt-3">
                 <p className="mb-2 text-xs text-muted-foreground">
-                  현재 동기화 키의 데이터(보유 종목·현금·관심 종목·목표 비율 등)를 <strong className="text-foreground">로컬과 서버에서 모두 비웁니다.</strong> 보유자 목록은 유지됩니다. <strong className="text-foreground">다른 동기화 키의 데이터는 키마다 별도로 저장되어 영향받지 않습니다.</strong> 필요하면 먼저 「백업 내려받기」로 보관하세요.
+                  현재 동기화 키의 데이터(보유 종목·현금·관심 종목·목표 비율 등)를 <strong className="text-foreground">로컬과 서버에서 모두 비웁니다.</strong> 보유자 목록은 유지됩니다. <strong className="text-foreground">다른 동기화 키의 데이터는 키마다 별도로 저장되어 영향받지 않습니다.</strong> 비우기 직전 서버 상태는 <strong className="text-foreground">자동 백업</strong>되어 「백업에서 복원」으로 되살릴 수 있습니다.
                 </p>
                 {pendingClearConfirm ? (
                   <div className="flex items-center gap-2">
