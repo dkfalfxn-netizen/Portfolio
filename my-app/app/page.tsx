@@ -4187,6 +4187,10 @@ export default function Home() {
     ];
     keysToRemove.forEach((k) => window.localStorage.removeItem(k));
     // React state 초기화
+    // state 변경이 자동 push를 트리거하지 않도록 skip 카운터 설정
+    skipMarkLocalChangedRef.current = 10;
+    skipOwnerLocalChangedRef.current = 5;
+    skipSellLogLocalChangedRef.current = 5;
     setPositions([]);
     setCashByOwner(DEFAULT_CASH_BY_OWNER);
     setSellLog({});
