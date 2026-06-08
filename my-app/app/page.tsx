@@ -4146,9 +4146,7 @@ export default function Home() {
     );
   }
 
-  function handleClearLocalData() {
-    // 로컬만 삭제 — 서버(Supabase) 데이터는 건드리지 않음
-    // push를 먼저 하면 오히려 빈 state가 서버를 덮어쓸 위험이 있으므로 제거
+  async function handleClearLocalData() {
     const keysToRemove = [
       STORAGE_KEY,
       LEGACY_POSITIONS_STORAGE_KEY,
@@ -4169,8 +4167,7 @@ export default function Home() {
       OWNER_SCRATCHPAD_STORAGE_KEY,
     ];
     keysToRemove.forEach((k) => window.localStorage.removeItem(k));
-    // React state 초기화
-    // state 변경이 자동 push를 트리거하지 않도록 skip 카운터 설정
+    // 자동 push 트리거 방지
     skipMarkLocalChangedRef.current = 10;
     skipOwnerLocalChangedRef.current = 5;
     skipSellLogLocalChangedRef.current = 5;
@@ -4179,9 +4176,57 @@ export default function Home() {
     setSellLog({});
     setBuyJournal([]);
     setWatchlistRows([]);
-    setWatchlistLoaded(true); // false로 두면 같은 키로 서버에서 재로딩되므로 true 유지
+    setWatchlistLoaded(true);
     setPendingClearConfirm(false);
-    setSyncMessage("초기화 완료. '서버에서 불러오기'를 누르면 기존 데이터를 복원할 수 있습니다.");
+
+    // 서버의 "현재 키" 행도 빈 데이터로 덮어쓴다(보유자 목록은 유지).
+    //  안 그러면 '키 저장'·'서버에서 불러오기' 때 서버에 남은 옛 데이터가 다시 살아난다.
+    //  다른 동기화 키 행은 키마다 별도 행이라 영향받지 않는다.
+    const key = cloudSyncKey.trim();
+    if (key.length >= 8) {
+      setSyncBusy(true);
+      setSyncMessage("서버의 이 키 데이터를 비우는 중…");
+      try {
+        const r = await fetch("/api/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "push",
+            key,
+            positions: [],
+            cashByOwner: DEFAULT_CASH_BY_OWNER,
+            holdingsSortByOwner: {},
+            sellLogByOwner: {},
+            ownerNames,
+            targetStockWeightByOwner: {},
+            ownerScratchpadByOwner: {},
+            rebalanceCalculatorByOwner: {},
+            alertThresholdsByPosition: {},
+          }),
+        });
+        // 관심종목도 서버에서 비운다
+        await fetch("/api/watchlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sync_key: key, entries: [] }),
+        });
+        if (r.ok) {
+          const j = (await r.json().catch(() => ({}))) as { updated_at?: string };
+          const ts = j.updated_at ?? new Date().toISOString();
+          safeSetItem(LAST_SYNC_TS_KEY, ts);
+          setLastSyncedAt(ts);
+          setSyncMessage("초기화 완료. 서버의 이 키 데이터까지 비웠습니다.");
+        } else {
+          setSyncMessage("로컬은 비웠지만 서버 비우기에 실패했습니다. '서버로 올리기'를 눌러 주세요.");
+        }
+      } catch {
+        setSyncMessage("로컬은 비웠지만 네트워크 오류로 서버 비우기에 실패했습니다.");
+      } finally {
+        setSyncBusy(false);
+      }
+    } else {
+      setSyncMessage("초기화 완료(로컬). 동기화 키가 없어 서버는 변경하지 않았습니다.");
+    }
   }
 
   useEffect(() => {
@@ -9104,11 +9149,11 @@ export default function Home() {
               </div>
               <div className="border-t pt-3">
                 <p className="mb-2 text-xs text-muted-foreground">
-                  이 기기의 로컬 데이터만 삭제합니다. <strong className="text-foreground">서버 데이터는 절대 건드리지 않습니다.</strong> 초기화 후 동기화 키를 입력하고 '서버에서 불러오기'를 누르면 복원됩니다. 보유자 목록은 유지됩니다.
+                  현재 동기화 키의 데이터(보유 종목·현금·관심 종목·목표 비율 등)를 <strong className="text-foreground">로컬과 서버에서 모두 비웁니다.</strong> 보유자 목록은 유지됩니다. <strong className="text-foreground">다른 동기화 키의 데이터는 키마다 별도로 저장되어 영향받지 않습니다.</strong> 필요하면 먼저 「백업 내려받기」로 보관하세요.
                 </p>
                 {pendingClearConfirm ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-destructive font-medium">정말 초기화하시겠습니까?</span>
+                    <span className="text-sm text-destructive font-medium">이 키의 서버 데이터까지 비웁니다. 진행할까요?</span>
                     <button
                       type="button"
                       className="cursor-pointer rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground transition-all duration-100 hover:bg-destructive/90 active:scale-95"
@@ -9130,7 +9175,7 @@ export default function Home() {
                     className="cursor-pointer rounded-md border border-destructive/50 px-3 py-1.5 text-sm text-destructive transition-all duration-100 hover:bg-destructive/10 active:scale-95"
                     onClick={() => setPendingClearConfirm(true)}
                   >
-                    로컬 데이터 초기화
+                    이 키 데이터 초기화 (로컬+서버)
                   </button>
                 )}
               </div>
