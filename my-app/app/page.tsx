@@ -7333,7 +7333,16 @@ export default function Home() {
             aria-hidden={activeTopNav !== "section-add"}
           >
           <section id="section-add" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
-            <h2 className="mb-3 font-semibold">종목 추가</h2>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="font-semibold">종목 추가</h2>
+              <button
+                type="button"
+                className="cursor-pointer rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/90 active:scale-95"
+                onClick={() => setShowTradeImageImport(true)}
+              >
+                📋 문자/이미지로 거래 입력
+              </button>
+            </div>
             <div className="mb-4 rounded-xl border bg-muted/20 p-3">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-sm font-medium">보유자 관리</p>
@@ -7757,7 +7766,16 @@ export default function Home() {
             aria-hidden={activeTopNav !== "section-realized"}
           >
           <section id="section-realized" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
-            <h2 className="mb-2 font-semibold">실현손익 입력</h2>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h2 className="font-semibold">실현손익 입력</h2>
+              <button
+                type="button"
+                className="cursor-pointer rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/90 active:scale-95"
+                onClick={() => setShowTradeImageImport(true)}
+              >
+                📋 문자/이미지로 거래 입력
+              </button>
+            </div>
             <p className="mb-3 text-xs text-muted-foreground">
               종목 추가 아래에서 보유자별 매도 기록을 입력합니다. 실현손익은 매도 체결 금액(원화換算)에{" "}
               <span className="font-medium text-foreground">{((TRADING_FEE_RATE * 100).toFixed(1))}%</span>

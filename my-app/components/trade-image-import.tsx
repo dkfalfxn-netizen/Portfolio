@@ -17,6 +17,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { ParsedTrade, ParsedTradeCurrency } from "@/app/api/parse-trade-image/route";
+import { parseBrokerText } from "@/lib/parse-broker-text";
 
 // ─── 타입 ─────────────────────────────────────────────────────────────────────
 
@@ -70,8 +71,33 @@ export default function TradeImageImport({ ownerNames, onBuyConfirm, onSellConfi
   const [selectedOwners, setSelectedOwners] = useState<Record<number, string[]>>({});
   // 저장 완료 여부
   const [saved, setSaved] = useState(false);
+  // 입력 방식: 이미지 | 텍스트(증권사 알림 문자)
+  const [inputMode, setInputMode] = useState<"image" | "text">("text");
+  const [brokerText, setBrokerText] = useState("");
 
   const defaultOwner = ownerNames[0] ?? "";
+
+  // ─── 텍스트(증권사 알림 문자) 파싱 ────────────────────────────────────────────
+  function handleParseText() {
+    setError(null);
+    setSaved(false);
+    setPreviewUrl(null);
+    const parsed = parseBrokerText(brokerText, ownerNames);
+    if (parsed.length === 0) {
+      setTrades([]);
+      setSelectedOwners({});
+      setError("거래를 찾지 못했습니다. 증권사 체결/주문 알림 문자를 그대로 붙여넣어 주세요. (체결수량 0인 미체결은 제외됩니다)");
+      return;
+    }
+    setTrades(parsed.map((p) => ({
+      type: p.type, date: p.date, symbol: p.symbol, name: p.name,
+      qty: p.qty, price: p.price, currency: p.currency,
+      avgPrice: p.avgPrice, fxRate: p.fxRate,
+    })));
+    const initOwners: Record<number, string[]> = {};
+    parsed.forEach((p, i) => { initOwners[i] = [p.detectedOwner ?? defaultOwner]; });
+    setSelectedOwners(initOwners);
+  }
 
   // ─── 이미지 처리 ───────────────────────────────────────────────────────────
 
@@ -209,8 +235,8 @@ export default function TradeImageImport({ ownerNames, onBuyConfirm, onSellConfi
         {/* 헤더 */}
         <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold text-slate-100">📷 이미지로 거래 입력</h2>
-            <p className="mt-0.5 text-[11px] text-slate-400">미래에셋·삼성증권 거래내역 화면을 캡처해서 올려주세요</p>
+            <h2 className="text-sm font-semibold text-slate-100">거래 입력 (문자 붙여넣기 · 이미지)</h2>
+            <p className="mt-0.5 text-[11px] text-slate-400">증권사 체결/주문 알림 문자를 붙여넣으면 보유자(계좌)를 자동 인식합니다</p>
           </div>
           <button
             onClick={onClose}
@@ -223,8 +249,52 @@ export default function TradeImageImport({ ownerNames, onBuyConfirm, onSellConfi
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
 
-          {/* 업로드 영역 */}
+          {/* 입력 방식 토글 */}
           {!saved && (
+            <div className="flex gap-1 rounded-lg bg-slate-800/60 p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setInputMode("text")}
+                className={`flex-1 rounded-md py-1.5 font-medium transition-colors ${inputMode === "text" ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:text-slate-200"}`}
+              >
+                📋 문자 붙여넣기
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputMode("image")}
+                className={`flex-1 rounded-md py-1.5 font-medium transition-colors ${inputMode === "image" ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:text-slate-200"}`}
+              >
+                📷 이미지
+              </button>
+            </div>
+          )}
+
+          {/* 텍스트 입력 영역 */}
+          {!saved && inputMode === "text" && (
+            <div className="space-y-2">
+              <textarea
+                value={brokerText}
+                onChange={(e) => setBrokerText(e.target.value)}
+                rows={8}
+                placeholder={"증권사 체결/주문 알림 문자를 그대로 붙여넣으세요. 여러 건을 한꺼번에 붙여넣어도 됩니다.\n\n[미래에셋증권] 일부체결 …\n[메리츠증권] …\n[하나증권] 퇴직연금 …"}
+                className="w-full rounded-lg border border-slate-600 bg-slate-950/60 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-400"
+              />
+              <button
+                type="button"
+                onClick={handleParseText}
+                disabled={!brokerText.trim()}
+                className="w-full rounded-md bg-blue-600 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-40"
+              >
+                분석하기
+              </button>
+              <p className="text-[10px] text-slate-500">
+                자동 인식: 미래에셋→ISA · 메리츠→직투 · 개인형 IRP→IRP · 확정기여형(DC)→DC 계좌. 인식이 틀리면 아래 표에서 보유자를 직접 고치세요.
+              </p>
+            </div>
+          )}
+
+          {/* 업로드 영역 */}
+          {!saved && inputMode === "image" && (
             <div
               className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed py-6 transition-colors cursor-pointer
                 ${isDragging ? "border-blue-400 bg-blue-950/30" : "border-slate-600 hover:border-slate-400"}`}
