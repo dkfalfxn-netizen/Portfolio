@@ -4126,8 +4126,47 @@ export default function Home() {
     );
   }
 
-  function handleClearLocalData() {
-    // 서버(Supabase) 데이터는 건드리지 않음 — 동기화 키 재입력 시 복원 가능
+  async function handleClearLocalData() {
+    // 1단계: 동기화 키가 있으면 서버에 먼저 push해서 데이터를 보존
+    const key = cloudSyncKey.trim();
+    if (key.length >= 8) {
+      setSyncMessage("서버에 저장 중…");
+      setSyncBusy(true);
+      try {
+        const r = await fetch("/api/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "push",
+            key,
+            positions,
+            cashByOwner,
+            holdingsSortByOwner,
+            sellLogByOwner: sellLog,
+            ownerNames,
+            targetStockWeightByOwner: loadAllTargetStockWeights(),
+            ownerScratchpadByOwner: loadAllOwnerScratchpads(),
+            rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+            ...getAlertThresholdsPayload(),
+          }),
+        });
+        if (!r.ok) {
+          const j = (await r.json()) as { error?: string };
+          setSyncMessage(`서버 저장 실패: ${j.error ?? "알 수 없는 오류"} — 초기화를 취소합니다.`);
+          setSyncBusy(false);
+          setPendingClearConfirm(false);
+          return;
+        }
+      } catch {
+        setSyncMessage("네트워크 오류로 서버 저장 실패 — 초기화를 취소합니다.");
+        setSyncBusy(false);
+        setPendingClearConfirm(false);
+        return;
+      } finally {
+        setSyncBusy(false);
+      }
+    }
+    // 2단계: 서버 저장 확인 후 로컬만 삭제
     const keysToRemove = [
       STORAGE_KEY,
       LEGACY_POSITIONS_STORAGE_KEY,
@@ -4155,7 +4194,7 @@ export default function Home() {
     setBuyJournal([]);
     setWatchlistRows([]);
     setPendingClearConfirm(false);
-    setSyncMessage("로컬 데이터를 초기화했습니다. 동기화 키를 입력하면 서버에서 복원할 수 있습니다.");
+    setSyncMessage("서버에 저장 완료 후 로컬을 초기화했습니다. '서버에서 불러오기'로 언제든 복원할 수 있습니다.");
   }
 
   useEffect(() => {
@@ -9078,8 +9117,7 @@ export default function Home() {
               </div>
               <div className="border-t pt-3">
                 <p className="mb-2 text-xs text-muted-foreground">
-                  보유자 목록은 유지하고, 보유 종목·현금·관심 종목·목표 비율 등 이 기기의 로컬 데이터만 삭제합니다.{" "}
-                  <strong className="text-foreground">서버 데이터는 보존</strong>되므로 동기화 키를 다시 입력하면 복원할 수 있습니다.
+                  동기화 키가 설정된 경우 <strong className="text-foreground">서버에 먼저 자동 저장</strong>한 뒤 로컬을 초기화합니다. 보유자 목록은 유지됩니다. '서버에서 불러오기'로 언제든 복원 가능합니다.
                 </p>
                 {pendingClearConfirm ? (
                   <div className="flex items-center gap-2">
