@@ -92,15 +92,18 @@ function mergeSavedTargetGroupsWithoutHoldings(
     if (!tickerKey || seenUpper.has(ku)) continue;
     seenUpper.add(ku);
     const name = (typeof row.name === "string" && row.name.trim()) ? row.name.trim() : tickerKey;
+    const sym = row.symbol?.trim() || tickerKey;
     extra.push({
       groupKey: tickerKey,
       displayName: tickerKey,
       valueKrw: 0,
       currentPct: 0,
-      repSymbol: row.symbol?.trim() || tickerKey,
+      repSymbol: sym,
       repName: name,
       repPrice: 0,
-      members: [],
+      // 종목 행(목표 입력란)이 보이도록 자기 자신을 멤버로 넣는다
+      members: [{ symbol: sym, name, valueKrw: 0, priceKrw: 0 }],
+      isWatchlistStub: true,
     });
   }
   return extra.length ? [...baseGroups, ...extra] : baseGroups;
@@ -124,6 +127,8 @@ export type GroupAllocation = {
   repName: string;
   repPrice: number;
   members: { symbol: string; name: string; valueKrw: number; priceKrw: number }[];
+  /** 관심종목 기반 stub 그룹 — 평가액 0이어도 유령 행으로 걸러지지 않게 함 */
+  isWatchlistStub?: boolean;
 };
 
 type MemberAdj = {
@@ -1235,7 +1240,9 @@ function RebalancingOwner({
 
   // ── 행 계산 (표시 순서 = orderedGroups, 대시보드와 같은 visual order 키) ───
   const rows = useMemo((): ComputedRow[] => {
-    const isGhostRow = (row: { valueKrw: number; currentPct: number; targetPct: number; members: { valueKrw: number }[] }) => {
+    const isGhostRow = (row: { valueKrw: number; currentPct: number; targetPct: number; members: { valueKrw: number }[]; isWatchlistStub?: boolean }) => {
+      // 관심종목 stub는 평가액 0이어도 항상 표시(목표 비중 입력용)
+      if (row.isWatchlistStub) return false;
       const hasMemberValue = row.members.some((m) => Math.abs(m.valueKrw) > 0);
       return (
         Math.abs(row.valueKrw) < 1 &&
