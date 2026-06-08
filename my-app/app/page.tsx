@@ -482,7 +482,15 @@ type BrokerNotificationParsed = {
   price: number;
   currency: "KRW" | "USD" | "EUR";
   date?: string;             // YYYY-MM-DD (없으면 호출부에서 오늘 날짜 사용)
+  accountKind?: string;      // 계좌 종류 토큰: "ISA" | "직투" | "IRP" | "DC"
+  accountNumber?: string;    // 계좌번호 문자열 (구분용)
 };
+
+/** 계좌번호 끝자리 → 보유자명 (이름 마스킹으로 구분 불가한 경우). 필요시 여기에 추가. */
+const ACCOUNT_NUMBER_OWNER_RULES: { test: RegExp; owner: string }[] = [
+  { test: /27-?01\b/, owner: "김도율" },
+  { test: /62-?01\b/, owner: "김찬율" },
+];
 
 /** 마스킹된 이름(김*주)을 ownerNames 목록에서 찾아 실제 이름 반환. 유일하게 매칭되면 반환, 아니면 빈 문자열 */
 function resolveOwnerFromMasked(masked: string, ownerNames: string[]): string {
@@ -493,6 +501,46 @@ function resolveOwnerFromMasked(masked: string, ownerNames: string[]): string {
   const last = masked[masked.length - 1];
   const matches = ownerNames.filter((n) => n.length >= 2 && n[0] === first && n[n.length - 1] === last);
   return matches.length === 1 ? matches[0] : "";
+}
+
+/** 이름(마스킹 가능)이 보유자명의 사람 부분과 맞는지 — "김승주 ISA"의 사람부분 "김승주" 기준 */
+function brokerNameMatchesOwner(accountName: string, owner: string): boolean {
+  if (!accountName) return true;
+  const personPart = owner.split(/\s+/)[0] ?? owner;
+  if (accountName.includes("*")) {
+    const f = accountName[0];
+    const l = accountName[accountName.length - 1];
+    return personPart.length >= 2 && personPart[0] === f && personPart[personPart.length - 1] === l;
+  }
+  return owner.includes(accountName) || accountName.includes(personPart);
+}
+
+/** 증권사 파싱 결과에서 보유자(계좌)를 결정.
+ *  1) 계좌번호 규칙 → 2) 계좌종류(ISA/직투/IRP/DC)+이름 조합 → 3) 이름 단독(마스킹 해석) */
+function resolveBrokerOwner(parsed: BrokerNotificationParsed, ownerNames: string[]): string {
+  // 1) 계좌번호로 특정
+  if (parsed.accountNumber) {
+    for (const rule of ACCOUNT_NUMBER_OWNER_RULES) {
+      if (rule.test.test(parsed.accountNumber)) {
+        const o = ownerNames.find((n) => n === rule.owner) ?? ownerNames.find((n) => n.includes(rule.owner));
+        if (o) return o;
+      }
+    }
+  }
+  // 2) 계좌 종류 토큰으로 후보를 좁히고, 여럿이면 이름으로 특정
+  const kind = parsed.accountKind?.trim().toUpperCase();
+  if (kind) {
+    const cands = ownerNames.filter((n) => n.toUpperCase().includes(kind));
+    if (cands.length === 1) return cands[0];
+    if (cands.length > 1) {
+      const narrowed = cands.filter((o) => brokerNameMatchesOwner(parsed.accountName, o));
+      if (narrowed.length >= 1) return narrowed[0];
+      return cands[0];
+    }
+  }
+  // 3) 이름 단독
+  const exact = ownerNames.find((n) => n === parsed.accountName);
+  return exact ?? resolveOwnerFromMasked(parsed.accountName, ownerNames);
 }
 
 function parsePriceField(raw: string): { price: number; currency: "KRW" | "USD" | "EUR" } {
@@ -526,7 +574,8 @@ function parseMiraeAssetNotification(text: string): BrokerNotificationParsed | n
   const { price, currency } = parsePriceField(체결단가Raw);
   if (!Number.isFinite(price) || price <= 0) return null;
   const tradeType: "buy" | "sell" = 매매구분.includes("매도") ? "sell" : "buy";
-  return { accountName: 계좌명, name, symbol, tradeType, qty, price, currency };
+  // 미래에셋 → ISA 계좌
+  return { accountName: 계좌명, name, symbol, tradeType, qty, price, currency, accountKind: "ISA", accountNumber: get("계좌번호") };
 }
 
 /** 하나증권 퇴직연금 체결 알림
@@ -550,7 +599,9 @@ function parseHanaNotification(text: string): BrokerNotificationParsed | null {
   const tradeType: "buy" | "sell" = 주문구분.includes("매도") ? "sell" : "buy";
   // 헤더 "퇴직연금"으로 보유자 추론
   const accountName = text.includes("퇴직연금") ? "퇴직연금" : "";
-  return { accountName, name: 종목.trim(), symbol: "", tradeType, qty, price, currency };
+  // 개인형 IRP / 확정기여형(DC) 구분
+  const accountKind = /개인형|IRP/i.test(text) ? "IRP" : /확정기여형|DC\s*형|\(DC/i.test(text) ? "DC" : undefined;
+  return { accountName, name: 종목.trim(), symbol: "", tradeType, qty, price, currency, accountKind };
 }
 
 /** 메리츠증권 해외주식 주문체결 안내
@@ -588,7 +639,8 @@ function parseMeritzNotification(text: string): BrokerNotificationParsed | null 
     date = `${year}-${dateMatch[1].padStart(2, "0")}-${dateMatch[2]}`;
   }
 
-  return { accountName: 계좌명Raw, name, symbol, tradeType, qty, price, currency, date };
+  // 메리츠 → 직투 계좌 (계좌번호로 김도율/김찬율 등 추가 구분)
+  return { accountName: 계좌명Raw, name, symbol, tradeType, qty, price, currency, date, accountKind: "직투", accountNumber: get("계좌번호") };
 }
 
 /** 지원하는 모든 증권사 파서를 순서대로 시도 */
@@ -7400,18 +7452,19 @@ export default function Home() {
                     setBuyPasteError("⚠️ 매도 체결 내역입니다. '실현손익 입력' 탭에 붙여넣어 주세요.");
                     return;
                   }
-                  const autoOwner = (() => {
-                    const exact = ownerNames.find((n) => n === parsed.accountName);
-                    return exact ?? (resolveOwnerFromMasked(parsed.accountName, ownerNames) || undefined);
-                  })();
+                  const autoOwner = resolveBrokerOwner(parsed, ownerNames) || undefined;
                   // 기존 보유 종목 검색 (심볼 또는 종목명으로)
                   const existingPos = positions.find(
                     (p) => (parsed.symbol && p.symbol === parsed.symbol) || p.name === parsed.name,
                   );
-                  // 기존 보유면 저장된 티커·종목명 사용, 신규면 알림 내용 그대로
-                  const resolvedSymbol = existingPos ? existingPos.symbol : (parsed.symbol || "");
-                  const resolvedName = existingPos ? existingPos.name : parsed.name;
-                  const isNewStock = !existingPos && !parsed.symbol;
+                  // 티커가 없으면 관심종목에서 종목명으로 티커를 끌어온다
+                  const wlMatch = !existingPos && !parsed.symbol
+                    ? watchlistRows.find((w) => w.symbol && w.name && w.name.trim() === parsed.name.trim())
+                    : undefined;
+                  // 기존 보유면 저장된 티커·종목명 사용, 신규면 알림 내용/관심종목 사용
+                  const resolvedSymbol = existingPos ? existingPos.symbol : (parsed.symbol || wlMatch?.symbol || "");
+                  const resolvedName = existingPos ? existingPos.name : (wlMatch?.name || parsed.name);
+                  const isNewStock = !existingPos && !parsed.symbol && !wlMatch;
                   const ownerUnresolved = !autoOwner && !!parsed.accountName;
                   setBuyPasteError(
                     isNewStock && ownerUnresolved
@@ -8205,11 +8258,10 @@ export default function Home() {
                           setSellLogErrorByOwner((prev) => ({ ...prev, [owner]: "⚠️ 매수 체결 내역입니다. '종목 추가' 탭에 붙여넣어 주세요." }));
                           return;
                         }
-                        // 계좌명(마스킹 포함)으로 보유자 자동 전환
-                        const resolvedFromMasked = resolveOwnerFromMasked(parsed.accountName, ownerNames);
-                        const exactOwner = ownerNames.find((n) => n === parsed.accountName);
-                        const ownerUnresolved = !exactOwner && !resolvedFromMasked && !!parsed.accountName;
-                        const autoOwner = (exactOwner ?? resolvedFromMasked) || owner;
+                        // 증권사/계좌종류/계좌번호로 보유자 자동 전환
+                        const resolvedBrokerOwner = resolveBrokerOwner(parsed, ownerNames);
+                        const ownerUnresolved = !resolvedBrokerOwner && !!parsed.accountName;
+                        const autoOwner = resolvedBrokerOwner || owner;
                         if (autoOwner !== owner) setSellLogOwnerForSection(autoOwner);
                         // 해당 보유자의 포지션에서 티커·평균단가 자동 조회
                         const pos = positions.find(
