@@ -711,11 +711,25 @@ function purchaseCashDeduction(params: {
   return { deductUsd: 0, deductKrw: withFee * eurKrw };
 }
 
-/** 매입환율 셀 hover 툴팁: 매수일·정산일·정산환율 내역 (USD만). 매수일 정보 없으면 null */
-function purchaseFxTooltip(p: Position, currentUsdKrw: number): string | undefined {
+/** 매입환율 셀 hover 툴팁: 매수일·정산일·정산환율 내역 (USD만). 매수일은 포지션 또는 매수저널에서 찾음 */
+function purchaseFxTooltip(
+  p: Position,
+  currentUsdKrw: number,
+  journal: BuyJournalEntry[] = [],
+): string | undefined {
   if (p.currency !== "USD") return undefined;
-  const d = typeof p.purchaseDate === "string" ? p.purchaseDate.trim() : "";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return undefined;
+  const pdate = typeof p.purchaseDate === "string" ? p.purchaseDate.trim() : "";
+  // 포지션에 매수일이 없으면(구버전 데이터) 같은 보유자·종목의 저널 매수일로 폴백
+  const jdate =
+    journal.find(
+      (b) => b.owner === p.owner && b.symbol === p.symbol && b.currency === "USD",
+    )?.date ?? "";
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(pdate)
+    ? pdate
+    : /^\d{4}-\d{2}-\d{2}$/.test(jdate)
+      ? jdate
+      : "";
+  if (!d) return undefined;
   const mdd = (ymd: string) => {
     const parts = ymd.split("-");
     return `${Number(parts[1])}/${Number(parts[2])}`;
@@ -2150,6 +2164,29 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
+  }, [positions, buyJournal]);
+
+  // 매수저널 환율을 보유표 매입환율에 단방향 동기화한다.
+  // (같은 보유자+종목+통화의 포지션 매입환율을 따름. 둘이 다르면 보유표가 기준)
+  useEffect(() => {
+    if (buyJournal.length === 0 || positions.length === 0) return;
+    setBuyJournal((prev) => {
+      let changed = false;
+      const next = prev.map((b) => {
+        if (b.currency === "KRW") return b;
+        const pos = positions.find(
+          (p) => p.owner === b.owner && p.symbol === b.symbol && p.currency === b.currency,
+        );
+        if (!pos) return b;
+        const rate = b.currency === "USD" ? pos.purchaseUsdKrw : pos.purchaseEurKrw;
+        if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return b;
+        if (Math.abs(rate - b.fxRate) < 1e-6) return b;
+        changed = true;
+        return { ...b, fxRate: rate, totalKrw: b.qty * b.buyPrice * rate };
+      });
+      if (changed) safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+      return changed ? next : prev;
+    });
   }, [positions, buyJournal]);
 
   const refreshLatestBackupAt = useCallback(async () => {
@@ -6399,9 +6436,9 @@ export default function Home() {
                               ) : (
                                 <div
                                   className="flex flex-col items-end gap-0.5"
-                                  title={purchaseFxTooltip(position, usdKrw)}
+                                  title={purchaseFxTooltip(position, usdKrw, buyJournal)}
                                 >
-                                  <span className={purchaseFxTooltip(position, usdKrw) ? "cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" : undefined}>
+                                  <span className={purchaseFxTooltip(position, usdKrw, buyJournal) ? "cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" : undefined}>
                                     {position.purchaseUsdKrw != null
                                       ? `${fmtInt(Math.round(position.purchaseUsdKrw))} ₩/$`
                                       : `${usdKrw.toLocaleString(MONEY_INT_LOCALE)} ₩/$`}
