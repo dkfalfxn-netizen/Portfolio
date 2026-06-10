@@ -341,6 +341,8 @@ type Position = {
   purchaseDate?: string;
   /** 정산환율(T+2 09:00 KST) 미확정 상태 — 현재환율 임시값. 정산 시점 경과 후 자동 보정되면 해제 */
   purchaseFxPending?: boolean;
+  /** 추가 당시 임시로 박은 환율(현재환율). 정산 후 매입환율은 정산값으로 바뀌므로 내역 표시용으로 보존 */
+  purchaseFxAtAdd?: number;
   accountType: "해외주식" | "국내주식";
   accountName: string;
   owner: OwnerName;
@@ -705,6 +707,48 @@ function purchaseCashDeduction(params: {
   const eurKrw = Number(params.purchaseEurKrw);
   if (!Number.isFinite(eurKrw) || eurKrw <= 0) return { deductUsd: 0, deductKrw: 0 };
   return { deductUsd: 0, deductKrw: withFee * eurKrw };
+}
+
+/** 매입환율 셀 hover 툴팁: 매수일·정산일·정산환율 내역 (USD만). 매수일 정보 없으면 null */
+function purchaseFxTooltip(p: Position, currentUsdKrw: number): string | undefined {
+  if (p.currency !== "USD") return undefined;
+  const d = typeof p.purchaseDate === "string" ? p.purchaseDate.trim() : "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return undefined;
+  const mdd = (ymd: string) => {
+    const parts = ymd.split("-");
+    return `${Number(parts[1])}/${Number(parts[2])}`;
+  };
+  const r = (n: number | undefined | null) =>
+    typeof n === "number" && Number.isFinite(n) ? Math.round(n).toLocaleString("ko-KR") : null;
+
+  const applied = r(p.purchaseUsdKrw);
+  if (p.purchaseFxPending) {
+    // 정산 전 — 매수일 + 현재환율 추정
+    const est = applied ?? r(currentUsdKrw);
+    return `매수 ${mdd(d)} · ${est} ₩/$ (정산 전·현재환율 추정)`;
+  }
+  // 정산 완료(또는 직접 입력)
+  const targetSec = krSettlementTargetUnixSec(d, 2, 9);
+  const settleYmd =
+    targetSec !== null
+      ? new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Seoul",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date(targetSec * 1000))
+      : null;
+  const addRate = r(p.purchaseFxAtAdd);
+  const lines: string[] = [];
+  if (addRate) lines.push(`${addRate} ₩/$ (${mdd(d)} 추가 당시)`);
+  if (applied) {
+    lines.push(
+      addRate && settleYmd
+        ? `${applied} ₩/$ (${mdd(settleYmd)} 정산 적용)`
+        : `매수 ${mdd(d)} · ${applied} ₩/$`,
+    );
+  }
+  return lines.length > 0 ? lines.join("\n") : undefined;
 }
 
 function normalizeOwnerNames(raw: unknown): OwnerName[] {
@@ -4594,9 +4638,13 @@ export default function Home() {
       currency: form.currency,
       accountType,
       accountName,
-      ...(form.currency === "USD" ? { purchaseUsdKrw: effectivePurchaseUsdKrw } : {}),
+      ...(form.currency === "USD"
+        ? { purchaseUsdKrw: effectivePurchaseUsdKrw, purchaseDate: tradeDateForBase }
+        : {}),
       ...(form.currency === "EUR" ? { purchaseEurKrw: effectivePurchaseEurKrw } : {}),
-      ...(usdFxPending ? { purchaseDate: tradeDateForBase, purchaseFxPending: true } : {}),
+      ...(usdFxPending
+        ? { purchaseFxPending: true, purchaseFxAtAdd: effectivePurchaseUsdKrw }
+        : {}),
       ...(cg ? { chartGroup: cg } : {}),
     };
 
@@ -4848,9 +4896,10 @@ export default function Home() {
         if (idx !== editingRowIndex) return p;
         if (p.currency === "USD") {
           if (!Number.isFinite(px) || px <= 0) return p;
-          // 직접 환율을 입력하면 정산대기 해제(자동 보정이 덮어쓰지 않도록)
-          const { purchaseFxPending: _drop, ...rest } = p;
-          void _drop;
+          // 직접 환율을 입력하면 정산대기·추가당시환율 내역 해제(자동 보정이 덮어쓰지 않도록)
+          const { purchaseFxPending: _dropPending, purchaseFxAtAdd: _dropAtAdd, ...rest } = p;
+          void _dropPending;
+          void _dropAtAdd;
           return { ...rest, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a, purchaseUsdKrw: px };
         }
         if (p.currency === "EUR") {
@@ -6313,8 +6362,11 @@ export default function Home() {
                                   onChange={(e) => setEditPurchaseUsdKrw(e.target.value)}
                                 />
                               ) : (
-                                <div className="flex flex-col items-end gap-0.5">
-                                  <span>
+                                <div
+                                  className="flex flex-col items-end gap-0.5"
+                                  title={purchaseFxTooltip(position, usdKrw)}
+                                >
+                                  <span className={purchaseFxTooltip(position, usdKrw) ? "cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" : undefined}>
                                     {position.purchaseUsdKrw != null
                                       ? `${fmtInt(Math.round(position.purchaseUsdKrw))} ₩/$`
                                       : `${usdKrw.toLocaleString(MONEY_INT_LOCALE)} ₩/$`}
