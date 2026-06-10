@@ -476,6 +476,8 @@ type BuyJournalEntry = {
   currency: "USD" | "EUR" | "KRW";
   fxRate: number;
   totalKrw: number;
+  /** USD 매수 정산환율(T+2 09:00) 미확정 — 현재환율 임시. 정산 후 fxRate·totalKrw 자동 보정되면 해제 */
+  fxPending?: boolean;
 };
 
 // ── 증권사 체결 알림 파서 ─────────────────────────────────────────────────────
@@ -2062,18 +2064,28 @@ export default function Home() {
     };
   }, [form.currency, form.purchaseDateForFx, showActionErrorToast]);
 
-  // 정산환율 자동 보정: purchaseFxPending(현재환율 임시) USD 포지션 중,
-  // 매수일 + 2영업일 09:00 KST가 지난 것은 실제 정산환율을 받아 매입환율을 교체한다.
+  // 정산환율 자동 보정: purchaseFxPending(현재환율 임시) USD 포지션·매수저널 중,
+  // 매수일 + 2영업일 09:00 KST가 지난 것은 실제 정산환율을 받아 매입환율(·저널 환율/총액)을 교체한다.
   const settlementBackfillBusyRef = useRef(false);
   useEffect(() => {
     const nowSec = Math.floor(Date.now() / 1000);
+    const isDue = (d: string): boolean => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+      const target = krSettlementTargetUnixSec(d, 2, 9);
+      return target !== null && target <= nowSec;
+    };
     const dueDates = new Set<string>();
     for (const p of positions) {
-      if (!p.purchaseFxPending || p.currency !== "USD") continue;
-      const d = typeof p.purchaseDate === "string" ? p.purchaseDate.trim() : "";
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
-      const target = krSettlementTargetUnixSec(d, 2, 9);
-      if (target !== null && target <= nowSec) dueDates.add(d);
+      if (p.purchaseFxPending && p.currency === "USD" && typeof p.purchaseDate === "string") {
+        const d = p.purchaseDate.trim();
+        if (isDue(d)) dueDates.add(d);
+      }
+    }
+    for (const b of buyJournal) {
+      if (b.fxPending && b.currency === "USD" && typeof b.date === "string") {
+        const d = b.date.trim();
+        if (isDue(d)) dueDates.add(d);
+      }
     }
     if (dueDates.size === 0 || settlementBackfillBusyRef.current) return;
 
@@ -2094,6 +2106,7 @@ export default function Home() {
           }
         }
         if (cancelled || Object.keys(rateByDate).length === 0) return;
+        let anyChange = false;
         setPositions((prev) => {
           let changed = false;
           const next = prev.map((p) => {
@@ -2110,9 +2123,25 @@ export default function Home() {
             }
             return p;
           });
-          if (changed) safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+          if (changed) anyChange = true;
           return changed ? next : prev;
         });
+        setBuyJournal((prev) => {
+          let changed = false;
+          const next = prev.map((b) => {
+            if (b.fxPending && b.currency === "USD" && rateByDate[b.date] != null) {
+              changed = true;
+              const fx = rateByDate[b.date];
+              const { fxPending: _drop, ...rest } = b;
+              void _drop;
+              return { ...rest, fxRate: fx, totalKrw: b.qty * b.buyPrice * fx };
+            }
+            return b;
+          });
+          if (changed) anyChange = true;
+          return changed ? next : prev;
+        });
+        if (anyChange) safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
       } finally {
         settlementBackfillBusyRef.current = false;
       }
@@ -2121,7 +2150,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [positions]);
+  }, [positions, buyJournal]);
 
   const refreshLatestBackupAt = useCallback(async () => {
     const key = cloudSyncKey.trim();
@@ -4707,6 +4736,7 @@ export default function Home() {
         currency: form.currency,
         fxRate: fx,
         totalKrw,
+        ...(usdFxPending && form.currency === "USD" ? { fxPending: true } : {}),
       };
     });
 
@@ -4786,6 +4816,10 @@ export default function Home() {
               currency: t.currency,
               purchaseUsdKrw: t.currency === "USD" ? (usdKrw ?? undefined) : undefined,
               purchaseEurKrw: t.currency === "EUR" ? (eurKrw ?? undefined) : undefined,
+              // USD는 매수일(t.date) 저장 + 정산대기 → T+2 지나면 정산환율로 자동 보정
+              ...(t.currency === "USD" && /^\d{4}-\d{2}-\d{2}$/.test(t.date)
+                ? { purchaseDate: t.date, purchaseFxPending: true, purchaseFxAtAdd: usdKrw ?? undefined }
+                : {}),
               accountType,
               accountName,
               owner,
@@ -4808,6 +4842,7 @@ export default function Home() {
           currency: t.currency,
           fxRate: fx,
           totalKrw: t.currency === "KRW" ? t.qty * t.price : t.qty * t.price * fx,
+          ...(t.currency === "USD" && /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? { fxPending: true } : {}),
         };
       });
       setBuyJournal((prev) => [...prev, ...newBuys].slice(-BUY_JOURNAL_MAX));
