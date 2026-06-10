@@ -742,6 +742,19 @@ function TargetWeightSortableBarRow({
         {isClipped ?
           <span className="absolute right-0.5 top-1/2 -translate-y-1/2 text-[7px] text-emerald-300/70">›</span>
         : null}
+        {/* 막대 위에 목표 달성률(현재/목표) 비율을 작게 표시 — 막대 채움 끝에 우측 정렬 */}
+        {hasInputTarget && hasPositiveTarget && barWidthPct > 0 ?
+          <span
+            className="pointer-events-none absolute top-1/2 z-20 -translate-y-1/2 px-0.5 text-[8px] font-bold tabular-nums leading-none text-white/90"
+            style={{
+              left: `${Math.min(barWidthPct, 100)}%`,
+              transform: "translate(-100%, -50%)",
+              textShadow: "0 0 3px rgba(0,0,0,0.95)",
+            }}
+          >
+            {Math.round(ratio * 100)}%
+          </span>
+        : null}
       </div>
 
       <div className="w-[5rem] shrink-0 text-right text-[10px] tabular-nums leading-snug sm:w-[5.25rem]">

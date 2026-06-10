@@ -23,7 +23,7 @@ import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import TradeImageImport, { type ConfirmedBuyTrade, type ConfirmedSellTrade } from "@/components/trade-image-import";
 import { cn } from "@/lib/utils";
-import { holdingSymbolsEquivalent, inferTradingCurrencyFromTicker } from "@/lib/finance-symbols";
+import { holdingSymbolsEquivalent, inferTradingCurrencyFromTicker, isKrxListedEquityCode } from "@/lib/finance-symbols";
 import {
   fmtInt,
   fmtUsdNumber,
@@ -2952,7 +2952,13 @@ export default function Home() {
             return [{ ticker: sym || nm, name: nm || sym, pct }];
           });
         })();
-        return { label: block.label, dailyChangeKrw, dailyChangePct, holdingsItems };
+        // 그룹이 없는 단일 국내 종목은 라벨이 티커 코드(예: A446770)뿐이므로,
+        // 화면에는 종목명을 노출한다(없으면 티커 유지). 해외 티커(SNDK 등)는 그대로.
+        const displayLabel = isKrxListedEquityCode(block.label)
+          ? block.items.find((p) => typeof p.name === "string" && p.name.trim())?.name?.trim() ||
+            block.label
+          : block.label;
+        return { label: displayLabel, dailyChangeKrw, dailyChangePct, holdingsItems };
       }).sort((a, b) => b.dailyChangeKrw - a.dailyChangeKrw);
       const totalDailyKrw = groups.reduce((s, g) => s + g.dailyChangeKrw, 0);
       const prevStockKrw = group.items.reduce((s, p) => {
