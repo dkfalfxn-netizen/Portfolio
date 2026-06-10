@@ -24,6 +24,15 @@ export type OwnerDailyReturn = {
   changePct: number | null;
 };
 
+/** 보유자별 누적(총) 수익률 — 현재 평가액 대비 매입원가 기준 평가손익률(%) */
+export type OwnerTotalReturn = {
+  owner: string;
+  /** (현재평가 − 매입원가) / 매입원가 × 100. 원가 정보가 전혀 없으면 null */
+  returnPct: number | null;
+  /** 평가손익 원화 금액 (현재평가 − 매입원가) */
+  profitKrw: number;
+};
+
 /** 지표 한 줄 (MA/RSI/BB/VOL) — HOLD→BUY|SELL 전환 시에만 */
 export type HoldTransitionRow = {
   key: "MA" | "RSI" | "BB" | "VOL";
@@ -267,6 +276,88 @@ export function computeOwnerDailyReturnsHybrid(
   });
 }
 
+/** 대시보드와 동일한 매매 수수료율 (매입원가에 반영) */
+const TRADING_FEE_RATE = 0.002;
+
+/** 총 수익률 계산용 포지션 — 평가/원가에 매입단가·매입환율이 필요 */
+export type CostBasisPos = {
+  symbol: string;
+  quantity: number;
+  avgPrice: number;
+  currentPrice: number;
+  currency: "USD" | "EUR" | "KRW";
+  owner: string;
+  purchaseUsdKrw?: number | null;
+  purchaseEurKrw?: number | null;
+};
+
+/**
+ * 보유자별 총 수익률(평가손익률).
+ *
+ * - 주식: 현재 평가액(KRW) vs 매입원가(KRW, 매입환율·수수료 반영) — 대시보드 enrichedPositions와 동일 규칙.
+ * - 현금: 원가=평가(손익 0)로 분모에만 포함 → 대시보드 헤더의 "투입 대비 평가" %와 일치.
+ */
+export function computeOwnerTotalReturns(
+  positions: CostBasisPos[],
+  cashByOwner: Record<string, { usd: number; krw: number }>,
+  quotes: PricesResult["quotes"],
+  usdKrw: number,
+  eurKrw: number,
+): OwnerTotalReturn[] {
+  const lookupCash = (canonical: string): { usd: number; krw: number } => {
+    const direct = cashByOwner[canonical];
+    if (direct) return direct;
+    for (const [k, v] of Object.entries(cashByOwner)) {
+      if (k.trim() === canonical) return v;
+    }
+    return { usd: 0, krw: 0 };
+  };
+
+  const owners = [
+    ...new Set([
+      ...positions.map((p) => p.owner.trim()),
+      ...Object.keys(cashByOwner).map((k) => k.trim()),
+    ]),
+  ].filter((o) => o.length > 0);
+
+  const ownersSorted = owners.sort((a, b) => {
+    const ao = ownerDisplayOrderIndex(a);
+    const bo = ownerDisplayOrderIndex(b);
+    if (ao !== bo) return ao - bo;
+    return a.localeCompare(b, "ko");
+  });
+
+  return ownersSorted.map((owner): OwnerTotalReturn => {
+    const cash = lookupCash(owner);
+    const cashKrw = cash.krw + cash.usd * usdKrw;
+
+    let stockValue = 0;
+    let stockCost = 0;
+    for (const p of positions) {
+      if (p.owner.trim() !== owner) continue;
+      const price = quotePriceForSymbol(quotes, p.symbol, p.currentPrice);
+      const effAvg = p.avgPrice * (1 + TRADING_FEE_RATE);
+      const purchaseFx =
+        p.currency === "USD"
+          ? (typeof p.purchaseUsdKrw === "number" && p.purchaseUsdKrw > 0 ? p.purchaseUsdKrw : usdKrw)
+          : p.currency === "EUR"
+            ? (typeof p.purchaseEurKrw === "number" && p.purchaseEurKrw > 0 ? p.purchaseEurKrw : eurKrw)
+            : 1;
+      const valueFx = p.currency === "USD" ? usdKrw : p.currency === "EUR" ? eurKrw : 1;
+      const valueKrw = p.quantity * price * valueFx;
+      const costKrw = p.quantity * effAvg * purchaseFx;
+      if (Number.isFinite(valueKrw) && valueKrw > 0) stockValue += valueKrw;
+      if (Number.isFinite(costKrw) && costKrw > 0) stockCost += costKrw;
+    }
+
+    const costBasis = stockCost + cashKrw;
+    const totalValue = stockValue + cashKrw;
+    const profitKrw = totalValue - costBasis;
+    const returnPct = costBasis > 0 && stockCost > 0 ? (profitKrw / costBasis) * 100 : null;
+    return { owner, returnPct, profitKrw };
+  });
+}
+
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -393,6 +484,8 @@ export function buildTelegramBriefingHtml(opts: {
   /** 전일 DB 스냅 합계 대비 포트폴리오 수익률(%) — 없으면 null */
   portfolioChangeVsYesterdayPct: number | null;
   ownerDailyReturns?: OwnerDailyReturn[];
+  /** 보유자별 총 수익률(평가손익률) — 주어지면 일일 변동률 대신 이 블록을 표시 */
+  ownerTotalReturns?: OwnerTotalReturn[];
   items: BriefingItem[];
   miniTrends?: MiniTrendMap;
   /** 전일 일봉까지만 보면 HOLD였다가, 최신 일봉 반영 후 BUY/SELL로 바뀐 지표만 */
@@ -403,6 +496,7 @@ export function buildTelegramBriefingHtml(opts: {
     dateLabel,
     portfolioChangeVsYesterdayPct,
     ownerDailyReturns,
+    ownerTotalReturns,
     items,
     holdTransitions,
   } = opts;
@@ -460,7 +554,25 @@ export function buildTelegramBriefingHtml(opts: {
   }
 
   let ownerBlock = "";
-  if (ownerDailyReturns && ownerDailyReturns.length > 0) {
+  if (ownerTotalReturns && ownerTotalReturns.length > 0) {
+    // 보유자별 총 수익률(평가손익률) — 일일 변동률 대신 표시
+    const sorted = [...ownerTotalReturns].sort((a, b) => {
+      const ao = ownerOrderIndex(a.owner);
+      const bo = ownerOrderIndex(b.owner);
+      if (ao !== bo) return ao - bo;
+      return a.owner.localeCompare(b.owner, "ko");
+    });
+    const lines = sorted.map((r) => {
+      if (r.returnPct === null || !Number.isFinite(r.returnPct)) {
+        return `• ${escapeHtml(r.owner)}: <i>원가 정보 없음</i>`;
+      }
+      const arrow = r.returnPct >= 0 ? "▲" : "▼";
+      const pctStr = `${r.returnPct >= 0 ? "+" : ""}${r.returnPct.toFixed(2)}%`;
+      const profitStr = `${r.profitKrw >= 0 ? "+" : "-"}${fmtKrw(Math.abs(r.profitKrw))}`;
+      return `• ${escapeHtml(r.owner)}: <b>${arrow} ${pctStr}</b> <i>(${profitStr})</i>`;
+    });
+    ownerBlock = `\n\n<b>👤 보유자별 총 수익률</b>\n${lines.join("\n")}`;
+  } else if (ownerDailyReturns && ownerDailyReturns.length > 0) {
     const sorted = [...ownerDailyReturns].sort((a, b) => {
       const ao = ownerOrderIndex(a.owner);
       const bo = ownerOrderIndex(b.owner);

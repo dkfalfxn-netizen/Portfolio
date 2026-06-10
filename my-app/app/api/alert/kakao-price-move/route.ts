@@ -7,8 +7,10 @@ import {
   collectHoldTransitions,
   computeLivePortfolioKrw,
   computeOwnerDailyReturnsHybrid,
+  computeOwnerTotalReturns,
   computeQuoteWeightedPortfolioReturnPct,
   type BriefingItem,
+  type CostBasisPos,
   type QuoteWeightedOwnerInput,
 } from "@/lib/briefing-message";
 import { isKrxCommodity, toYahooSymbol } from "@/lib/finance-symbols";
@@ -197,6 +199,33 @@ function normalizeDbPositions(raw: unknown): Array<{
     const cur = x.currency === "USD" || x.currency === "EUR" || x.currency === "KRW" ? x.currency : "KRW";
     const owner = typeof x.owner === "string" ? x.owner.trim() : "";
     out.push({ symbol: symNorm, quantity: q, currentPrice: cp, currency: cur, owner });
+  }
+  return out;
+}
+
+/** 총 수익률 계산용 — 매입단가·매입환율까지 보존 */
+function normalizeCostPositions(raw: unknown): CostBasisPos[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CostBasisPos[] = [];
+  for (const p of raw) {
+    if (!p || typeof p !== "object") continue;
+    const x = p as Record<string, unknown>;
+    const sym = typeof x.symbol === "string" ? x.symbol.trim() : "";
+    if (!sym) continue;
+    const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    const numOrNull = (v: unknown): number | null =>
+      typeof v === "number" && Number.isFinite(v) ? v : null;
+    const cur = x.currency === "USD" || x.currency === "EUR" || x.currency === "KRW" ? x.currency : "KRW";
+    out.push({
+      symbol: sym,
+      quantity: num(x.quantity),
+      avgPrice: num(x.avgPrice),
+      currentPrice: num(x.currentPrice),
+      currency: cur,
+      owner: typeof x.owner === "string" ? x.owner.trim() : "",
+      purchaseUsdKrw: numOrNull(x.purchaseUsdKrw),
+      purchaseEurKrw: numOrNull(x.purchaseEurKrw),
+    });
   }
   return out;
 }
@@ -482,6 +511,14 @@ export async function GET(req: NextRequest) {
     yesterdayRecord,
   );
 
+  const ownerTotalReturns = computeOwnerTotalReturns(
+    normalizeCostPositions(snap.positions),
+    cashForHybrid,
+    quotes,
+    usdKrw,
+    eurKrw,
+  );
+
   if (items.length === 0) {
     return NextResponse.json({
       ok: true,
@@ -502,6 +539,7 @@ export async function GET(req: NextRequest) {
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,
       ownerDailyReturns,
+      ownerTotalReturns,
       items: briefingItems,
       miniTrends,
       holdTransitions,
@@ -797,6 +835,14 @@ export async function POST(req: NextRequest) {
     yesterdayRecordManual,
   );
 
+  const ownerTotalReturns = computeOwnerTotalReturns(
+    normalizeCostPositions(snap.positions),
+    cashNorm,
+    quotes,
+    usdK,
+    eurK,
+  );
+
   async function sendHoldings(itemsForMessage: AlertItem[]): Promise<Response | null> {
     if (itemsForMessage.length === 0) return null;
     const briefingItems = toBriefingItems(itemsForMessage);
@@ -807,6 +853,7 @@ export async function POST(req: NextRequest) {
       dateLabel: mmddKST(),
       portfolioChangeVsYesterdayPct,
       ownerDailyReturns,
+      ownerTotalReturns,
       items: briefingItems,
       miniTrends,
       holdTransitions,
