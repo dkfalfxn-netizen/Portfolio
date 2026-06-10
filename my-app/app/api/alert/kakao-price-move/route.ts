@@ -13,7 +13,7 @@ import {
   type CostBasisPos,
   type QuoteWeightedOwnerInput,
 } from "@/lib/briefing-message";
-import { isKrxCommodity, toYahooSymbol } from "@/lib/finance-symbols";
+import { isKrxCommodity, isKrxListedEquityCode, toYahooSymbol } from "@/lib/finance-symbols";
 import { todayKST, yesterdayKST, mmddKST, isKstWeekend } from "@/lib/date-utils";
 import { analyzeFourSignals, type FourSignalsResult } from "@/lib/technical-signals";
 import { isKrEquityTradingSessionDay, isUsEquityTradingSessionDay } from "@/lib/trading-calendar";
@@ -62,7 +62,8 @@ function marketGroupOfSymbol(symbol: string): MarketGroup {
   const normalized = normalizeSymbol(symbol);
   if (isKrxCommodity(normalized)) return "DOMESTIC";
   if (normalized.startsWith("KRX:") || normalized.startsWith("KQ:")) return "DOMESTIC";
-  if (/^[0-9][0-9A-Z]{5}$/.test(normalized)) return "DOMESTIC";
+  // 6자리(005930, 0022T0)·7자리 A접두(A446770, A0173Y0) KRX 코드 모두 국내로
+  if (isKrxListedEquityCode(normalized)) return "DOMESTIC";
   return "OVERSEAS";
 }
 
@@ -70,7 +71,6 @@ function isMarketTradingDay(group: MarketGroup, at: Date): boolean {
   if (group === "DOMESTIC") return isKrEquityTradingSessionDay(at);
   return isUsEquityTradingSessionDay(at);
 }
-const TARGET_OWNERS = new Set(["김승주", "강희진"]);
 
 async function fetchYahooQuote(symbol: string): Promise<Quote> {
   try {
@@ -424,7 +424,7 @@ export async function GET(req: NextRequest) {
     const symbolMap = new Map<string, { ownerLabel: string; name: string; sector: string; groupLabel: string }>();
     for (const p of positions) {
       const owner = typeof p.owner === "string" ? p.owner.trim() : "";
-      if (!TARGET_OWNERS.has(owner)) continue;
+      if (!owner) continue; // 보유자 이름 있는 모든 종목 대상 (보유자 하드코딩 제거)
       const keyedSymbol = `${owner}::${p.symbol}`;
       if (p.symbol && !symbolMap.has(keyedSymbol)) {
         symbolMap.set(keyedSymbol, {
@@ -645,7 +645,7 @@ export async function POST(req: NextRequest) {
   const symbolMap = new Map<string, { ownerLabel: string; name: string; sector: string; groupLabel: string }>();
   for (const p of positions) {
     const owner = typeof p.owner === "string" ? p.owner.trim() : "";
-    if (!TARGET_OWNERS.has(owner)) continue;
+    if (!owner) continue; // 보유자 이름 있는 모든 종목 대상 (보유자 하드코딩 제거)
     const keyedSymbol = `${owner}::${p.symbol}`;
     if (p.symbol && !symbolMap.has(keyedSymbol)) {
       symbolMap.set(keyedSymbol, {
