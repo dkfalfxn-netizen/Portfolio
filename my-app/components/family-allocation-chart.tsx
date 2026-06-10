@@ -512,6 +512,37 @@ function fmtTargetPctLabel(targetPct: number): string {
   return rounded.toFixed(1);
 }
 
+/**
+ * 목표 달성률(현재/목표) 구간별 막대 색.
+ * 0~20% 빨강 · 20~40% 주황 · 40~60% 노랑 · 60~80% 연두 · 80%+ 초록
+ */
+function ratioBandBarStyle(ratio: number): { bg: string; glow: string } {
+  if (ratio < 0.2)
+    return {
+      bg: "linear-gradient(to right, rgb(153,27,27), rgb(220,38,38), rgb(248,113,113))",
+      glow: "0 0 8px rgba(248,113,113,0.45)",
+    };
+  if (ratio < 0.4)
+    return {
+      bg: "linear-gradient(to right, rgb(154,52,18), rgb(234,88,12), rgb(251,146,60))",
+      glow: "0 0 8px rgba(251,146,60,0.45)",
+    };
+  if (ratio < 0.6)
+    return {
+      bg: "linear-gradient(to right, rgb(161,98,7), rgb(202,138,4), rgb(250,204,21))",
+      glow: "0 0 8px rgba(250,204,21,0.4)",
+    };
+  if (ratio < 0.8)
+    return {
+      bg: "linear-gradient(to right, rgb(63,98,18), rgb(132,204,22), rgb(190,242,100))",
+      glow: "0 0 8px rgba(163,230,53,0.4)",
+    };
+  return {
+    bg: "linear-gradient(to right, rgb(20,83,45), rgb(22,163,74), rgb(52,211,153))",
+    glow: "0 0 8px rgba(52,211,153,0.4)",
+  };
+}
+
 /** 목표 바 한 줄 — 비현금만 드래그 정렬 가능 */
 function TargetWeightSortableBarRow({
   slice,
@@ -557,20 +588,18 @@ function TargetWeightSortableBarRow({
   const belowBand = hasPositiveTarget && relDev < -PORTFOLIO_TARGET_REL_DEV_BAND;
   const diffPp = actual - target;
 
+  // 목표가 양수인 줄은 달성률(현재/목표) 구간별 색, 목표 0%인데 보유 중이면(현금 등) 파랑
+  const ratioBand = ratioBandBarStyle(ratio);
   const barBg = !hasInputTarget
     ? "rgba(255,255,255,0.07)"
-    : withinBand
-      ? "linear-gradient(to right, rgb(29,78,216), rgb(14,165,233))"
-      : belowBand
-        ? "linear-gradient(to right, rgb(153,27,27), rgb(220,38,38), rgb(248,113,113))"
-        : "linear-gradient(to right, rgb(20,83,45), rgb(22,163,74), rgb(52,211,153))";
+    : hasPositiveTarget
+      ? ratioBand.bg
+      : "linear-gradient(to right, rgb(29,78,216), rgb(14,165,233), rgb(56,189,248))";
   const barGlow = !hasInputTarget
     ? undefined
-    : withinBand
-      ? "0 0 8px rgba(56,189,248,0.35)"
-      : belowBand
-        ? "0 0 8px rgba(248,113,113,0.45)"
-        : "0 0 8px rgba(52,211,153,0.4)";
+    : hasPositiveTarget
+      ? ratioBand.glow
+      : "0 0 8px rgba(56,189,248,0.4)";
 
   const tooltipEntries = entriesForAllocationTooltip(slice);
   const isGrouped = tooltipEntries.length > 1;
