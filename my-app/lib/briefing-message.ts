@@ -31,6 +31,8 @@ export type OwnerTotalReturn = {
   returnPct: number | null;
   /** 평가손익 원화 금액 (현재평가 − 매입원가) */
   profitKrw: number;
+  /** 매입원가 + 현금 (총 수익률 분모) — 전체 합산용 */
+  costBasisKrw: number;
 };
 
 /** 지표 한 줄 (MA/RSI/BB/VOL) — HOLD→BUY|SELL 전환 시에만 */
@@ -354,7 +356,7 @@ export function computeOwnerTotalReturns(
     const totalValue = stockValue + cashKrw;
     const profitKrw = totalValue - costBasis;
     const returnPct = costBasis > 0 && stockCost > 0 ? (profitKrw / costBasis) * 100 : null;
-    return { owner, returnPct, profitKrw };
+    return { owner, returnPct, profitKrw, costBasisKrw: costBasis };
   });
 }
 
@@ -544,8 +546,28 @@ export function buildTelegramBriefingHtml(opts: {
   const cronFooter =
     "\n\n<i>📡 자동(KST): 01:00 · 09:30 · 12:00 · 15:40 · 23:00</i>";
 
+  // 전체 총 수익률(평가손익률) — 보유자별 합산. ownerTotalReturns가 있으면 일일 대신 이 값 사용
+  const overallTotal = (() => {
+    if (!ownerTotalReturns || ownerTotalReturns.length === 0) return null;
+    let profit = 0;
+    let cost = 0;
+    let hasCost = false;
+    for (const r of ownerTotalReturns) {
+      profit += r.profitKrw;
+      cost += r.costBasisKrw;
+      if (r.returnPct !== null) hasCost = true;
+    }
+    if (!hasCost || cost <= 0) return null;
+    return { pct: (profit / cost) * 100, profitKrw: profit };
+  })();
+
   let portfolioLine = "";
-  if (portfolioChangeVsYesterdayPct !== null && Number.isFinite(portfolioChangeVsYesterdayPct)) {
+  if (overallTotal !== null) {
+    const arrow = overallTotal.pct >= 0 ? "▲" : "▼";
+    const pctStr = `${overallTotal.pct >= 0 ? "+" : ""}${overallTotal.pct.toFixed(2)}%`;
+    const profitStr = `${overallTotal.profitKrw >= 0 ? "+" : "-"}${fmtKrw(Math.abs(overallTotal.profitKrw))}`;
+    portfolioLine = `전체 총 수익률: <b>${arrow} ${pctStr}</b> <i>(${profitStr})</i>`;
+  } else if (portfolioChangeVsYesterdayPct !== null && Number.isFinite(portfolioChangeVsYesterdayPct)) {
     const p = portfolioChangeVsYesterdayPct;
     const arrow = p >= 0 ? "▲" : "▼";
     portfolioLine = `전체 수익률: <b>${arrow} ${p >= 0 ? "+" : ""}${p.toFixed(2)}%</b>`;
