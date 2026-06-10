@@ -194,6 +194,49 @@ export function isKrEquityTradingSessionDay(at: Date = new Date()): boolean {
   return true;
 }
 
+/** 한국 영업일(주말·KRX 휴장일 제외) 여부 — Asia/Seoul 달력 YYYY-MM-DD */
+function isKrBusinessDayYmd(ymd: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return false;
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  const wd = dt.getUTCDay();
+  if (wd === 0 || wd === 6) return false;
+  if (KRX_CLOSED.has(ymd)) return false;
+  return true;
+}
+
+function ymdFromUtcDate(dt: Date): string {
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    dt.getUTCDate(),
+  ).padStart(2, "0")}`;
+}
+
+/**
+ * 매입일(한국 달력)로부터 n 영업일 뒤 hourKst시(KST)의 유닉스 초.
+ * 예: 매입 금요일 → 2영업일 뒤 = 다음 화요일 09:00 KST (주말·공휴일 건너뜀).
+ * 해외주식 원화 결제 정산환율(T+2) 시점 추정에 사용.
+ */
+export function krSettlementTargetUnixSec(
+  purchaseYmd: string,
+  businessDays = 2,
+  hourKst = 9,
+): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(purchaseYmd.trim());
+  if (!m) return null;
+  let cursor = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (Number.isNaN(cursor.getTime())) return null;
+  let added = 0;
+  let guard = 0;
+  while (added < businessDays && guard < 60) {
+    cursor = new Date(cursor.getTime() + 86400000);
+    if (isKrBusinessDayYmd(ymdFromUtcDate(cursor))) added++;
+    guard++;
+  }
+  const ms = Date.parse(`${ymdFromUtcDate(cursor)}T00:00:00+09:00`);
+  if (!Number.isFinite(ms)) return null;
+  return Math.floor((ms + hourKst * 3600000) / 1000);
+}
+
 /** 김승주: 미국장 영업일 / 그 외: 한국장 영업일 — 전일 대비 등락 표시 여부 */
 export function shouldShowDailyChangeVsPreviousClose(
   ownerName: string,

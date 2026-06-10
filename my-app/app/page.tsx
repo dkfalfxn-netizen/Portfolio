@@ -88,7 +88,7 @@ import {
   type DailyPrice as SignalDailyPrice,
   type TradeSignal,
 } from "@/lib/signals";
-import { shouldShowDailyChangeVsPreviousClose } from "@/lib/trading-calendar";
+import { shouldShowDailyChangeVsPreviousClose, krSettlementTargetUnixSec } from "@/lib/trading-calendar";
 import {
   Card,
   CardContent,
@@ -337,6 +337,10 @@ type Position = {
   purchaseUsdKrw?: number;
   /** 해외(EUR) 매수 시점 EUR/KRW */
   purchaseEurKrw?: number;
+  /** 매수일(YYYY-MM-DD, KST) — 정산환율(T+2 09:00) 자동 보정용. 날짜 미입력 시 추가한 날로 설정 */
+  purchaseDate?: string;
+  /** 정산환율(T+2 09:00 KST) 미확정 상태 — 현재환율 임시값. 정산 시점 경과 후 자동 보정되면 해제 */
+  purchaseFxPending?: boolean;
   accountType: "해외주식" | "국내주식";
   accountName: string;
   owner: OwnerName;
@@ -2013,6 +2017,67 @@ export default function Home() {
       ac.abort();
     };
   }, [form.currency, form.purchaseDateForFx, showActionErrorToast]);
+
+  // 정산환율 자동 보정: purchaseFxPending(현재환율 임시) USD 포지션 중,
+  // 매수일 + 2영업일 09:00 KST가 지난 것은 실제 정산환율을 받아 매입환율을 교체한다.
+  const settlementBackfillBusyRef = useRef(false);
+  useEffect(() => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const dueDates = new Set<string>();
+    for (const p of positions) {
+      if (!p.purchaseFxPending || p.currency !== "USD") continue;
+      const d = typeof p.purchaseDate === "string" ? p.purchaseDate.trim() : "";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      const target = krSettlementTargetUnixSec(d, 2, 9);
+      if (target !== null && target <= nowSec) dueDates.add(d);
+    }
+    if (dueDates.size === 0 || settlementBackfillBusyRef.current) return;
+
+    settlementBackfillBusyRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rateByDate: Record<string, number> = {};
+        for (const d of dueDates) {
+          try {
+            const r = await fetch(`/api/market/fx-settlement?purchaseDate=${encodeURIComponent(d)}`);
+            const j = (await r.json()) as { rate?: number };
+            if (r.ok && typeof j.rate === "number" && Number.isFinite(j.rate) && j.rate > 0) {
+              rateByDate[d] = Math.round(j.rate * 1000) / 1000;
+            }
+          } catch {
+            // 조회 실패한 날짜는 다음 기회에 다시 시도
+          }
+        }
+        if (cancelled || Object.keys(rateByDate).length === 0) return;
+        setPositions((prev) => {
+          let changed = false;
+          const next = prev.map((p) => {
+            if (
+              p.purchaseFxPending &&
+              p.currency === "USD" &&
+              typeof p.purchaseDate === "string" &&
+              rateByDate[p.purchaseDate] != null
+            ) {
+              changed = true;
+              const { purchaseFxPending: _drop, ...rest } = p;
+              void _drop;
+              return { ...rest, purchaseUsdKrw: rateByDate[p.purchaseDate] };
+            }
+            return p;
+          });
+          if (changed) safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+          return changed ? next : prev;
+        });
+      } finally {
+        settlementBackfillBusyRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [positions]);
 
   const refreshLatestBackupAt = useCallback(async () => {
     const key = cloudSyncKey.trim();
@@ -4511,6 +4576,15 @@ export default function Home() {
     }
 
     const cg = form.chartGroup.trim();
+    // 매수일: 입력했으면 그 날짜, 아니면 오늘(KST)
+    const ymdCandidateForBase = form.purchaseDateForFx.trim();
+    const tradeDateForBase =
+      /^\d{4}-\d{2}-\d{2}$/.test(ymdCandidateForBase) ? ymdCandidateForBase : todayKST();
+    // USD 매수인데 매입환율을 직접/정산조회로 확정하지 못했으면(빈칸 → 현재환율 임시),
+    // 매수일을 저장하고 정산대기로 표시 → T+2 09:00 KST 지나면 자동으로 정산환율 보정
+    const usdFxFinalized =
+      form.currency === "USD" && Number.isFinite(purchaseUsdKrwNum) && purchaseUsdKrwNum > 0;
+    const usdFxPending = form.currency === "USD" && !usdFxFinalized;
     const base: Omit<Position, "owner"> = {
       symbol,
       name: nameTrimmed,
@@ -4522,6 +4596,7 @@ export default function Home() {
       accountName,
       ...(form.currency === "USD" ? { purchaseUsdKrw: effectivePurchaseUsdKrw } : {}),
       ...(form.currency === "EUR" ? { purchaseEurKrw: effectivePurchaseEurKrw } : {}),
+      ...(usdFxPending ? { purchaseDate: tradeDateForBase, purchaseFxPending: true } : {}),
       ...(cg ? { chartGroup: cg } : {}),
     };
 
@@ -4773,7 +4848,10 @@ export default function Home() {
         if (idx !== editingRowIndex) return p;
         if (p.currency === "USD") {
           if (!Number.isFinite(px) || px <= 0) return p;
-          return { ...p, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a, purchaseUsdKrw: px };
+          // 직접 환율을 입력하면 정산대기 해제(자동 보정이 덮어쓰지 않도록)
+          const { purchaseFxPending: _drop, ...rest } = p;
+          void _drop;
+          return { ...rest, symbol: sym, name: nm, chartGroup: cg, quantity: q, avgPrice: a, purchaseUsdKrw: px };
         }
         if (p.currency === "EUR") {
           if (!Number.isFinite(peur) || peur <= 0) return p;
@@ -6244,6 +6322,10 @@ export default function Home() {
                                   {position.purchaseUsdKrw == null ? (
                                     <span className="text-[10px] text-muted-foreground">
                                       미입력·현재환율 추정
+                                    </span>
+                                  ) : position.purchaseFxPending ? (
+                                    <span className="text-[10px] text-amber-500">
+                                      정산환율 대기(매수 2영업일 후 자동 보정)
                                     </span>
                                   ) : null}
                                 </div>

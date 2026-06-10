@@ -1,28 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { krSettlementTargetUnixSec } from "@/lib/trading-calendar";
 
 const YAHOO_KRW_X = "KRW=X";
-
-function parseYmd(s: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
-  if (!m) return false;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  if (!Number.isFinite(y) || mo < 1 || mo > 12 || d < 1 || d > 31) return false;
-  const dt = new Date(Date.UTC(y, mo - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
-}
-
-/**
- * 매입일(한국 달력) 다음날부터 이틀째 되는 날 09:00 KST 시점의 유닉스 초.
- * 예: 매입일 5/1 → 5/3 09:00 KST
- */
-function settlementFxTargetUnixSec(purchaseYmd: string): number | null {
-  if (!parseYmd(purchaseYmd)) return null;
-  const ms = Date.parse(`${purchaseYmd}T00:00:00+09:00`);
-  if (!Number.isFinite(ms)) return null;
-  return Math.floor((ms + 2 * 86400000 + 9 * 3600000) / 1000);
-}
 
 function pickClosestClose(
   timestamps: number[],
@@ -72,7 +51,8 @@ async function fetchYahooKrwXNear(targetSec: number, interval: "1h" | "1d"): Pro
 
 export async function GET(req: NextRequest) {
   const purchaseDate = req.nextUrl.searchParams.get("purchaseDate") ?? "";
-  const sec = settlementFxTargetUnixSec(purchaseDate);
+  // 매입일 + 2영업일(주말·공휴일 제외) 09:00 KST 시점
+  const sec = krSettlementTargetUnixSec(purchaseDate, 2, 9);
   if (sec === null) {
     return NextResponse.json({ error: "purchaseDate는 YYYY-MM-DD 형식이어야 합니다." }, { status: 400 });
   }
