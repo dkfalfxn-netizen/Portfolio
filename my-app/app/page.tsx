@@ -711,19 +711,21 @@ function purchaseCashDeduction(params: {
   return { deductUsd: 0, deductKrw: withFee * eurKrw };
 }
 
-/** 매입환율 셀 hover 툴팁: 매수일·정산일·정산환율 내역 (USD만). 매수일은 포지션 또는 매수저널에서 찾음 */
-function purchaseFxTooltip(
+type FxTooltipRow = { label: string; value: string; tag?: string };
+type FxTooltipData = { ticker: string; name?: string; rows: FxTooltipRow[]; note?: string };
+
+/** 매입환율 셀 hover 툴팁 데이터: 매수일·정산일·정산환율 내역 (USD만). 매수일은 포지션 또는 매수저널에서 찾음 */
+function purchaseFxTooltipData(
   p: Position,
   currentUsdKrw: number,
   journal: BuyJournalEntry[] = [],
-): string | undefined {
+): FxTooltipData | undefined {
   if (p.currency !== "USD") return undefined;
   const pdate = typeof p.purchaseDate === "string" ? p.purchaseDate.trim() : "";
-  // 포지션에 매수일이 없으면(구버전 데이터) 같은 보유자·종목의 저널 매수일로 폴백
-  const jdate =
-    journal.find(
-      (b) => b.owner === p.owner && b.symbol === p.symbol && b.currency === "USD",
-    )?.date ?? "";
+  const jEntry = journal.find(
+    (b) => b.owner === p.owner && b.symbol === p.symbol && b.currency === "USD",
+  );
+  const jdate = jEntry?.date ?? "";
   const d = /^\d{4}-\d{2}-\d{2}$/.test(pdate)
     ? pdate
     : /^\d{4}-\d{2}-\d{2}$/.test(jdate)
@@ -735,15 +737,19 @@ function purchaseFxTooltip(
     return `${Number(parts[1])}/${Number(parts[2])}`;
   };
   const r = (n: number | undefined | null) =>
-    typeof n === "number" && Number.isFinite(n) ? Math.round(n).toLocaleString("ko-KR") : null;
-
+    typeof n === "number" && Number.isFinite(n) ? `${Math.round(n).toLocaleString("ko-KR")} ₩/$` : null;
+  const name = (jEntry?.name || p.name || "").trim() || undefined;
   const applied = r(p.purchaseUsdKrw);
+
   if (p.purchaseFxPending) {
-    // 정산 전 — 매수일 + 현재환율 추정
-    const est = applied ?? r(currentUsdKrw);
-    return `매수 ${mdd(d)} · ${est} ₩/$ (정산 전·현재환율 추정)`;
+    const est = applied ?? r(currentUsdKrw) ?? "—";
+    return {
+      ticker: p.symbol,
+      name,
+      rows: [{ label: `매수 ${mdd(d)}`, value: est }],
+      note: "정산 전 · 현재환율 추정",
+    };
   }
-  // 정산 완료(또는 직접 입력)
   const targetSec = krSettlementTargetUnixSec(d, 2, 9);
   const settleYmd =
     targetSec !== null
@@ -755,16 +761,72 @@ function purchaseFxTooltip(
         }).format(new Date(targetSec * 1000))
       : null;
   const addRate = r(p.purchaseFxAtAdd);
-  const lines: string[] = [];
-  if (addRate) lines.push(`${addRate} ₩/$ (${mdd(d)} 추가 당시)`);
+  const rows: FxTooltipRow[] = [];
+  if (addRate) rows.push({ label: `추가 ${mdd(d)}`, value: addRate });
   if (applied) {
-    lines.push(
+    rows.push(
       addRate && settleYmd
-        ? `${applied} ₩/$ (${mdd(settleYmd)} 정산 적용)`
-        : `매수 ${mdd(d)} · ${applied} ₩/$`,
+        ? { label: `정산 ${mdd(settleYmd)}`, value: applied, tag: "적용" }
+        : { label: `매수 ${mdd(d)}`, value: applied },
     );
   }
-  return lines.length > 0 ? lines.join("\n") : undefined;
+  if (rows.length === 0) return undefined;
+  return { ticker: p.symbol, name, rows };
+}
+
+/** 매입환율 셀: hover 시 「오늘 수익 요약」과 같은 양식의 팝업(헤더+행) 표시 */
+function PurchaseFxCell({
+  position,
+  currentUsdKrw,
+  journal,
+  children,
+}: {
+  position: Position;
+  currentUsdKrw: number;
+  journal: BuyJournalEntry[];
+  children: ReactNode;
+}) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const data = purchaseFxTooltipData(position, currentUsdKrw, journal);
+  if (!data) return <>{children}</>;
+  return (
+    <>
+      <span
+        className="cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2"
+        onMouseEnter={(e) => setPos({ x: e.clientX, y: e.clientY })}
+        onMouseMove={(e) => setPos({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setPos(null)}
+      >
+        {children}
+      </span>
+      {pos !== null &&
+        typeof window !== "undefined" &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-[9999] rounded-lg border border-white/[0.12] bg-[#1a1f2e] shadow-2xl"
+            style={{ left: pos.x + 14, top: pos.y - 6 }}
+          >
+            <div className="flex items-baseline gap-2 border-b border-white/[0.1] px-3 py-2">
+              <span className="text-[13px] font-bold text-zinc-100">{data.ticker}</span>
+              {data.name ? <span className="text-[12px] text-zinc-400">{data.name}</span> : null}
+            </div>
+            <div className="space-y-1 px-3 py-2">
+              {data.rows.map((row, i) => (
+                <div key={i} className="flex items-center gap-4 text-[12px]">
+                  <span className="shrink-0 text-zinc-400">{row.label}</span>
+                  <span className="flex-1 text-right tabular-nums font-medium text-zinc-100">
+                    {row.value}
+                  </span>
+                  {row.tag ? <span className="shrink-0 text-[11px] text-emerald-400">{row.tag}</span> : null}
+                </div>
+              ))}
+              {data.note ? <div className="pt-0.5 text-[11px] text-amber-400">{data.note}</div> : null}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
 }
 
 function normalizeOwnerNames(raw: unknown): OwnerName[] {
@@ -6434,15 +6496,12 @@ export default function Home() {
                                   onChange={(e) => setEditPurchaseUsdKrw(e.target.value)}
                                 />
                               ) : (
-                                <div
-                                  className="flex flex-col items-end gap-0.5"
-                                  title={purchaseFxTooltip(position, usdKrw, buyJournal)}
-                                >
-                                  <span className={purchaseFxTooltip(position, usdKrw, buyJournal) ? "cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" : undefined}>
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <PurchaseFxCell position={position} currentUsdKrw={usdKrw} journal={buyJournal}>
                                     {position.purchaseUsdKrw != null
                                       ? `${fmtInt(Math.round(position.purchaseUsdKrw))} ₩/$`
                                       : `${usdKrw.toLocaleString(MONEY_INT_LOCALE)} ₩/$`}
-                                  </span>
+                                  </PurchaseFxCell>
                                   {position.purchaseUsdKrw == null ? (
                                     <span className="text-[10px] text-muted-foreground">
                                       미입력·현재환율 추정
