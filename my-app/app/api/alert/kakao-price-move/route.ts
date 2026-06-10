@@ -473,8 +473,17 @@ export async function GET(req: NextRequest) {
   const posForHybrid = normalizeDbPositions(snap.positions);
   const cashForHybrid = normalizeCash(snap.cash_by_owner);
   const quoteWeights: QuoteWeightedOwnerInput[] = [];
+  // 총수익률용 현재가: 배치 quotes에 종목별 라이브 시세(memoizedQuote)를 덮어써 정확도 보강
+  // (배치 fetchPrices가 비면 스냅샷 저장가로 폴백돼 손익이 어긋나는 것 방지)
+  const totalReturnQuotes: typeof quotes = { ...quotes };
   for (const row of posForHybrid) {
     const qRow = await memoizedQuote(row.symbol);
+    if (typeof qRow.price === "number" && Number.isFinite(qRow.price) && qRow.price > 0) {
+      totalReturnQuotes[row.symbol] = {
+        price: qRow.price,
+        currency: totalReturnQuotes[row.symbol]?.currency ?? null,
+      };
+    }
     const pctRow =
       qRow.price && qRow.previousClose && qRow.previousClose > 0
         ? ((qRow.price - qRow.previousClose) / qRow.previousClose) * 100
@@ -514,7 +523,7 @@ export async function GET(req: NextRequest) {
   const ownerTotalReturns = computeOwnerTotalReturns(
     normalizeCostPositions(snap.positions),
     cashForHybrid,
-    quotes,
+    totalReturnQuotes,
     usdKrw,
     eurKrw,
   );
@@ -803,8 +812,16 @@ export async function POST(req: NextRequest) {
         )
       : undefined;
   const quoteWeightsManual: QuoteWeightedOwnerInput[] = [];
+  // 총수익률용 현재가: 배치 quotes에 종목별 라이브 시세를 덮어써 정확도 보강
+  const totalReturnQuotes: typeof quotes = { ...quotes };
   for (const row of posNorm) {
     const qRow = await postMemoizedQuote(row.symbol);
+    if (typeof qRow.price === "number" && Number.isFinite(qRow.price) && qRow.price > 0) {
+      totalReturnQuotes[row.symbol] = {
+        price: qRow.price,
+        currency: totalReturnQuotes[row.symbol]?.currency ?? null,
+      };
+    }
     const pctRow =
       qRow.price && qRow.previousClose && qRow.previousClose > 0
         ? ((qRow.price - qRow.previousClose) / qRow.previousClose) * 100
@@ -838,7 +855,7 @@ export async function POST(req: NextRequest) {
   const ownerTotalReturns = computeOwnerTotalReturns(
     normalizeCostPositions(snap.positions),
     cashNorm,
-    quotes,
+    totalReturnQuotes,
     usdK,
     eurK,
   );
