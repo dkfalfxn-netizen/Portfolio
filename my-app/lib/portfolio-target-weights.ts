@@ -1,6 +1,19 @@
 /** page·목표비중 UI 공통 — 로컬 변경 시 서버 푸시 유도 */
 export const HAS_LOCAL_CHANGES_KEY = "portfolio_has_local_changes_v1";
 
+/** 미저장 로컬 변경의 마지막 발생 시각(ISO) — 동기화 충돌 확인창에 표시 */
+export const LOCAL_CHANGES_AT_KEY = "portfolio_local_changes_at_v1";
+
+/** 로컬 변경 플래그와 마지막 수정 시각을 함께 기록 — 플래그를 직접 set하지 말고 이 함수를 사용 */
+export function markLocalChanged(): void {
+  try {
+    window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    window.localStorage.setItem(LOCAL_CHANGES_AT_KEY, new Date().toISOString());
+  } catch {
+    //
+  }
+}
+
 /** 목표 비중 % — 대시보드·리밸런싱 계산기 공통(localStorage 단일 소스) */
 export const TARGET_WEIGHT_STORAGE_KEY = "portfolio_target_stock_weight_v1";
 
@@ -72,7 +85,7 @@ export function persistOwnerTargetWeightsFromInputStrings(
     all[ownerName] = merged;
     if (JSON.stringify(all[ownerName]) === prevRow) return false;
     window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
-    window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    markLocalChanged();
     window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
     return true;
   } catch {

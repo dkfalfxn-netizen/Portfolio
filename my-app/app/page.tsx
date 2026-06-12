@@ -34,6 +34,8 @@ import {
 } from "@/lib/format-money";
 import {
   HAS_LOCAL_CHANGES_KEY,
+  LOCAL_CHANGES_AT_KEY,
+  markLocalChanged,
   TARGET_WEIGHT_STORAGE_KEY,
   CALCULATOR_TARGET_STORAGE_KEY,
   buildRebalanceCalculatorByOwnerFromLocal,
@@ -1650,6 +1652,20 @@ function normalizeSellLogStrict(
  * 로컬 시각이 비어 있으면(저장소 삭제·최초) 항상 true → 서버 스냅샷을 반영해야 함.
  * 문자열만 `>`로 비교하면 `"" > ""`가 false가 되어 pull 적용이 건너뛰어질 수 있다.
  */
+/** 충돌 확인창용 KST 시각 표기: "6. 13. 09:12" (파싱 실패 시 "시각 미상") */
+function formatKstForConflict(isoRaw: string): string {
+  const t = Date.parse(isoRaw.trim());
+  if (!Number.isFinite(t)) return "시각 미상";
+  return new Date(t).toLocaleString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 function isServerSnapshotNewerThanLocal(serverTsRaw: string, lastSyncTsRaw: string): boolean {
   const serverTs = serverTsRaw.trim();
   const lastSyncTs = lastSyncTsRaw.trim();
@@ -2245,7 +2261,7 @@ export default function Home() {
           if (changed) anyChange = true;
           return changed ? next : prev;
         });
-        if (anyChange) safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+        if (anyChange) markLocalChanged();
       } finally {
         settlementBackfillBusyRef.current = false;
       }
@@ -2274,7 +2290,7 @@ export default function Home() {
         changed = true;
         return { ...b, fxRate: rate, totalKrw: b.qty * b.buyPrice * rate };
       });
-      if (changed) safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+      if (changed) markLocalChanged();
       return changed ? next : prev;
     });
   }, [positions, buyJournal]);
@@ -2318,7 +2334,7 @@ export default function Home() {
     if (skipOwnerLocalChangedRef.current > 0) {
       skipOwnerLocalChangedRef.current -= 1;
     } else {
-      safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+      markLocalChanged();
     }
   }, [ownerNames, isHydrated]);
 
@@ -3261,7 +3277,7 @@ export default function Home() {
       if (next.length === prev.length && next.every((n, i) => n === prev[i])) return prev;
       return next;
     });
-    safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+    markLocalChanged();
   }, []);
 
   const dailyLiveChangeByDate = useMemo<Record<string, DailyLiveChange>>(() => {
@@ -3541,17 +3557,20 @@ export default function Home() {
           } catch {
             // 백업 실패해도 동기화 흐름은 계속 (아래 확인에서 사용자가 판단)
           }
-          // A: 어느 쪽을 살릴지 확인
+          // A: 어느 쪽을 살릴지 확인 (각 데이터의 시각을 함께 표기)
+          const serverTimeLabel = formatKstForConflict(serverTs);
+          const localChangedAtRaw = window.localStorage.getItem(LOCAL_CHANGES_AT_KEY) ?? "";
+          const localTimeLabel = formatKstForConflict(localChangedAtRaw);
           const overwrite = window.confirm(
             [
               "⚠️ 동기화 충돌",
               "",
-              "서버에 다른 기기에서 저장한 더 최신 데이터가 있습니다.",
-              "이 기기에도 아직 서버에 올리지 않은 변경이 있습니다.",
+              `서버: 다른 기기에서 저장한 더 최신 데이터 (${serverTimeLabel} 저장)`,
+              `이 기기: 아직 서버에 올리지 않은 변경 (${localTimeLabel} 마지막 수정)`,
               "",
-              "[확인] 이 기기 데이터로 서버를 덮어씁니다.",
+              `[확인] 이 기기 데이터(${localTimeLabel} 수정)로 서버를 덮어씁니다.`,
               "         (직전 서버 상태는 방금 자동 백업되어 복원 가능)",
-              "[취소] 서버의 최신 데이터를 이 기기로 불러옵니다.",
+              `[취소] 서버 데이터(${serverTimeLabel} 저장)를 이 기기로 불러옵니다.`,
               "         (이 기기의 미저장 변경은 버려집니다)",
             ].join("\n"),
           );
@@ -3609,7 +3628,7 @@ export default function Home() {
             Object.keys(fromServerAlerts).length === 0 &&
             Object.keys(mergedAlerts).length > 0
           ) {
-            safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+            markLocalChanged();
           }
           // 매수저널: 서버에 있으면 교체, 서버가 비어있으면(컬럼 신설 직후 등)
           // 이 기기 기록을 보존하고 다음 push로 서버에 올린다.
@@ -3618,7 +3637,7 @@ export default function Home() {
             skipBuyJournalLocalChangedRef.current = 1;
             setBuyJournal(serverBuyJournal);
           } else if (buyJournalEntries.length > 0) {
-            safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+            markLocalChanged();
           }
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있고 충돌이 없거나(서버가 더 최신이 아님)
@@ -3815,7 +3834,7 @@ export default function Home() {
       skipMarkLocalChangedRef.current -= 1;
     } else {
       // 사용자가 직접 수정한 경우 → 다음 동기화 시 Push 유도
-      safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+      markLocalChanged();
     }
   }, [positions, isHydrated]);
 
@@ -3825,7 +3844,7 @@ export default function Home() {
     if (skipMarkLocalChangedRef.current > 0) {
       skipMarkLocalChangedRef.current -= 1;
     } else {
-      safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+      markLocalChanged();
     }
   }, [cashByOwner, isHydrated]);
 
@@ -3835,7 +3854,7 @@ export default function Home() {
     if (skipAlertThresholdsHydrateRef.current > 0) {
       skipAlertThresholdsHydrateRef.current -= 1;
     } else {
-      safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+      markLocalChanged();
     }
   }, [alertThresholdsByKey, isHydrated]);
 
@@ -3855,7 +3874,7 @@ export default function Home() {
     if (skipSellLogLocalChangedRef.current > 0) {
       skipSellLogLocalChangedRef.current -= 1;
     } else {
-      safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+      markLocalChanged();
       safeSetItem(SELL_LOG_DIRTY_KEY, "1");
       setSellLogDirty(true);
     }
@@ -3868,7 +3887,7 @@ export default function Home() {
       skipBuyJournalLocalChangedRef.current -= 1;
     } else {
       // 사용자가 매수 기록을 추가·수정한 경우 → 다음 동기화 시 Push 유도
-      safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+      markLocalChanged();
     }
   }, [buyJournal, isHydrated]);
 
@@ -4155,7 +4174,7 @@ export default function Home() {
           skipBuyJournalLocalChangedRef.current = 1;
           setBuyJournal(pulledBuyJournal);
         } else if (buyJournal.length > 0) {
-          safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+          markLocalChanged();
         }
         setSyncMessage("서버에서 불러왔습니다.");
         setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
@@ -4181,7 +4200,7 @@ export default function Home() {
           Object.keys(fromServerPull).length === 0 &&
           Object.keys(mergedPullAlerts).length > 0
         ) {
-          safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+          markLocalChanged();
         }
         // 관심종목도 서버에서 다시 불러오기
         setWatchlistLoaded(false);
@@ -4552,7 +4571,7 @@ export default function Home() {
         LEGACY_POSITIONS_STORAGE_KEY, CASH_STORAGE_KEY,
         HOLDINGS_SORT_STORAGE_KEY, DAILY_SNAPSHOTS_KEY, SELL_LOG_KEY,
         BUY_JOURNAL_KEY, LAST_SYNC_TS_KEY, LAST_SELL_LOG_SYNC_TS_KEY,
-        SELL_LOG_DIRTY_KEY, HAS_LOCAL_CHANGES_KEY, SNAPSHOT_PUSHED_DATE_KEY,
+        SELL_LOG_DIRTY_KEY, HAS_LOCAL_CHANGES_KEY, LOCAL_CHANGES_AT_KEY, SNAPSHOT_PUSHED_DATE_KEY,
         SNAPSHOT_PUSHED_TOTAL_KEY, ALERT_THRESHOLDS_STORAGE_KEY,
         TARGET_WEIGHT_STORAGE_KEY, CALCULATOR_TARGET_STORAGE_KEY,
         OWNER_SCRATCHPAD_STORAGE_KEY,
@@ -4604,6 +4623,7 @@ export default function Home() {
       LAST_SELL_LOG_SYNC_TS_KEY,
       SELL_LOG_DIRTY_KEY,
       HAS_LOCAL_CHANGES_KEY,
+      LOCAL_CHANGES_AT_KEY,
       SNAPSHOT_PUSHED_DATE_KEY,
       SNAPSHOT_PUSHED_TOTAL_KEY,
       ALERT_THRESHOLDS_STORAGE_KEY,
@@ -5243,7 +5263,7 @@ export default function Home() {
     setOwnerNames((prev) => [...prev, name]);
     setCashByOwner((prev) => ({ ...prev, [name]: prev[name] ?? { usd: 0, krw: 0 } }));
     setHoldingsSortByOwner((prev) => ({ ...prev, [name]: prev[name] ?? "manual" }));
-    safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+    markLocalChanged();
   }
 
   function handleRenameOwner(name: string) {
@@ -5283,7 +5303,7 @@ export default function Home() {
       delete next[name];
       return next;
     });
-    safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+    markLocalChanged();
   }
 
   function handleDeleteOwner(name: string) {
@@ -5317,7 +5337,7 @@ export default function Home() {
     });
     setSellLog((prev) => { const next = { ...prev }; delete next[name]; return next; });
     setSellLogForm((prev) => { const next = { ...prev }; delete next[name]; return next; });
-    safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+    markLocalChanged();
   }
 
   const holdingsViewOwner = activeTopNav.startsWith("owner-")

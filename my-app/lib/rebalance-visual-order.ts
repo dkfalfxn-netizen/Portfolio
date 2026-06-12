@@ -1,4 +1,4 @@
-import { HAS_LOCAL_CHANGES_KEY } from "@/lib/portfolio-target-weights";
+import { markLocalChanged } from "@/lib/portfolio-target-weights";
 
 /** 보유자별 비중 행 순서(chart 그룹·티커 키 문자열과 동일) */
 export const REBALANCE_VISUAL_ORDER_KEY = "portfolio_rebalance_visual_order_v1";
@@ -78,7 +78,7 @@ export function persistVisualOrderForOwner(owner: string, keys: string[]): void 
     const all = loadAllRebalanceVisualOrders();
     all[owner] = keys.filter((k) => typeof k === "string" && k.length > 0);
     window.localStorage.setItem(REBALANCE_VISUAL_ORDER_KEY, JSON.stringify(all));
-    window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+    markLocalChanged();
   } catch {
     /* 저장 불가 시 무시 */
   }

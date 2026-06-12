@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ResponsiveContainer, Tooltip, Treemap } from "recharts";
 import {
-  HAS_LOCAL_CHANGES_KEY,
+  markLocalChanged,
   loadAllCalculatorMemberSplitModes,
   loadAllCalculatorMemberSplits,
   loadAllTargetStockWeights,
@@ -1177,7 +1177,7 @@ function TargetStockWeightNeu({
       all[ownerName] = targetsByTicker;
       try {
         window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
-        window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+        markLocalChanged();
         window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
       } catch {
         setSaveStatus("err");
@@ -1200,7 +1200,7 @@ function TargetStockWeightNeu({
     all[ownerName] = targetsByTicker;
     try {
       window.localStorage.setItem(TARGET_WEIGHT_STORAGE_KEY, JSON.stringify(all));
-      window.localStorage.setItem(HAS_LOCAL_CHANGES_KEY, "1");
+      markLocalChanged();
       window.dispatchEvent(new Event(PORTFOLIO_TARGET_WEIGHTS_REFRESH_EVENT));
     } catch {
       setSaveStatus("err");
