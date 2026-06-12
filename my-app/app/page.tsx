@@ -1653,6 +1653,36 @@ function normalizeSellLogStrict(
  * 로컬 시각이 비어 있으면(저장소 삭제·최초) 항상 true → 서버 스냅샷을 반영해야 함.
  * 문자열만 `>`로 비교하면 `"" > ""`가 false가 되어 pull 적용이 건너뛰어질 수 있다.
  */
+/**
+ * 충돌 자동 해소 기준: 이 기기가 이 시간 안에 서버와 동기화된 적이 있으면
+ * 데이터가 낡지 않았다고 보고, 묻지 않고 이 기기 변경을 우선 저장한다(서버는 자동 백업).
+ * 모달은 이 시간보다 오래 동기화가 끊겼던 기기(며칠 묵은 탭 등)에서만 띄운다.
+ */
+const CONFLICT_AUTO_PUSH_IF_SYNCED_WITHIN_MS = 10 * 60_000;
+
+/** 자동 이행(매수저널·알림 보존) 플래그 최소 재시도 간격 — 업로드가 계속 실패해도 push 폭주 방지 */
+const AUTO_KEEP_AT_KEY = "portfolio_auto_migration_keep_at_v1";
+const AUTO_KEEP_MIN_INTERVAL_MS = 10 * 60_000;
+
+function canMarkAutoMigrationKeep(): boolean {
+  try {
+    const raw = window.localStorage.getItem(AUTO_KEEP_AT_KEY);
+    if (!raw) return true;
+    const t = Date.parse(raw);
+    return !Number.isFinite(t) || Date.now() - t >= AUTO_KEEP_MIN_INTERVAL_MS;
+  } catch {
+    return true;
+  }
+}
+
+function recordAutoMigrationKeep(): void {
+  try {
+    window.localStorage.setItem(AUTO_KEEP_AT_KEY, new Date().toISOString());
+  } catch {
+    //
+  }
+}
+
 /** 충돌 확인창용 KST 시각 표기: "6. 13. 09:12" (파싱 실패 시 "시각 미상") */
 function formatKstForConflict(isoRaw: string): string {
   const t = Date.parse(isoRaw.trim());
@@ -3549,12 +3579,32 @@ export default function Home() {
         let conflictChoice: "push" | "applyServer" | null = null;
         if (hasLocalChanges && serverNewer && !forcePull) {
           const localChangedAtRaw = (window.localStorage.getItem(LOCAL_CHANGES_AT_KEY) ?? "").trim();
+          const lastSyncAgeMs = (() => {
+            const t = Date.parse(lastSyncTs);
+            return Number.isFinite(t) ? Date.now() - t : Number.POSITIVE_INFINITY;
+          })();
           if (localChangedAtRaw.length === 0) {
             // 수정 시각 기록이 없는 플래그 = 매수저널·알림설정 자동 이행(사용자 수정 아님).
             // 묻지 않고 서버 최신을 따른다 — "취소를 눌러도 충돌창이 계속 뜨는" 반복 방지.
             // (적용 후 자동 이행 데이터는 auto-push가 조용히 다시 서버에 올린다)
             conflictChoice = "applyServer";
+          } else if (lastSyncAgeMs < CONFLICT_AUTO_PUSH_IF_SYNCED_WITHIN_MS) {
+            // 이 기기는 방금 전까지 서버와 같은 상태였음 → 데이터가 낡지 않았으므로
+            // 묻지 않고 이 기기 변경을 우선 저장한다(활발히 수정 중 모달 폭탄 방지).
+            // 덮어쓰기 전 서버 상태는 자동 백업되어 복원 가능.
+            try {
+              await fetch("/api/backup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sync_key: key }),
+              });
+            } catch {
+              // 백업 실패해도 진행 — 이 기기 기준 데이터가 최신 작업본
+            }
+            conflictChoice = "push";
+            setSyncMessage("다른 기기의 저장과 겹쳐 이 기기 변경을 우선 저장했습니다. (직전 서버 상태는 자동 백업됨)");
           } else {
+            // 이 기기가 오래(10분+) 동기화되지 않았던 경우(며칠 묵은 탭 등)만 사용자에게 확인.
             // C: 덮어쓰기로 사라질 "현재 서버 상태"를 백업 테이블에 자동 저장 (snapshot 생략 = 서버가 자기 상태를 백업)
             try {
               await fetch("/api/backup", {
@@ -3632,12 +3682,17 @@ export default function Home() {
           setAlertThresholdsByKey(mergedAlerts);
           safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(mergedAlerts));
           skipAlertThresholdsHydrateRef.current = 1;
+          // 자동 이행 플래그는 10분 간격으로만 재시도 — 업로드 실패가 반복돼도 push 폭주 방지
+          const allowAutoKeep = canMarkAutoMigrationKeep();
+          let autoKeepFired = false;
           if (
+            allowAutoKeep &&
             Object.keys(fromServerAlerts).length === 0 &&
             Object.keys(mergedAlerts).length > 0
           ) {
             // 자동 이행(사용자 수정 아님): 수정 시각 없이 플래그만 — 충돌창 판단에서 제외됨
             safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+            autoKeepFired = true;
           }
           // 매수저널: 서버에 있으면 교체, 서버가 비어있으면(컬럼 신설 직후 등)
           // 이 기기 기록을 보존하고 다음 push로 서버에 올린다.
@@ -3645,10 +3700,12 @@ export default function Home() {
           if (serverBuyJournal.length > 0) {
             skipBuyJournalLocalChangedRef.current = 1;
             setBuyJournal(serverBuyJournal);
-          } else if (buyJournalEntries.length > 0) {
+          } else if (allowAutoKeep && buyJournalEntries.length > 0) {
             // 자동 이행(사용자 수정 아님): 수정 시각 없이 플래그만 — 충돌창 판단에서 제외됨
             safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+            autoKeepFired = true;
           }
+          if (autoKeepFired) recordAutoMigrationKeep();
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있고 충돌이 없거나(서버가 더 최신이 아님)
           //   충돌 시 사용자가 "이 기기로 덮어쓰기"를 선택한 경우 → 로컬을 서버에 올림.
@@ -4179,13 +4236,17 @@ export default function Home() {
         }
         // 매수저널: 서버에 있으면 교체, 비어있으면 이 기기 기록 보존(다음 push로 올림).
         // HAS_LOCAL_CHANGES 설정은 위의 removeItem 이후여야 지워지지 않는다.
+        // 자동 이행 플래그는 10분 간격으로만 재시도(push 폭주 방지).
+        const allowAutoKeepPull = canMarkAutoMigrationKeep();
+        let autoKeepFiredPull = false;
         const pulledBuyJournal = normalizeBuyJournalStrict(j.buy_journal, pulledOwners);
         if (pulledBuyJournal.length > 0) {
           skipBuyJournalLocalChangedRef.current = 1;
           setBuyJournal(pulledBuyJournal);
-        } else if (buyJournal.length > 0) {
+        } else if (allowAutoKeepPull && buyJournal.length > 0) {
           // 자동 이행(사용자 수정 아님): 수정 시각 없이 플래그만
           safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+          autoKeepFiredPull = true;
         }
         setSyncMessage("서버에서 불러왔습니다.");
         setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
@@ -4208,12 +4269,15 @@ export default function Home() {
         safeSetItem(ALERT_THRESHOLDS_STORAGE_KEY, JSON.stringify(mergedPullAlerts));
         skipAlertThresholdsHydrateRef.current = 1;
         if (
+          allowAutoKeepPull &&
           Object.keys(fromServerPull).length === 0 &&
           Object.keys(mergedPullAlerts).length > 0
         ) {
           // 자동 이행(사용자 수정 아님): 수정 시각 없이 플래그만
           safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+          autoKeepFiredPull = true;
         }
+        if (autoKeepFiredPull) recordAutoMigrationKeep();
         // 관심종목도 서버에서 다시 불러오기
         setWatchlistLoaded(false);
       } else {
