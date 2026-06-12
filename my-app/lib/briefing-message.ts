@@ -368,18 +368,6 @@ function fmtKrw(n: number): string {
   return `₩${Math.round(n).toLocaleString("ko-KR")}`;
 }
 
-/** 전일 대비 % 높은 순(내림차순). 등락 없음/null 은 뒤로 */
-function sortByChangePctDesc(a: BriefingItem, b: BriefingItem): number {
-  const va = a.changePct;
-  const vb = b.changePct;
-  const fa = va !== null && Number.isFinite(va);
-  const fb = vb !== null && Number.isFinite(vb);
-  if (!fa && !fb) return 0;
-  if (!fa) return 1;
-  if (!fb) return -1;
-  return vb - va;
-}
-
 /** 터미널/고정폭 정렬용: 한글·전각 등은 폭 2, 영문·숫자·기호는 폭 1로 계산 */
 function codePointDisplayWidth(cp: number): number {
   if (cp >= 0x1100 && cp <= 0x115f) return 2;
@@ -438,25 +426,6 @@ function fmtPctPlain(p: number | null): string {
   return `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
 }
 
-function iconForGroupLabel(label: string): string {
-  const s = label.trim().toLowerCase();
-  if (!s) return "🧩";
-  if (s.includes("attack")) return "🎯";
-  if (s.includes("원자력") || s.includes("nuclear")) return "☢️";
-  if (s.includes("국내주식")) return "🇰🇷";
-  if (s.includes("s&p500") || s.includes("s&p 500") || s.includes("sp500")) return "🇺🇸";
-  if (s.includes("에르메스") || s.includes("hermes")) return "👜";
-  if (s === "xle" || s.includes("xle")) return "⛽";
-  if (s.includes("에너지") || s.includes("energy")) return "⚡";
-  if (s.includes("방산") || s.includes("defense")) return "🛡️";
-  if (s.includes("반도체") || s.includes("semiconductor")) return "💾";
-  if (s.includes("ai") || s.includes("tech") || s.includes("기술")) return "🤖";
-  if (s.includes("금") || s.includes("gold")) return "🥇";
-  if (s.includes("채권") || s.includes("bond")) return "💵";
-  if (s.includes("현금") || s.includes("cash")) return "💰";
-  return "🧩";
-}
-
 function ownerOrderIndex(owner: string): number {
   return ownerDisplayOrderIndex(owner);
 }
@@ -499,48 +468,8 @@ export function buildTelegramBriefingHtml(opts: {
     portfolioChangeVsYesterdayPct,
     ownerDailyReturns,
     ownerTotalReturns,
-    items,
     holdTransitions,
   } = opts;
-
-  function groupByChartLabel(rows: BriefingItem[]): Array<{ label: string; rows: BriefingItem[] }> {
-    const map = new Map<string, BriefingItem[]>();
-    for (const row of rows) {
-      const key = (row.groupLabel ?? "").trim() || row.symbol;
-      const prev = map.get(key);
-      if (prev) prev.push(row);
-      else map.set(key, [row]);
-    }
-    return [...map.entries()]
-      .map(([label, gRows]) => ({
-        label,
-        rows: gRows.sort(sortByChangePctDesc),
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label, "ko"));
-  }
-
-  type GroupWithAvg = { label: string; rows: BriefingItem[]; avg: number | null };
-
-  function computeGroupsWithAvg(rows: BriefingItem[]): GroupWithAvg[] {
-    return groupByChartLabel(rows).map((g) => {
-      const values = g.rows
-        .map((r) => r.changePct)
-        .filter((v): v is number => v !== null && Number.isFinite(v));
-      const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
-      return { ...g, avg };
-    });
-  }
-
-  function sortGroupsByAbsMagnitude(groups: GroupWithAvg[]): GroupWithAvg[] {
-    return [...groups].sort((a, b) => {
-      const af = a.avg !== null && Number.isFinite(a.avg);
-      const bf = b.avg !== null && Number.isFinite(b.avg);
-      if (!af && !bf) return 0;
-      if (!af) return 1;
-      if (!bf) return -1;
-      return Math.abs(b.avg!) - Math.abs(a.avg!);
-    });
-  }
 
   const timeLine = slotLabel ? `⏰ <i>${escapeHtml(slotLabel)}</i>\n\n` : "";
   const cronFooter =
@@ -611,24 +540,6 @@ export function buildTelegramBriefingHtml(opts: {
     ownerBlock = `\n\n<b>👤 보유자별 요약</b>\n${lines.join("\n")}`;
   }
 
-  /** 전 종목 통합 그룹 — 차트 라벨(섹터) 단위 평균등락 */
-  const allGroups = computeGroupsWithAvg(items);
-  const moverGroups = sortGroupsByAbsMagnitude(
-    allGroups.filter((g) => g.avg !== null && Math.abs(g.avg) >= 2),
-  );
-
-  let moversBlock = "";
-  if (moverGroups.length > 0) {
-    const lines = moverGroups.map((g) => {
-      const arrow = g.avg! >= 0 ? "▲" : "▼";
-      const signed = `${g.avg! >= 0 ? "+" : ""}${g.avg!.toFixed(2)}%`;
-      return `${iconForGroupLabel(g.label)} <b>${escapeHtml(g.label)}</b>: ${signed} ${arrow}`;
-    });
-    moversBlock = `\n\n<b>🔥 주요 변동 종목 (±2% 이상)</b>\n${lines.join("\n")}`;
-  } else {
-    moversBlock = `\n\n<b>🔥 주요 변동 종목 (±2% 이상)</b>\n<i>(해당 없음)</i>`;
-  }
-
   /** HOLD→전환 종목을 BUY / SELL 한 줄로 묶음 */
   let signalBlock = "";
   if (holdTransitions.length > 0) {
@@ -663,7 +574,6 @@ export function buildTelegramBriefingHtml(opts: {
     `📊 <b>포트폴리오 데일리 리포트</b> (${escapeHtml(dateLabel)})\n\n` +
     `${portfolioLine}` +
     `${ownerBlock}` +
-    `${moversBlock}` +
     `${signalBlock}` +
     `${cronFooter}`;
 
