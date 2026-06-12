@@ -330,6 +330,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 자동 push 전 가벼운 확인용: 서버 스냅샷의 updated_at만 반환.
+  // 다른 기기가 그 사이 push했는지(서버가 더 최신인지)를 본문 전송 없이 판별한다.
+  if (action === "meta") {
+    const { data, error } = await admin
+      .from("portfolio_snapshots")
+      .select("updated_at")
+      .eq("sync_key", key)
+      .maybeSingle();
+    if (error) {
+      return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 500 });
+    }
+    return NextResponse.json({
+      found: !!data,
+      updated_at: typeof data?.updated_at === "string" ? data.updated_at : null,
+    });
+  }
+
   if (action === "pull") {
     let withSellLog = await admin
       .from("portfolio_snapshots")
@@ -798,7 +815,7 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json(
-    { error: "action은 pull, push, pushTargetWeights 중 하나여야 합니다." },
+    { error: "action은 meta, pull, push, pushTargetWeights 중 하나여야 합니다." },
     { status: 400 },
   );
 }

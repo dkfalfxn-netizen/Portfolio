@@ -23,6 +23,7 @@ import { RebalancingCalculator } from "@/components/rebalancing-calculator";
 import { TechnicalSignalDetailModal } from "@/components/technical-signal-detail-modal";
 import TradeImageImport, { type ConfirmedBuyTrade, type ConfirmedSellTrade } from "@/components/trade-image-import";
 import { cn } from "@/lib/utils";
+import { FALLBACK_USD_KRW, FALLBACK_EUR_KRW } from "@/lib/fx-fallback";
 import { holdingSymbolsEquivalent, inferTradingCurrencyFromTicker, isKrxListedEquityCode } from "@/lib/finance-symbols";
 import {
   fmtInt,
@@ -2390,8 +2391,8 @@ export default function Home() {
     }
   }, [ownerNames, sellLogListViewOwner]);
 
-  const usdKrw = marketQuery.data?.usdKrw ?? 1350;
-  const eurKrw = marketQuery.data?.eurKrw ?? 1450;
+  const usdKrw = marketQuery.data?.usdKrw ?? FALLBACK_USD_KRW;
+  const eurKrw = marketQuery.data?.eurKrw ?? FALLBACK_EUR_KRW;
 
   const handleAddSymbolInput = useCallback(
     (value: string) => {
@@ -3929,8 +3930,44 @@ export default function Home() {
     // 로컬 변경이 없으면 불필요한 push를 생략 — Pull 직후 state가 바뀌어도 push 안 함
     if (window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1") return;
     if (pushDebounceRef.current) clearTimeout(pushDebounceRef.current);
-    pushDebounceRef.current = setTimeout(() => {
+    pushDebounceRef.current = setTimeout(async () => {
       // debounce 후 다시 확인 (그 사이 pull이 들어왔을 수 있음)
+      if (window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1") return;
+      // ── 덮어쓰기 가드: push 전에 서버가 더 최신인지 확인 ──
+      // 모바일에서 며칠 전 열어둔 탭이 복원된 채 수정하면, 다른 기기가 올린
+      // 최신 서버 데이터를 옛 state로 통째로 덮어쓸 수 있다. 서버 updated_at이
+      // 로컬 마지막 동기 시각보다 새로우면 블라인드 push 대신 충돌 플로우
+      // (서버 상태 자동 백업 + 사용자 확인)로 위임한다.
+      // meta 확인 자체가 실패하면(네트워크 등) 기존 동작대로 push를 진행한다.
+      try {
+        const metaRes = await fetch("/api/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "meta", key: cloudSyncKey }),
+        });
+        if (metaRes.ok) {
+          const meta = (await metaRes.json().catch(() => ({}))) as {
+            found?: boolean;
+            updated_at?: string | null;
+          };
+          const serverTs = typeof meta.updated_at === "string" ? meta.updated_at : "";
+          const lastSyncTs = window.localStorage.getItem(LAST_SYNC_TS_KEY) ?? "";
+          if (meta.found && isServerSnapshotNewerThanLocal(serverTs, lastSyncTs)) {
+            setSyncMessage("서버에 다른 기기의 최신 데이터가 있어 확인이 필요합니다.");
+            await syncWithServerForKey(
+              cloudSyncKey,
+              positions,
+              cashByOwner,
+              holdingsSortByOwner,
+              sellLog,
+              ownerNames,
+            );
+            return;
+          }
+        }
+      } catch {
+        // meta 확인 실패는 무시하고 평소대로 push
+      }
       if (window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1") return;
       void fetch("/api/sync", {
         method: "POST",
@@ -3973,7 +4010,40 @@ export default function Home() {
     // marketQuery.data?.quotes는 의도적으로 deps에서 제외 — 시세 틱마다 push가 트리거되면 안 됨.
     // push 시점에 클로저로 현재 시세를 읽어 currentPrice만 실어 보낸다(데이터 변경 시에만 push).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames, alertThresholdsByKey, isHydrated, syncReady, autoSync, cloudSyncKey]);
+  }, [positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames, alertThresholdsByKey, isHydrated, syncReady, autoSync, cloudSyncKey, syncWithServerForKey]);
+
+  /** 탭 복귀 재동기화 마지막 실행 시각 — 잦은 포커스 전환 시 과도한 pull 방지(60초 스로틀) */
+  const visibilityResyncLastRunRef = useRef(0);
+
+  // ── 탭 복귀 시 재동기화 ──
+  // pull은 원래 페이지 로드 시 1회뿐이라, 모바일 브라우저가 며칠 전 탭을
+  // 새로고침 없이 복원하면 옛 데이터가 그대로 보였다. 탭이 다시 보일 때
+  // syncWithServerForKey를 돌려 서버가 더 최신이면 받아오고(로컬 변경 없을 때),
+  // 충돌이면 기존 확인 플로우를 태운다.
+  useEffect(() => {
+    if (!isHydrated || !syncReady || !autoSync || cloudSyncKey.length < 8) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - visibilityResyncLastRunRef.current < 60_000) return;
+      if (syncBusy) return;
+      visibilityResyncLastRunRef.current = now;
+      void syncWithServerForKey(
+        cloudSyncKey,
+        positions,
+        cashByOwner,
+        holdingsSortByOwner,
+        sellLog,
+        ownerNames,
+      );
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [isHydrated, syncReady, autoSync, cloudSyncKey, positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames, syncBusy, syncWithServerForKey]);
 
   async function handlePullCloud() {
     const key = cloudSyncKey.trim();

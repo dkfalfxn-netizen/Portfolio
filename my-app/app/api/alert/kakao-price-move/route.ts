@@ -17,6 +17,7 @@ import { isKrxCommodity, isKrxListedEquityCode, toYahooSymbol } from "@/lib/fina
 import { todayKST, yesterdayKST, mmddKST, isKstWeekend } from "@/lib/date-utils";
 import { analyzeFourSignals, type FourSignalsResult } from "@/lib/technical-signals";
 import { isKrEquityTradingSessionDay, isUsEquityTradingSessionDay } from "@/lib/trading-calendar";
+import { FALLBACK_USD_KRW, FALLBACK_EUR_KRW } from "@/lib/fx-fallback";
 
 type Position = {
   symbol: string;
@@ -347,8 +348,8 @@ export async function GET(req: NextRequest) {
     }
   }
   const { quotes, usdKrw: fxUsd, eurKrw: fxEur } = await fetchPrices([...allSyms]);
-  const usdKrw = fxUsd ?? 1400;
-  const eurKrw = fxEur ?? 1500;
+  const usdKrw = fxUsd ?? FALLBACK_USD_KRW;
+  const eurKrw = fxEur ?? FALLBACK_EUR_KRW;
 
   let todayLiveKrw = 0;
   let yesterdayPortfolioSum = 0;
@@ -784,8 +785,8 @@ export async function POST(req: NextRequest) {
   const posNorm = normalizeDbPositions(snap.positions);
   const allSyms = [...new Set(posNorm.map((p) => p.symbol))];
   const { quotes, usdKrw: pUsd, eurKrw: pEur } = await fetchPrices(allSyms);
-  const usdK = pUsd ?? 1400;
-  const eurK = pEur ?? 1500;
+  const usdK = pUsd ?? FALLBACK_USD_KRW;
+  const eurK = pEur ?? FALLBACK_EUR_KRW;
   const cashNorm = normalizeCash(snap.cash_by_owner);
   const todayLiveKrw = computeLivePortfolioKrw(posNorm, cashNorm, quotes, usdK, eurK);
 
