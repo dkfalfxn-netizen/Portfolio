@@ -1542,6 +1542,32 @@ function loadCashByOwner(): CashByOwner {
 }
 
 /** 서버 pull 전용: owner_names 기준으로만 cash 복원 (DEFAULT 강제 주입 없음) */
+/** 서버 pull 전용: 매수저널 복원 (loadBuyJournal과 동일 검증 + owner_names 필터) */
+function normalizeBuyJournalStrict(raw: unknown, owners: OwnerName[]): BuyJournalEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const allowed = new Set(owners);
+  return raw
+    .filter(
+      (e): e is BuyJournalEntry =>
+        e !== null &&
+        typeof e === "object" &&
+        typeof (e as BuyJournalEntry).id === "string" &&
+        typeof (e as BuyJournalEntry).date === "string" &&
+        typeof (e as BuyJournalEntry).owner === "string" &&
+        typeof (e as BuyJournalEntry).symbol === "string" &&
+        typeof (e as BuyJournalEntry).name === "string" &&
+        typeof (e as BuyJournalEntry).qty === "number" &&
+        typeof (e as BuyJournalEntry).buyPrice === "number" &&
+        typeof (e as BuyJournalEntry).fxRate === "number" &&
+        typeof (e as BuyJournalEntry).totalKrw === "number" &&
+        ((e as BuyJournalEntry).currency === "USD" ||
+          (e as BuyJournalEntry).currency === "EUR" ||
+          (e as BuyJournalEntry).currency === "KRW"),
+    )
+    .filter((e) => allowed.has(e.owner))
+    .slice(-BUY_JOURNAL_MAX);
+}
+
 function normalizeCashStrict(raw: unknown, owners: OwnerName[]): CashByOwner {
   const obj =
     raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -1753,6 +1779,7 @@ export default function Home() {
   const skipAlertThresholdsHydrateRef = useRef(0);
   const skipOwnerLocalChangedRef = useRef(0);
   const skipSellLogLocalChangedRef = useRef(0);
+  const skipBuyJournalLocalChangedRef = useRef(0);
   const [holdingsSortByOwner, setHoldingsSortByOwner] =
     useState<Record<OwnerName, HoldingsSortMode>>(defaultHoldingsSort);
   /** 보유자별 심플 종목 요약 테이블 접힘 여부 */
@@ -3459,6 +3486,7 @@ export default function Home() {
       cash: CashByOwner,
       holdingsSort: Record<OwnerName, HoldingsSortMode>,
       sellLogByOwner: Record<string, SellLogEntry[]>,
+      buyJournalEntries: BuyJournalEntry[],
       owners: OwnerName[],
       /** true이면 로컬 변경 여부와 무관하게 항상 pull 우선 */
       forcePull = false,
@@ -3477,6 +3505,7 @@ export default function Home() {
         cash_by_owner?: unknown;
         holdings_sort_by_owner?: unknown;
         sell_log_by_owner?: unknown;
+        buy_journal?: unknown;
         owner_names?: unknown;
         target_stock_weight_by_owner?: unknown;
         owner_scratchpad_by_owner?: unknown;
@@ -3582,6 +3611,15 @@ export default function Home() {
           ) {
             safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
           }
+          // 매수저널: 서버에 있으면 교체, 서버가 비어있으면(컬럼 신설 직후 등)
+          // 이 기기 기록을 보존하고 다음 push로 서버에 올린다.
+          const serverBuyJournal = normalizeBuyJournalStrict(j.buy_journal, pulledOwners);
+          if (serverBuyJournal.length > 0) {
+            skipBuyJournalLocalChangedRef.current = 1;
+            setBuyJournal(serverBuyJournal);
+          } else if (buyJournalEntries.length > 0) {
+            safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+          }
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있고 충돌이 없거나(서버가 더 최신이 아님)
           //   충돌 시 사용자가 "이 기기로 덮어쓰기"를 선택한 경우 → 로컬을 서버에 올림.
@@ -3596,6 +3634,7 @@ export default function Home() {
               cashByOwner: cash,
               holdingsSortByOwner: holdingsSort,
               sellLogByOwner,
+              buyJournal: buyJournalEntries,
               ownerNames: owners,
               targetStockWeightByOwner: loadAllTargetStockWeights(),
               ownerScratchpadByOwner: loadAllOwnerScratchpads(),
@@ -3649,6 +3688,7 @@ export default function Home() {
             cashByOwner: cash,
             holdingsSortByOwner: holdingsSort,
             sellLogByOwner,
+            buyJournal: buyJournalEntries,
             ownerNames: owners,
             targetStockWeightByOwner: loadAllTargetStockWeights(),
             ownerScratchpadByOwner: loadAllOwnerScratchpads(),
@@ -3700,6 +3740,7 @@ export default function Home() {
     skipOwnerLocalChangedRef.current = 1; // 초기 로드 시 ownerNames 효과가 로컬 변경으로 오인되는 것을 방지
     setPositions(pos);
     setCashByOwner(cash);
+    skipBuyJournalLocalChangedRef.current = 1;
     setBuyJournal(buyJ);
     setSellLog(log);
     setOwnerNames(owners);
@@ -3757,7 +3798,7 @@ export default function Home() {
     }
 
     void (async () => {
-      await syncWithServerForKey(savedKey, pos, cash, holdSort, log, loadOwnerNames());
+      await syncWithServerForKey(savedKey, pos, cash, holdSort, log, buyJ, loadOwnerNames());
       setSyncReady(true);
     })();
   }, [syncWithServerForKey]);
@@ -3823,6 +3864,12 @@ export default function Home() {
   useEffect(() => {
     if (!isHydrated) return;
     safeSetItem(BUY_JOURNAL_KEY, JSON.stringify(buyJournal));
+    if (skipBuyJournalLocalChangedRef.current > 0) {
+      skipBuyJournalLocalChangedRef.current -= 1;
+    } else {
+      // 사용자가 매수 기록을 추가·수정한 경우 → 다음 동기화 시 Push 유도
+      safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
+    }
   }, [buyJournal, isHydrated]);
 
   // 로컬 스냅샷 읽기 + 동기화 키가 있으면 서버 스냅샷도 병합
@@ -3960,6 +4007,7 @@ export default function Home() {
               cashByOwner,
               holdingsSortByOwner,
               sellLog,
+              buyJournal,
               ownerNames,
             );
             return;
@@ -3980,6 +4028,7 @@ export default function Home() {
           cashByOwner,
           holdingsSortByOwner,
           sellLogByOwner: sellLog,
+          buyJournal,
           ownerNames,
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
@@ -4010,7 +4059,7 @@ export default function Home() {
     // marketQuery.data?.quotes는 의도적으로 deps에서 제외 — 시세 틱마다 push가 트리거되면 안 됨.
     // push 시점에 클로저로 현재 시세를 읽어 currentPrice만 실어 보낸다(데이터 변경 시에만 push).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames, alertThresholdsByKey, isHydrated, syncReady, autoSync, cloudSyncKey, syncWithServerForKey]);
+  }, [positions, cashByOwner, holdingsSortByOwner, sellLog, buyJournal, ownerNames, alertThresholdsByKey, isHydrated, syncReady, autoSync, cloudSyncKey, syncWithServerForKey]);
 
   /** 탭 복귀 재동기화 마지막 실행 시각 — 잦은 포커스 전환 시 과도한 pull 방지(60초 스로틀) */
   const visibilityResyncLastRunRef = useRef(0);
@@ -4034,6 +4083,7 @@ export default function Home() {
         cashByOwner,
         holdingsSortByOwner,
         sellLog,
+        buyJournal,
         ownerNames,
       );
     };
@@ -4043,7 +4093,7 @@ export default function Home() {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [isHydrated, syncReady, autoSync, cloudSyncKey, positions, cashByOwner, holdingsSortByOwner, sellLog, ownerNames, syncBusy, syncWithServerForKey]);
+  }, [isHydrated, syncReady, autoSync, cloudSyncKey, positions, cashByOwner, holdingsSortByOwner, sellLog, buyJournal, ownerNames, syncBusy, syncWithServerForKey]);
 
   async function handlePullCloud() {
     const key = cloudSyncKey.trim();
@@ -4065,6 +4115,7 @@ export default function Home() {
         cash_by_owner?: unknown;
         holdings_sort_by_owner?: unknown;
         sell_log_by_owner?: unknown;
+        buy_journal?: unknown;
         owner_names?: unknown;
         target_stock_weight_by_owner?: unknown;
         owner_scratchpad_by_owner?: unknown;
@@ -4096,6 +4147,15 @@ export default function Home() {
           safeSetItem(LAST_SELL_LOG_SYNC_TS_KEY, j.updated_at);
           window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
           window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+        }
+        // 매수저널: 서버에 있으면 교체, 비어있으면 이 기기 기록 보존(다음 push로 올림).
+        // HAS_LOCAL_CHANGES 설정은 위의 removeItem 이후여야 지워지지 않는다.
+        const pulledBuyJournal = normalizeBuyJournalStrict(j.buy_journal, pulledOwners);
+        if (pulledBuyJournal.length > 0) {
+          skipBuyJournalLocalChangedRef.current = 1;
+          setBuyJournal(pulledBuyJournal);
+        } else if (buyJournal.length > 0) {
+          safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
         }
         setSyncMessage("서버에서 불러왔습니다.");
         setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
@@ -4153,6 +4213,7 @@ export default function Home() {
           cashByOwner,
           holdingsSortByOwner,
           sellLogByOwner: sellLog,
+          buyJournal,
           ownerNames,
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
@@ -4446,6 +4507,9 @@ export default function Home() {
           ...("alert_thresholds_by_position" in s && s.alert_thresholds_by_position != null
             ? { alertThresholdsByPosition: s.alert_thresholds_by_position }
             : {}),
+          ...(Array.isArray(s.buy_journal_entries) && s.buy_journal_entries.length > 0
+            ? { buyJournal: s.buy_journal_entries }
+            : {}),
         }),
       });
       const j = (await r.json()) as { error?: string };
@@ -4453,9 +4517,10 @@ export default function Home() {
         setSyncMessage(j.error ?? "복원(서버 반영)에 실패했습니다.");
         return;
       }
-      // 매수 일지는 메인 sync에 없으므로 백업에서 직접 localStorage 복원
+      // 매수 일지: 위 push로 서버에도 반영되지만, 직후 pull 전에 화면이 비지 않도록 로컬도 즉시 복원
       if (Array.isArray(s.buy_journal_entries) && s.buy_journal_entries.length > 0) {
         safeSetItem(BUY_JOURNAL_KEY, JSON.stringify(s.buy_journal_entries));
+        skipBuyJournalLocalChangedRef.current = 1;
         setBuyJournal(loadBuyJournal());
       }
       setPendingBackups(null);
@@ -4520,6 +4585,7 @@ export default function Home() {
       cashByOwner,
       holdingsSortByOwner,
       sellLog,
+      buyJournal,
       ownerNames,
       shouldForcePull,
     );

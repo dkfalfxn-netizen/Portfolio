@@ -31,7 +31,8 @@ function isLikelyMissingColumnError(message: string): boolean {
   const m = message.toLowerCase();
   return (
     (m.includes("column") && (m.includes("does not exist") || m.includes("unknown"))) ||
-    m.includes("alert_thresholds")
+    m.includes("alert_thresholds") ||
+    m.includes("buy_journal")
   );
 }
 
@@ -92,6 +93,7 @@ type PushBody = {
   holdingsSortByOwner?: unknown;
   ownerNames?: unknown;
   sellLogByOwner?: unknown;
+  buyJournal?: unknown;
   targetStockWeightByOwner?: unknown;
   ownerScratchpadByOwner?: unknown;
   rebalanceCalculatorByOwner?: unknown;
@@ -166,6 +168,62 @@ function sanitizeSellLogForOwners(
     out[owner] = cleaned;
   }
   return out;
+}
+
+type BuyJournalCurrency = "USD" | "EUR" | "KRW";
+type BuyJournalEntry = {
+  id: string;
+  date: string;
+  owner: string;
+  symbol: string;
+  name: string;
+  qty: number;
+  buyPrice: number;
+  currency: BuyJournalCurrency;
+  fxRate: number;
+  totalKrw: number;
+  fxPending?: boolean;
+};
+
+/** 클라이언트 BUY_JOURNAL_MAX와 동일 — 서버 저장 상한 */
+const BUY_JOURNAL_MAX = 500;
+
+/** 매수저널 검증: 클라이언트 loadBuyJournal과 동일 최소 기준(id·owner·symbol·qty>0) */
+function sanitizeBuyJournalForOwners(raw: unknown, allowed: Set<string>): BuyJournalEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: BuyJournalEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const e = item as Record<string, unknown>;
+    const id = typeof e.id === "string" ? e.id.trim() : "";
+    const owner = typeof e.owner === "string" ? e.owner.trim() : "";
+    const symbol = typeof e.symbol === "string" ? e.symbol.trim() : "";
+    const qty = Number(e.qty);
+    if (!id || !owner || !symbol || !allowed.has(owner)) continue;
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+    const currency: BuyJournalCurrency =
+      e.currency === "USD" || e.currency === "EUR" || e.currency === "KRW" ? e.currency : "KRW";
+    const buyPriceRaw = Number(e.buyPrice);
+    const buyPrice = Number.isFinite(buyPriceRaw) && buyPriceRaw >= 0 ? buyPriceRaw : 0;
+    const fxRate =
+      typeof e.fxRate === "number" && Number.isFinite(e.fxRate) && e.fxRate > 0 ? e.fxRate : 1;
+    const totalKrwRaw = Number(e.totalKrw);
+    const totalKrw = Number.isFinite(totalKrwRaw) ? totalKrwRaw : qty * buyPrice * fxRate;
+    out.push({
+      id,
+      date: typeof e.date === "string" ? e.date.trim() : "",
+      owner,
+      symbol,
+      name: typeof e.name === "string" && e.name.trim() ? e.name.trim() : symbol,
+      qty,
+      buyPrice,
+      currency,
+      fxRate,
+      totalKrw,
+      ...(e.fxPending === true ? { fxPending: true } : {}),
+    });
+  }
+  return out.slice(-BUY_JOURNAL_MAX);
 }
 
 function parseOwnerNames(raw: unknown): string[] {
@@ -351,15 +409,18 @@ export async function POST(req: NextRequest) {
     let withSellLog = await admin
       .from("portfolio_snapshots")
       .select(
-        "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, target_stock_weight_by_owner, owner_scratchpad_by_owner, rebalance_calculator_by_owner, alert_thresholds_by_position, updated_at",
+        "positions, cash_by_owner, holdings_sort_by_owner, owner_names, sell_log_by_owner, buy_journal, target_stock_weight_by_owner, owner_scratchpad_by_owner, rebalance_calculator_by_owner, alert_thresholds_by_position, updated_at",
       )
       .eq("sync_key", key)
       .maybeSingle();
 
     if (withSellLog.error) {
       const msg = (withSellLog.error.message ?? "").toLowerCase();
+      // buy_journal·alert_thresholds 컬럼 마이그레이션 전 스키마 폴백 (두 컬럼 모두 제외 후 재시도)
       const maybeMissingAlertCol =
-        msg.includes("alert_thresholds") || (msg.includes("column") && msg.includes("does not exist"));
+        msg.includes("alert_thresholds") ||
+        msg.includes("buy_journal") ||
+        (msg.includes("column") && msg.includes("does not exist"));
       if (maybeMissingAlertCol) {
         withSellLog = await admin
           .from("portfolio_snapshots")
@@ -398,6 +459,7 @@ export async function POST(req: NextRequest) {
           holdings_sort_by_owner?: unknown;
           owner_names?: unknown;
           sell_log_by_owner?: unknown;
+          buy_journal?: unknown;
           target_stock_weight_by_owner?: unknown;
           owner_scratchpad_by_owner?: unknown;
           rebalance_calculator_by_owner?: unknown;
@@ -417,6 +479,7 @@ export async function POST(req: NextRequest) {
         cash_by_owner: {},
         holdings_sort_by_owner: {},
         sell_log_by_owner: {},
+        buy_journal: [],
         owner_names: [],
         target_stock_weight_by_owner: {},
         owner_scratchpad_by_owner: {},
@@ -459,6 +522,7 @@ export async function POST(req: NextRequest) {
       cash_by_owner: sanitizeCashForOwners(data.cash_by_owner, allowed),
       holdings_sort_by_owner: sanitizeHoldingsSortForOwners(sortParsed, allowed),
       sell_log_by_owner: sanitizeSellLogForOwners(data.sell_log_by_owner, allowed),
+      buy_journal: sanitizeBuyJournalForOwners(data.buy_journal, allowed),
       owner_names: ownerList,
       target_stock_weight_by_owner,
       owner_scratchpad_by_owner: sanitizeOwnerScratchpadsForOwners(
@@ -531,6 +595,31 @@ export async function POST(req: NextRequest) {
         .eq("sync_key", key)
         .maybeSingle();
       sellLogOut = sanitizeSellLogForOwners(existing?.sell_log_by_owner ?? {}, allowed);
+    }
+
+    let buyJournalOut: BuyJournalEntry[];
+    {
+      // 목표 비중과 동일 규칙: 비어있으면 서버 기존값 보존.
+      // (저널이 없는 다른 기기·구버전 클라이언트의 push가 서버 매수 기록을 지우는 것 방지)
+      const incomingRaw = "buyJournal" in b && b.buyJournal != null ? b.buyJournal : null;
+      const incomingSanitized =
+        incomingRaw != null ? sanitizeBuyJournalForOwners(incomingRaw, allowed) : null;
+      const incomingIsEmpty = incomingSanitized == null || incomingSanitized.length === 0;
+      if (!incomingIsEmpty) {
+        buyJournalOut = incomingSanitized!;
+      } else {
+        const { data: existing, error: loadErr } = await admin
+          .from("portfolio_snapshots")
+          .select("buy_journal")
+          .eq("sync_key", key)
+          .maybeSingle();
+        buyJournalOut = loadErr
+          ? [] // 컬럼 미생성(마이그레이션 전) — 아래 upsert 폴백에서 buy_journal 자체가 제외됨
+          : sanitizeBuyJournalForOwners(
+              (existing as { buy_journal?: unknown } | null)?.buy_journal ?? [],
+              allowed,
+            );
+      }
     }
 
     let targetWeightsOut: TargetMap;
@@ -643,6 +732,7 @@ export async function POST(req: NextRequest) {
       holdings_sort_by_owner: holdingsSortOut,
       owner_names: ownerNames,
       sell_log_by_owner: sellLogOut,
+      buy_journal: buyJournalOut,
       target_stock_weight_by_owner: targetWeightsOut,
       owner_scratchpad_by_owner: scratchPadsOut,
       rebalance_calculator_by_owner: rebalanceCalculatorOut,
@@ -652,8 +742,15 @@ export async function POST(req: NextRequest) {
     let withOwnerNames = await admin
       .from("portfolio_snapshots")
       .upsert(payload, { onConflict: "sync_key" });
+    // buy_journal 컬럼 미생성(supabase/buy_journal_column.sql 미실행) 폴백
     if (withOwnerNames.error && isLikelyMissingColumnError(withOwnerNames.error.message)) {
-      const { alert_thresholds_by_position: _drop, ...rest } = payload;
+      const { buy_journal: _dropBuyJournal, ...restNoBuyJournal } = payload;
+      withOwnerNames = await admin
+        .from("portfolio_snapshots")
+        .upsert(restNoBuyJournal, { onConflict: "sync_key" });
+    }
+    if (withOwnerNames.error && isLikelyMissingColumnError(withOwnerNames.error.message)) {
+      const { alert_thresholds_by_position: _drop, buy_journal: _dropBj, ...rest } = payload;
       withOwnerNames = await admin
         .from("portfolio_snapshots")
         .upsert(rest, { onConflict: "sync_key" });
