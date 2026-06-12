@@ -35,6 +35,7 @@ import {
 import {
   HAS_LOCAL_CHANGES_KEY,
   LOCAL_CHANGES_AT_KEY,
+  clearLocalChanged,
   markLocalChanged,
   TARGET_WEIGHT_STORAGE_KEY,
   CALCULATOR_TARGET_STORAGE_KEY,
@@ -1926,7 +1927,7 @@ export default function Home() {
       const j = (await r.json().catch(() => ({}))) as { updated_at?: string };
       const ts = j.updated_at ?? new Date().toISOString();
       safeSetItem(LAST_SYNC_TS_KEY, ts);
-      window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+      clearLocalChanged();
       setLastSyncedAt(ts);
       return true;
     }
@@ -3547,34 +3548,41 @@ export default function Home() {
         //   (C) 덮어쓰기 전 서버 상태를 자동 백업하고 (A) 사용자에게 방향을 확인한다.
         let conflictChoice: "push" | "applyServer" | null = null;
         if (hasLocalChanges && serverNewer && !forcePull) {
-          // C: 덮어쓰기로 사라질 "현재 서버 상태"를 백업 테이블에 자동 저장 (snapshot 생략 = 서버가 자기 상태를 백업)
-          try {
-            await fetch("/api/backup", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ sync_key: key }),
-            });
-          } catch {
-            // 백업 실패해도 동기화 흐름은 계속 (아래 확인에서 사용자가 판단)
+          const localChangedAtRaw = (window.localStorage.getItem(LOCAL_CHANGES_AT_KEY) ?? "").trim();
+          if (localChangedAtRaw.length === 0) {
+            // 수정 시각 기록이 없는 플래그 = 매수저널·알림설정 자동 이행(사용자 수정 아님).
+            // 묻지 않고 서버 최신을 따른다 — "취소를 눌러도 충돌창이 계속 뜨는" 반복 방지.
+            // (적용 후 자동 이행 데이터는 auto-push가 조용히 다시 서버에 올린다)
+            conflictChoice = "applyServer";
+          } else {
+            // C: 덮어쓰기로 사라질 "현재 서버 상태"를 백업 테이블에 자동 저장 (snapshot 생략 = 서버가 자기 상태를 백업)
+            try {
+              await fetch("/api/backup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sync_key: key }),
+              });
+            } catch {
+              // 백업 실패해도 동기화 흐름은 계속 (아래 확인에서 사용자가 판단)
+            }
+            // A: 어느 쪽을 살릴지 확인 (각 데이터의 시각을 함께 표기)
+            const serverTimeLabel = formatKstForConflict(serverTs);
+            const localTimeLabel = formatKstForConflict(localChangedAtRaw);
+            const overwrite = window.confirm(
+              [
+                "⚠️ 동기화 충돌",
+                "",
+                `서버: 다른 기기에서 저장한 더 최신 데이터 (${serverTimeLabel} 저장)`,
+                `이 기기: 아직 서버에 올리지 않은 변경 (${localTimeLabel} 마지막 수정)`,
+                "",
+                `[확인] 이 기기 데이터(${localTimeLabel} 수정)로 서버를 덮어씁니다.`,
+                "         (직전 서버 상태는 방금 자동 백업되어 복원 가능)",
+                `[취소] 서버 데이터(${serverTimeLabel} 저장)를 이 기기로 불러옵니다.`,
+                "         (이 기기의 미저장 변경은 버려집니다)",
+              ].join("\n"),
+            );
+            conflictChoice = overwrite ? "push" : "applyServer";
           }
-          // A: 어느 쪽을 살릴지 확인 (각 데이터의 시각을 함께 표기)
-          const serverTimeLabel = formatKstForConflict(serverTs);
-          const localChangedAtRaw = window.localStorage.getItem(LOCAL_CHANGES_AT_KEY) ?? "";
-          const localTimeLabel = formatKstForConflict(localChangedAtRaw);
-          const overwrite = window.confirm(
-            [
-              "⚠️ 동기화 충돌",
-              "",
-              `서버: 다른 기기에서 저장한 더 최신 데이터 (${serverTimeLabel} 저장)`,
-              `이 기기: 아직 서버에 올리지 않은 변경 (${localTimeLabel} 마지막 수정)`,
-              "",
-              `[확인] 이 기기 데이터(${localTimeLabel} 수정)로 서버를 덮어씁니다.`,
-              "         (직전 서버 상태는 방금 자동 백업되어 복원 가능)",
-              `[취소] 서버 데이터(${serverTimeLabel} 저장)를 이 기기로 불러옵니다.`,
-              "         (이 기기의 미저장 변경은 버려집니다)",
-            ].join("\n"),
-          );
-          conflictChoice = overwrite ? "push" : "applyServer";
         }
 
         const shouldApplyServer =
@@ -3604,7 +3612,7 @@ export default function Home() {
           safeSetItem(LAST_SYNC_TS_KEY, clockToStore);
           safeSetItem(LAST_SELL_LOG_SYNC_TS_KEY, clockToStore);
           window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
-          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+          clearLocalChanged();
           setLastSyncedAt(clockToStore);
           setLastSellLogSyncedAt(clockToStore);
           setSellLogDirty(false);
@@ -3628,7 +3636,8 @@ export default function Home() {
             Object.keys(fromServerAlerts).length === 0 &&
             Object.keys(mergedAlerts).length > 0
           ) {
-            markLocalChanged();
+            // 자동 이행(사용자 수정 아님): 수정 시각 없이 플래그만 — 충돌창 판단에서 제외됨
+            safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
           }
           // 매수저널: 서버에 있으면 교체, 서버가 비어있으면(컬럼 신설 직후 등)
           // 이 기기 기록을 보존하고 다음 push로 서버에 올린다.
@@ -3637,7 +3646,8 @@ export default function Home() {
             skipBuyJournalLocalChangedRef.current = 1;
             setBuyJournal(serverBuyJournal);
           } else if (buyJournalEntries.length > 0) {
-            markLocalChanged();
+            // 자동 이행(사용자 수정 아님): 수정 시각 없이 플래그만 — 충돌창 판단에서 제외됨
+            safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
           }
         } else if (hasLocalChanges) {
           // ─ 로컬에 미반영 변경이 있고 충돌이 없거나(서버가 더 최신이 아님)
@@ -3669,7 +3679,7 @@ export default function Home() {
             safeSetItem(LAST_SYNC_TS_KEY, pushedTs);
             safeSetItem(LAST_SELL_LOG_SYNC_TS_KEY, pushedTs);
             window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
-            window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+            clearLocalChanged();
             setSyncMessage("이 기기의 변경 데이터를 서버에 올렸습니다.");
             setLastSyncedAt(pushedTs);
             setLastSellLogSyncedAt(pushedTs);
@@ -3723,7 +3733,7 @@ export default function Home() {
           safeSetItem(LAST_SYNC_TS_KEY, pushedTs);
           safeSetItem(LAST_SELL_LOG_SYNC_TS_KEY, pushedTs);
           window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
-          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+          clearLocalChanged();
           setSyncMessage("서버에 기존 데이터가 없어 이 기기 내용을 올렸습니다.");
           setLastSyncedAt(pushedTs);
           setLastSellLogSyncedAt(pushedTs);
@@ -4061,7 +4071,7 @@ export default function Home() {
           safeSetItem(LAST_SYNC_TS_KEY, pushedTs);
           safeSetItem(LAST_SELL_LOG_SYNC_TS_KEY, pushedTs);
           window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
-          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+          clearLocalChanged();
           setLastSyncedAt(pushedTs);
           setLastSellLogSyncedAt(pushedTs);
           setSellLogDirty(false);
@@ -4165,7 +4175,7 @@ export default function Home() {
           safeSetItem(LAST_SYNC_TS_KEY, j.updated_at);
           safeSetItem(LAST_SELL_LOG_SYNC_TS_KEY, j.updated_at);
           window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
-          window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+          clearLocalChanged();
         }
         // 매수저널: 서버에 있으면 교체, 비어있으면 이 기기 기록 보존(다음 push로 올림).
         // HAS_LOCAL_CHANGES 설정은 위의 removeItem 이후여야 지워지지 않는다.
@@ -4174,7 +4184,8 @@ export default function Home() {
           skipBuyJournalLocalChangedRef.current = 1;
           setBuyJournal(pulledBuyJournal);
         } else if (buyJournal.length > 0) {
-          markLocalChanged();
+          // 자동 이행(사용자 수정 아님): 수정 시각 없이 플래그만
+          safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
         }
         setSyncMessage("서버에서 불러왔습니다.");
         setLastSyncedAt(typeof j.updated_at === "string" ? j.updated_at : null);
@@ -4200,7 +4211,8 @@ export default function Home() {
           Object.keys(fromServerPull).length === 0 &&
           Object.keys(mergedPullAlerts).length > 0
         ) {
-          markLocalChanged();
+          // 자동 이행(사용자 수정 아님): 수정 시각 없이 플래그만
+          safeSetItem(HAS_LOCAL_CHANGES_KEY, "1");
         }
         // 관심종목도 서버에서 다시 불러오기
         setWatchlistLoaded(false);
@@ -4248,7 +4260,7 @@ export default function Home() {
         safeSetItem(LAST_SYNC_TS_KEY, pushedTs);
         safeSetItem(LAST_SELL_LOG_SYNC_TS_KEY, pushedTs);
         window.localStorage.removeItem(SELL_LOG_DIRTY_KEY);
-        window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+        clearLocalChanged();
         setSyncMessage("서버에 올렸습니다.");
         setLastSyncedAt(pushedTs);
         setLastSellLogSyncedAt(pushedTs);
@@ -4591,7 +4603,7 @@ export default function Home() {
     const noLocalChanges = window.localStorage.getItem(HAS_LOCAL_CHANGES_KEY) !== "1";
     const shouldForcePull = isFirstValidKeySave || noLocalChanges;
     if (shouldForcePull) {
-      window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+      clearLocalChanged();
       window.localStorage.removeItem(LAST_SYNC_TS_KEY);
     }
 

@@ -14,6 +14,19 @@ export function markLocalChanged(): void {
   }
 }
 
+/**
+ * 로컬 변경 플래그·수정 시각을 함께 해제 — 동기화 성공(push/pull) 시 사용.
+ * 시각을 남겨두면 자동 이행 플래그(매수저널·알림 보존)와 사용자 수정을 구분할 수 없게 된다.
+ */
+export function clearLocalChanged(): void {
+  try {
+    window.localStorage.removeItem(HAS_LOCAL_CHANGES_KEY);
+    window.localStorage.removeItem(LOCAL_CHANGES_AT_KEY);
+  } catch {
+    //
+  }
+}
+
 /** 목표 비중 % — 대시보드·리밸런싱 계산기 공통(localStorage 단일 소스) */
 export const TARGET_WEIGHT_STORAGE_KEY = "portfolio_target_stock_weight_v1";
 
