@@ -279,7 +279,7 @@ export function computeOwnerDailyReturnsHybrid(
 }
 
 /** 대시보드와 동일한 매매 수수료율 (매입원가에 반영) */
-const TRADING_FEE_RATE = 0.002;
+const TRADING_FEE_RATE = 0.001;
 
 /** 총 수익률 계산용 포지션 — 평가/원가에 매입단가·매입환율이 필요 */
 export type CostBasisPos = {

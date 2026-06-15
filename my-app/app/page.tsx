@@ -415,7 +415,7 @@ const BUY_JOURNAL_KEY = "portfolio_buy_journal_v1";
 const BUY_JOURNAL_MAX = 500;
 const LAST_SELL_LOG_SYNC_TS_KEY = "portfolio_last_sell_log_sync_ts_v1";
 const SELL_LOG_DIRTY_KEY = "portfolio_sell_log_dirty_v1";
-const TRADING_FEE_RATE = 0.002; // 0.2%
+const TRADING_FEE_RATE = 0.001; // 0.1%
 /** 매입 시 현금 잔고 비교용(부동소수 오차) */
 const CASH_CHECK_EPS = 1e-6;
 /** 보유 종목 차트 그룹 추천(datalist). 「현금」은 현금·현금성 자산을 한 그룹으로 묶을 때 사용 */
