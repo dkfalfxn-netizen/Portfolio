@@ -55,9 +55,29 @@ export async function resolveFxWithFallback(
   return { usdKrw, eurKrw };
 }
 
+function resolveYahooMarketState(meta: Record<string, unknown>): "PRE" | "POST" | "REGULAR" | "OTHER" {
+  if (typeof meta.marketState === "string") {
+    const s = meta.marketState as string;
+    if (s === "PRE" || s === "PREPRE") return "PRE";
+    if (s === "POST" || s === "POSTPOST" || s === "CLOSED") return "POST";
+    if (s === "REGULAR") return "REGULAR";
+  }
+  const periods = meta.currentTradingPeriod as
+    | { pre?: { start: number; end: number }; regular?: { start: number; end: number }; post?: { start: number; end: number } }
+    | undefined;
+  if (periods) {
+    const now = Date.now() / 1000;
+    if (periods.pre && now >= periods.pre.start && now < periods.pre.end) return "PRE";
+    if (periods.regular && now >= periods.regular.start && now < periods.regular.end) return "REGULAR";
+    if (periods.post && now >= periods.post.start && now < periods.post.end) return "POST";
+    if (periods.post && now >= periods.post.end) return "POST";
+  }
+  return "OTHER";
+}
+
 async function fetchYahooPrice(yahooSymbol: string): Promise<PriceQuote> {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1m&range=1d`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1m&range=1d&includePrePost=true`;
     const res = await fetch(url, {
       method: "GET",
       cache: "no-store",
@@ -67,13 +87,26 @@ async function fetchYahooPrice(yahooSymbol: string): Promise<PriceQuote> {
     if (!res.ok) return { price: null, currency: null };
     const data = await res.json() as { chart?: { result?: unknown[] } };
     const meta = data?.chart?.result?.[0] as Record<string, unknown> | undefined;
-    const priceKeys = ["regularMarketPrice", "postMarketPrice", "preMarketPrice", "chartPreviousClose", "previousClose"] as const;
-    let price: number | null = null;
-    for (const k of priceKeys) {
-      const v = meta?.[k];
-      if (typeof v === "number" && Number.isFinite(v) && v > 0) { price = v; break; }
+    if (!meta) return { price: null, currency: null };
+
+    const num = (k: string): number | null => {
+      const v = meta[k];
+      return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+    };
+
+    const state = resolveYahooMarketState(meta);
+    const regularPrice = num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
+
+    let price: number | null;
+    if (state === "PRE") {
+      price = num("preMarketPrice") ?? regularPrice;
+    } else if (state === "POST") {
+      price = num("postMarketPrice") ?? regularPrice;
+    } else {
+      price = regularPrice;
     }
-    const currency = typeof meta?.currency === "string" ? meta.currency : null;
+
+    const currency = typeof meta.currency === "string" ? meta.currency : null;
     return { price, currency };
   } catch {
     return { price: null, currency: null };

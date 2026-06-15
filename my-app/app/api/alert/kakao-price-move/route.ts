@@ -75,18 +75,32 @@ function isMarketTradingDay(group: MarketGroup, at: Date): boolean {
 
 async function fetchYahooQuote(symbol: string): Promise<Quote> {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d&includePrePost=true`;
     const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" } });
     if (!res.ok) return { price: null, previousClose: null };
     const data = await res.json() as { chart?: { result?: Array<{ meta?: Record<string, unknown> }> } };
     const meta = data.chart?.result?.[0]?.meta ?? {};
-    const price = ["regularMarketPrice", "postMarketPrice", "preMarketPrice", "chartPreviousClose", "previousClose"]
-      .map((k) => meta[k])
-      .find((v) => typeof v === "number" && Number.isFinite(v) && v > 0) as number | undefined;
-    const prev = ["chartPreviousClose", "previousClose"]
-      .map((k) => meta[k])
-      .find((v) => typeof v === "number" && Number.isFinite(v) && v > 0) as number | undefined;
-    return { price: price ?? null, previousClose: prev ?? null };
+
+    const num = (k: string): number | null => {
+      const v = meta[k];
+      return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+    };
+
+    const regularPrice = num("regularMarketPrice") ?? num("chartPreviousClose") ?? num("previousClose");
+
+    // market state 판별 후 프리/애프터장 가격 우선 선택
+    const state = typeof meta.marketState === "string" ? meta.marketState : null;
+    let price: number | null;
+    if (state === "PRE" || state === "PREPRE") {
+      price = num("preMarketPrice") ?? regularPrice;
+    } else if (state === "POST" || state === "POSTPOST" || state === "CLOSED") {
+      price = num("postMarketPrice") ?? regularPrice;
+    } else {
+      price = regularPrice;
+    }
+
+    const prev = num("chartPreviousClose") ?? num("previousClose");
+    return { price, previousClose: prev };
   } catch {
     return { price: null, previousClose: null };
   }
