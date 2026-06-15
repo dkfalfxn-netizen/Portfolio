@@ -767,11 +767,10 @@ function TargetWeightSortableBarRow({
         {/* 막대 위에 목표 달성률(현재/목표) 비율을 작게 표시 — 막대 채움 끝에 우측 정렬, 세로 중앙 */}
         {hasInputTarget && hasPositiveTarget && barWidthPct > 0 ?
           <span
-            className="pointer-events-none absolute inset-y-0 z-20 flex items-center px-0.5 text-[8px] font-bold tabular-nums leading-none text-white/90"
+            className="pointer-events-none absolute inset-y-0 z-20 flex items-center px-0.5 text-[8px] font-bold tabular-nums leading-none text-black"
             style={{
               left: `${Math.min(barWidthPct, 100)}%`,
               transform: "translateX(-100%)",
-              textShadow: "0 0 3px rgba(0,0,0,0.95)",
             }}
           >
             {Math.round(ratio * 100)}%
