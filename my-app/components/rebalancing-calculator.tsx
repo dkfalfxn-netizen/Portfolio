@@ -985,12 +985,25 @@ function floorShares(diffKrw: number, priceKrw: number): number {
   return Math.floor(Math.abs(diffKrw) / priceKrw);
 }
 
-/** ±N주 · ±원화 액수. 시세 없으면 ±액만 (미보유·워치 등 priceKrw=0) */
+/**
+ * ±N주 · ±실제매수액 (정수 주수 기준). 1주 단위 때문에 목표 배분액과 차이가 나면
+ * "(목표 ±₩…)"를 덧붙여 "원래 이만큼 매수해야 하지만 주수가 안 맞아 이 정도만 매수"임을 표시.
+ * 시세 없으면 목표액만 (미보유·워치 등 priceKrw=0).
+ */
 function formatMemberSharesOrAmount(diffKrw: number, priceKrw: number): string {
   const sign = diffKrw >= 0 ? "+" : "-";
-  const amtPart = `${sign}${fmtKrw(diffKrw)}`;
-  if (priceKrw > 0) return `${sign}${floorShares(diffKrw, priceKrw)}주 · ${amtPart}`;
-  return amtPart;
+  if (priceKrw <= 0) return `${sign}${fmtKrw(diffKrw)}`;
+
+  const shares = floorShares(diffKrw, priceKrw);
+  const actualKrw = shares * priceKrw;            // 정수 주수로 실제 체결되는 금액
+  const targetKrw = Math.abs(diffKrw);            // 원래 매수해야 할 목표 배분액
+  const base = `${sign}${shares}주 · ${sign}${fmtKrw(actualKrw)}`;
+
+  // 목표액과 실제 체결액이 1주 단위 때문에 벌어지면 목표를 함께 표기
+  if (Math.round(targetKrw - actualKrw) >= 1) {
+    return `${base} (목표 ${sign}${fmtKrw(targetKrw)})`;
+  }
+  return base;
 }
 
 function RebalancingOwner({
