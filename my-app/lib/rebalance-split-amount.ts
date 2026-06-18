@@ -27,9 +27,10 @@ export function approxPortfolioPctAfterDelta(
 /**
  * 분할·리밸 시 1회분 금액.
  * - remainder: 남은 매수액 diffKrw ÷ n.
- * - milestone (매수, diffKrw 양수, n≥2): 목표 평가의 **k/n** 지점까지 이번 회에 맞춤
- *   (= 목표평가×k/n − 현재평가, 0~(전체 차액)으로 클램프). k 기본 1.
- * - 매도(diffKrw≤0)·n===1 일 때 milestone도 remainder와 동일하게 diff/n(또는 전액).
+ * - milestone (n≥2): 목표 평가의 **k/n** 지점까지 이번 회에 맞춤
+ *   매수: (목표평가×k/n − 현재평가), 0~diffKrw 클램프.
+ *   매도: (목표평가×k/n − 현재평가), diffKrw~0 클램프 (매수와 대칭).
+ * - n===1 일 때 milestone도 전액(diffKrw).
  */
 export function perSplitKrwCore(
   mode: SplitAmountMode,
@@ -46,11 +47,15 @@ export function perSplitKrwCore(
   if (mode === "remainder") {
     return row.diffKrw / n;
   }
-  if (row.diffKrw > 0 && effectiveTotalKrw > 0) {
+  if (effectiveTotalKrw > 0) {
     const fullTargetKrw = (row.targetPct / 100) * effectiveTotalKrw;
     const milestoneKrw = fullTargetKrw * (k / n);
     const raw = milestoneKrw - row.valueKrw;
-    return Math.min(Math.max(0, raw), row.diffKrw);
+    if (row.diffKrw > 0) {
+      return Math.min(Math.max(0, raw), row.diffKrw);
+    }
+    // 매도: raw가 음수(현재보다 낮은 목표)이므로 [diffKrw, 0] 범위로 클램프
+    return Math.max(Math.min(0, raw), row.diffKrw);
   }
   return row.diffKrw / n;
 }
