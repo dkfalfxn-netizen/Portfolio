@@ -1234,8 +1234,8 @@ function RebalancingOwner({
   // ── 모드 & 신규 투자금 ─────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>("buy-sell");
   const [newMoneyInput, setNewMoneyInput] = useState("");
-  const [splitCountInput, setSplitCountInput] = useState("1");
-  const [splitAmountMode, setSplitAmountMode] = useState<SplitAmountMode>("remainder");
+  const [splitCountInput, setSplitCountInput] = useState("10");
+  const [splitAmountMode, setSplitAmountMode] = useState<SplitAmountMode>("milestone");
   const [milestoneStepInput, setMilestoneStepInput] = useState("1");
   const [hideSmall, setHideSmall] = useState(false);
   const [saveToast, setSaveToast] = useState(false);
@@ -1953,11 +1953,11 @@ function RebalancingOwner({
               onChange={(e) => setSplitAmountMode(e.target.value as SplitAmountMode)}
               className="max-w-[10rem] rounded border border-border bg-background px-1.5 py-1 text-[11px] text-foreground outline-none ring-primary/35 focus:ring-1"
               aria-label="회당 분할 금액 계산 방식"
-              title="남은액÷n·매도는 균등 분할. 목표 단계별은 매수만 목표평가의 k/n까지 이번 회에 맞춤(k 선택). 분할 1회면 동일."
+              title="목표 단계별은 목표평가의 k/n까지 이번 회에 맞춤(k 선택, 매수·매도 동일). 남은액÷n은 균등 분할. 분할 1회면 동일."
             >
-              <option value="remainder">남은 금액 ÷ n</option>
               <option value="milestone">목표÷n 단계별 (그룹)</option>
               <option value="member-milestone">종목별 k/n 단계</option>
+              <option value="remainder">남은 금액 ÷ n</option>
             </select>
           </label>
           <div className="flex items-center gap-1.5 text-xs">
