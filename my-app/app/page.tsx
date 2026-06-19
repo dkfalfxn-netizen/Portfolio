@@ -4119,6 +4119,9 @@ export default function Home() {
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
           rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+          // 동기화 시점 환율 — 텔레그램이 "대시보드가 본 값"을 그대로 재현하는 데 사용
+          usdKrw,
+          eurKrw,
           ...getAlertThresholdsPayload(),
         }),
       }).then(async (r) => {

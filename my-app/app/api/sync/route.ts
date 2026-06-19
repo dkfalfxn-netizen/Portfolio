@@ -99,6 +99,9 @@ type PushBody = {
   rebalanceCalculatorByOwner?: unknown;
   /** 키: `보유자::티커`(대문자) */
   alertThresholdsByPosition?: unknown;
+  /** 동기화 시점 대시보드 환율 — 텔레그램이 "대시보드가 본 값"을 재현하는 데 사용 */
+  usdKrw?: unknown;
+  eurKrw?: unknown;
 };
 
 type SellLogCurrency = "USD" | "EUR" | "KRW";
@@ -724,6 +727,13 @@ export async function POST(req: NextRequest) {
           );
     }
 
+    // 동기화 시점 환율(있을 때만 저장). 미전송 시 컬럼을 payload에서 빼서 서버 기존값 보존.
+    const fxUsdRaw = Number((b as PushBody).usdKrw);
+    const fxEurRaw = Number((b as PushBody).eurKrw);
+    const fxCols: { usd_krw?: number; eur_krw?: number } = {};
+    if (Number.isFinite(fxUsdRaw) && fxUsdRaw > 0) fxCols.usd_krw = fxUsdRaw;
+    if (Number.isFinite(fxEurRaw) && fxEurRaw > 0) fxCols.eur_krw = fxEurRaw;
+
     const updatedAt = new Date().toISOString();
     const payload = {
       sync_key: key,
@@ -737,11 +747,24 @@ export async function POST(req: NextRequest) {
       owner_scratchpad_by_owner: scratchPadsOut,
       rebalance_calculator_by_owner: rebalanceCalculatorOut,
       alert_thresholds_by_position: alertThresholdsOut,
+      ...fxCols,
       updated_at: updatedAt,
     };
     let withOwnerNames = await admin
       .from("portfolio_snapshots")
       .upsert(payload, { onConflict: "sync_key" });
+    // usd_krw·eur_krw 컬럼 미생성(supabase/portfolio_snapshots_fx.sql 미실행) 폴백.
+    // 환율 컬럼만 빼고 나머지(owner_names·sell_log 등)는 보존해 재시도 — 데이터 손실 방지.
+    if (
+      withOwnerNames.error &&
+      Object.keys(fxCols).length > 0 &&
+      /usd_krw|eur_krw/.test(withOwnerNames.error.message)
+    ) {
+      const { usd_krw: _dropUsd, eur_krw: _dropEur, ...restNoFx } = payload;
+      withOwnerNames = await admin
+        .from("portfolio_snapshots")
+        .upsert(restNoFx, { onConflict: "sync_key" });
+    }
     // buy_journal 컬럼 미생성(supabase/buy_journal_column.sql 미실행) 폴백
     if (withOwnerNames.error && isLikelyMissingColumnError(withOwnerNames.error.message)) {
       const { buy_journal: _dropBuyJournal, ...restNoBuyJournal } = payload;

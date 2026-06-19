@@ -319,11 +319,24 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const { data: snap, error: snapLoadErr } = await admin
+  const snapRes = await admin
     .from("portfolio_snapshots")
-    .select("sync_key, positions, cash_by_owner, watchlist")
+    .select("sync_key, positions, cash_by_owner, watchlist, usd_krw, eur_krw")
     .eq("sync_key", alertSyncKey)
     .maybeSingle();
+  let snap = snapRes.data;
+  let snapLoadErr = snapRes.error;
+  // usd_krw·eur_krw 컬럼 미생성(supabase/portfolio_snapshots_fx.sql 미실행) 폴백.
+  // 환율 컬럼 없이 재조회 → 기존 라이브 시세 방식으로 정상 동작.
+  if (snapLoadErr && /usd_krw|eur_krw/.test(snapLoadErr.message ?? "")) {
+    const retry = await admin
+      .from("portfolio_snapshots")
+      .select("sync_key, positions, cash_by_owner, watchlist")
+      .eq("sync_key", alertSyncKey)
+      .maybeSingle();
+    snap = retry.data as typeof snap;
+    snapLoadErr = retry.error;
+  }
 
   if (snapLoadErr) {
     const msg = snapLoadErr.message ?? "";
@@ -535,13 +548,26 @@ export async function GET(req: NextRequest) {
     yesterdayRecord,
   );
 
-  const ownerTotalReturns = computeOwnerTotalReturns(
-    normalizeCostPositions(snap.positions),
-    cashForHybrid,
-    totalReturnQuotes,
-    usdKrw,
-    eurKrw,
-  );
+  // 동기화 시점 저장 환율이 있으면, 시세를 재조회하지 않고 스냅샷 시세(currentPrice) + 저장 환율로
+  // 계산 → 대시보드가 마지막 동기화 때 본 값과 정확히 일치. 없으면 기존 라이브 시세 방식.
+  const snapUsdKrw = Number((snap as { usd_krw?: unknown }).usd_krw);
+  const snapEurKrw = Number((snap as { eur_krw?: unknown }).eur_krw);
+  const hasSyncFx = Number.isFinite(snapUsdKrw) && snapUsdKrw > 0;
+  const ownerTotalReturns = hasSyncFx
+    ? computeOwnerTotalReturns(
+        normalizeCostPositions(snap.positions),
+        cashForHybrid,
+        {},
+        snapUsdKrw,
+        Number.isFinite(snapEurKrw) && snapEurKrw > 0 ? snapEurKrw : eurKrw,
+      )
+    : computeOwnerTotalReturns(
+        normalizeCostPositions(snap.positions),
+        cashForHybrid,
+        totalReturnQuotes,
+        usdKrw,
+        eurKrw,
+      );
 
   if (items.length === 0) {
     return NextResponse.json({
@@ -642,11 +668,23 @@ export async function POST(req: NextRequest) {
   const admin = createSupabaseAdmin();
   if (!admin) return NextResponse.json({ error: "Supabase가 설정되지 않았습니다." }, { status: 503 });
 
-  const { data: snap, error: snapErr } = await admin
+  const snapRes = await admin
     .from("portfolio_snapshots")
-    .select("positions, cash_by_owner, watchlist")
+    .select("positions, cash_by_owner, watchlist, usd_krw, eur_krw")
     .eq("sync_key", syncKey)
     .maybeSingle();
+  let snap = snapRes.data;
+  let snapErr = snapRes.error;
+  // usd_krw·eur_krw 컬럼 미생성(supabase/portfolio_snapshots_fx.sql 미실행) 폴백.
+  if (snapErr && /usd_krw|eur_krw/.test(snapErr.message ?? "")) {
+    const retry = await admin
+      .from("portfolio_snapshots")
+      .select("positions, cash_by_owner, watchlist")
+      .eq("sync_key", syncKey)
+      .maybeSingle();
+    snap = retry.data as typeof snap;
+    snapErr = retry.error;
+  }
 
   if (snapErr) {
     const msg = snapErr.message ?? "";
@@ -867,13 +905,25 @@ export async function POST(req: NextRequest) {
     yesterdayRecordManual,
   );
 
-  const ownerTotalReturns = computeOwnerTotalReturns(
-    normalizeCostPositions(snap.positions),
-    cashNorm,
-    totalReturnQuotes,
-    usdK,
-    eurK,
-  );
+  // 동기화 시점 저장 환율이 있으면 스냅샷 시세 + 저장 환율로 계산(대시보드와 일치), 없으면 라이브.
+  const snapUsdKrwManual = Number((snap as { usd_krw?: unknown }).usd_krw);
+  const snapEurKrwManual = Number((snap as { eur_krw?: unknown }).eur_krw);
+  const hasSyncFxManual = Number.isFinite(snapUsdKrwManual) && snapUsdKrwManual > 0;
+  const ownerTotalReturns = hasSyncFxManual
+    ? computeOwnerTotalReturns(
+        normalizeCostPositions(snap.positions),
+        cashNorm,
+        {},
+        snapUsdKrwManual,
+        Number.isFinite(snapEurKrwManual) && snapEurKrwManual > 0 ? snapEurKrwManual : eurK,
+      )
+    : computeOwnerTotalReturns(
+        normalizeCostPositions(snap.positions),
+        cashNorm,
+        totalReturnQuotes,
+        usdK,
+        eurK,
+      );
 
   async function sendHoldings(itemsForMessage: AlertItem[]): Promise<Response | null> {
     if (itemsForMessage.length === 0) return null;
