@@ -1950,6 +1950,8 @@ export default function Home() {
         targetStockWeightByOwner: loadAllTargetStockWeights(),
         ownerScratchpadByOwner: loadAllOwnerScratchpads(),
         rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+        usdKrw: fxRef.current.usd,
+        eurKrw: fxRef.current.eur,
         ...getAlertThresholdsPayload(),
       }),
     });
@@ -2467,6 +2469,10 @@ export default function Home() {
 
   const usdKrw = marketQuery.data?.usdKrw ?? FALLBACK_USD_KRW;
   const eurKrw = marketQuery.data?.eurKrw ?? FALLBACK_EUR_KRW;
+  // 동기화(push) 시점 환율을 항상 최신값으로 보관 — 어떤 push 경로에서도 스테일 클로저 없이 읽음.
+  // (텔레그램이 "대시보드가 본 값"을 재현하려면 push마다 이 환율이 스냅샷에 함께 저장돼야 함)
+  const fxRef = useRef({ usd: usdKrw, eur: eurKrw });
+  fxRef.current = { usd: usdKrw, eur: eurKrw };
 
   const handleAddSymbolInput = useCallback(
     (value: string) => {
@@ -3725,6 +3731,8 @@ export default function Home() {
               targetStockWeightByOwner: loadAllTargetStockWeights(),
               ownerScratchpadByOwner: loadAllOwnerScratchpads(),
               rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+              usdKrw: fxRef.current.usd,
+              eurKrw: fxRef.current.eur,
               ...getAlertThresholdsPayload(),
             }),
           });
@@ -3779,6 +3787,8 @@ export default function Home() {
             targetStockWeightByOwner: loadAllTargetStockWeights(),
             ownerScratchpadByOwner: loadAllOwnerScratchpads(),
             rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+            usdKrw: fxRef.current.usd,
+            eurKrw: fxRef.current.eur,
             ...getAlertThresholdsPayload(),
           }),
         });
@@ -4120,8 +4130,8 @@ export default function Home() {
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
           rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
           // 동기화 시점 환율 — 텔레그램이 "대시보드가 본 값"을 그대로 재현하는 데 사용
-          usdKrw,
-          eurKrw,
+          usdKrw: fxRef.current.usd,
+          eurKrw: fxRef.current.eur,
           ...getAlertThresholdsPayload(),
         }),
       }).then(async (r) => {
@@ -4316,6 +4326,8 @@ export default function Home() {
           targetStockWeightByOwner: loadAllTargetStockWeights(),
           ownerScratchpadByOwner: loadAllOwnerScratchpads(),
           rebalanceCalculatorByOwner: buildRebalanceCalculatorByOwnerFromLocal(),
+          usdKrw: fxRef.current.usd,
+          eurKrw: fxRef.current.eur,
           ...getAlertThresholdsPayload(),
         }),
       });
