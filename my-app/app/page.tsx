@@ -1726,20 +1726,17 @@ function positionsWithLivePrices(
 }
 
 /**
- * 미국 주간거래(데이마켓) 세션 시간대 추정 — 평일 KST 09:00~18:00.
- * 이 시간대에만 KIS 주간거래 현재가를 폴링한다(그 외엔 시세가 없어 폴링 낭비·404).
+ * 미국 주간거래/시간외 현재가 폴링 대상 시간 — 평일(KST)이면 종일.
+ * KIS 주간거래·정규·시간외 데이터가 하루 중 넓은 시간대에 들어오므로 시간은 제한하지 않고
+ * 주말(미국 휴장)만 제외한다. 세션이 없어 시세가 안 오면 엔드포인트가 알아서 빈 값을 주고,
+ * 프론트는 price>0일 때만 덮어쓰므로 안전하다.
  */
-function isKstDaytimeSession(now: Date = new Date()): boolean {
-  const parts = new Intl.DateTimeFormat("en-US", {
+function isKstUsTradingPollWindow(now: Date = new Date()): boolean {
+  const wd = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Seoul",
     weekday: "short",
-    hour: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const wd = parts.find((p) => p.type === "weekday")?.value ?? "";
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
-  if (wd === "Sat" || wd === "Sun") return false;
-  return hour >= 9 && hour < 18;
+  }).format(now);
+  return wd !== "Sat" && wd !== "Sun";
 }
 
 /** 포지션·보유자 로컬 캐시가 없으면(부분 삭제) 동기 시각만 남아 pull이 건너뛰어지는 문제를 막기 위함 */
@@ -2510,7 +2507,7 @@ export default function Home() {
 
     let cancelled = false;
     const poll = async () => {
-      if (!isKstDaytimeSession()) return; // 주간거래 시간대만
+      if (!isKstUsTradingPollWindow()) return; // 평일만(주말 미국 휴장)
       await Promise.all(
         usdSymbols.map(async (sym) => {
           try {
