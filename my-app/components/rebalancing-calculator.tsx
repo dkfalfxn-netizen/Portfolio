@@ -167,7 +167,7 @@ type Props = {
   cloudSyncKey?: string;
 };
 
-type Mode = "buy-sell" | "buy-only";
+type Mode = "buy-sell" | "buy-only" | "sell-only";
 
 /** SSR에서는 false, 클라이언트에서는 true — localStorage 병합은 클라이언트에서만 */
 function useClientReady(): boolean {
@@ -866,7 +866,7 @@ function RebalancingBarSortableRow({
 
       {!pinned && row.members.length > 0 ?
         <div className="border-t border-dashed border-slate-600/50 pb-2 pt-2" style={membersCollapsed ? { display: "none" } : undefined}>
-          {rebalanceMode !== "buy-only" ?
+          {rebalanceMode === "buy-sell" ?
             <div
               className="mt-2 ml-7 sm:ml-8 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-slate-600/55 bg-slate-900/70 px-2.5 py-2"
               role="status"
@@ -1234,6 +1234,8 @@ function RebalancingOwner({
   // ── 모드 & 신규 투자금 ─────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>("buy-sell");
   const [newMoneyInput, setNewMoneyInput] = useState("");
+  /** 매도(현금확보) 모드: 보유 종목을 이 비율(%)만큼 비중 그대로 매도 */
+  const [sellRatioInput, setSellRatioInput] = useState("50");
   const [splitCountInput, setSplitCountInput] = useState("10");
   const [splitAmountMode, setSplitAmountMode] = useState<SplitAmountMode>("milestone");
   const [milestoneStepInput, setMilestoneStepInput] = useState("1");
@@ -1244,6 +1246,12 @@ function RebalancingOwner({
   const [stockTargetPctQuickInput, setStockTargetPctQuickInput] = useState("");
 
   const newMoneyKrw = useMemo(() => parseKoreanIntDigits(newMoneyInput), [newMoneyInput]);
+  /** 매도 비율 0~1 (입력 0~100%를 클램프) */
+  const sellRatio = useMemo(() => {
+    const n = parseFloat(String(sellRatioInput).replace(",", "."));
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(1, n / 100);
+  }, [sellRatioInput]);
   const splitCount = useMemo(() => {
     const n = Math.floor(Number(splitCountInput));
     if (!Number.isFinite(n) || n < 1) return 1;
@@ -1308,6 +1316,24 @@ function RebalancingOwner({
       }).filter((r) => !isGhostRow(r));
     }
 
+    if (mode === "sell-only") {
+      // 보유 종목을 sellRatio만큼 비중 그대로 매도(현금화). 현금/워치 stub은 매도 대상 아님.
+      return orderedGroups.map((g) => {
+        const isCash = isPinnedCashPortfolioGroup(g.groupKey);
+        const diffKrw = isCash ? 0 : -g.valueKrw * sellRatio; // 음수 = 매도
+        // 매도 후 그룹 비중(=현재×(1-비율)). 분할(목표÷n) 회당 계산이 매도에도 일관되게 동작하도록 설정.
+        const targetPct = isCash ? g.currentPct : g.currentPct * (1 - sellRatio);
+        const memberAdjustments: MemberAdj[] = g.members.map((m) => {
+          if (isCash || isUndecidedSlotMemberSymbol(m.symbol)) {
+            return { ...m, diffKrw: 0, shares: m.priceKrw > 0 ? 0 : null };
+          }
+          const d = -m.valueKrw * sellRatio; // 각 종목을 현재 평가액 비율 그대로 매도
+          return { ...m, diffKrw: d, shares: m.priceKrw > 0 ? d / m.priceKrw : null };
+        });
+        return { ...g, targetPct, diffKrw, memberAdjustments };
+      }).filter((r) => !isGhostRow(r));
+    }
+
     // buy-only
     const newTotal = totalKrw + Math.max(newMoneyKrw, 0);
     const totalEff = newTotal;
@@ -1335,7 +1361,7 @@ function RebalancingOwner({
         }),
       };
     }).filter((r) => !isGhostRow(r));
-  }, [orderedGroups, targets, totalKrw, mode, newMoneyKrw, memberSplits, memberSplitModes]);
+  }, [orderedGroups, targets, totalKrw, mode, newMoneyKrw, sellRatio, memberSplits, memberSplitModes]);
 
   const { sortableBarGroupKeys, sortableContextIds } = useMemo(() => {
     const nk = rows.filter((r) => !isPinnedCashPortfolioGroup(r.groupKey)).map((r) => r.groupKey);
@@ -1682,7 +1708,7 @@ function RebalancingOwner({
       <div className="flex flex-wrap items-center gap-2">
         {/* 모드 토글 */}
         <div className="flex overflow-hidden rounded-md border text-xs sm:text-sm">
-          {(["buy-sell", "buy-only"] as Mode[]).map((m) => (
+          {(["buy-sell", "buy-only", "sell-only"] as Mode[]).map((m) => (
             <button
               key={m}
               type="button"
@@ -1693,10 +1719,38 @@ function RebalancingOwner({
                   : "hover:bg-muted text-muted-foreground"
               }`}
             >
-              {m === "buy-sell" ? "매수+매도" : "신규 투자금만"}
+              {m === "buy-sell" ? "매수+매도" : m === "buy-only" ? "신규 투자금만" : "매도(현금확보)"}
             </button>
           ))}
         </div>
+
+        {/* 매도 비율 입력 (sell-only 모드에서만 표시) */}
+        {mode === "sell-only" && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground shrink-0">매도 비율</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              placeholder="50"
+              className="w-16 rounded border bg-background px-2 py-1 text-right tabular-nums text-xs"
+              value={sellRatioInput}
+              onChange={(e) => setSellRatioInput(e.target.value)}
+              aria-label="매도 비율 퍼센트"
+              title="보유 종목을 이 비율만큼 비중 그대로 매도합니다. 예: 50 → 전 종목 절반 매도, 50%가 현금화."
+            />
+            <span className="text-muted-foreground shrink-0">%</span>
+            {sellRatio > 0 && (
+              <span className="text-xs text-muted-foreground shrink-0">
+                현금 확보{" "}
+                <span className="font-medium text-blue-400">
+                  {fmtKrw(rows.reduce((s, r) => s + Math.max(0, -r.diffKrw), 0))}
+                </span>
+              </span>
+            )}
+          </div>
+        )}
 
         {/* 신규 투자금 입력 (buy-only 모드에서만 표시) */}
         {mode === "buy-only" && (
@@ -2425,6 +2479,7 @@ function RebalancingOwner({
       <p className="text-xs text-muted-foreground">
         * 주수는 현재가 기준 정수(floor) 참고용입니다. 실제 매매 시 수수료·가격 변동을 감안하세요.
         {mode === "buy-only" && " · 신규 투자금 모드에서는 매도 없이 배분됩니다."}
+        {mode === "sell-only" && " · 매도 모드: 보유 종목을 매도 비율만큼 비중 그대로 매도합니다(매도 후 종목 간 비중은 유지, 매도액이 현금으로). 목표% 열은 매도 후 비중입니다."}
       </p>
     </div>
   );
