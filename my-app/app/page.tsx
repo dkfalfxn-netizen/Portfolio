@@ -1725,6 +1725,23 @@ function positionsWithLivePrices(
   });
 }
 
+/**
+ * 미국 주간거래(데이마켓) 세션 시간대 추정 — 평일 KST 09:00~18:00.
+ * 이 시간대에만 KIS 주간거래 현재가를 폴링한다(그 외엔 시세가 없어 폴링 낭비·404).
+ */
+function isKstDaytimeSession(now: Date = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    weekday: "short",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const wd = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  if (wd === "Sat" || wd === "Sun") return false;
+  return hour >= 9 && hour < 18;
+}
+
 /** 포지션·보유자 로컬 캐시가 없으면(부분 삭제) 동기 시각만 남아 pull이 건너뛰어지는 문제를 막기 위함 */
 function isLocalPortfolioCacheCleared(): boolean {
   if (typeof window === "undefined") return false;
@@ -2474,6 +2491,54 @@ export default function Home() {
   const fxRef = useRef({ usd: usdKrw, eur: eurKrw });
   fxRef.current = { usd: usdKrw, eur: eurKrw };
 
+  // 미국 주간거래(데이마켓) 실시간 현재가 — KIS Railway 엔드포인트를 3~5초 폴링해 덮어씀.
+  // 키: 티커(대문자). NEXT_PUBLIC_KIS_API_BASE 미설정 시 비활성(기존 Yahoo 시세 그대로).
+  const [daytimeQuotes, setDaytimeQuotes] = useState<Record<string, { price: number; asOf: string }>>({});
+
+  useEffect(() => {
+    const base = (process.env.NEXT_PUBLIC_KIS_API_BASE ?? "").trim().replace(/\/+$/, "");
+    if (!base) return;
+    const usdSymbols = [
+      ...new Set(
+        positions
+          .filter((p) => p.currency === "USD")
+          .map((p) => (p.symbol ?? "").trim().toUpperCase())
+          .filter((s) => s.length > 0),
+      ),
+    ];
+    if (usdSymbols.length === 0) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      if (!isKstDaytimeSession()) return; // 주간거래 시간대만
+      await Promise.all(
+        usdSymbols.map(async (sym) => {
+          try {
+            const r = await fetch(
+              `${base}/api/overseas/daytime-price?symbol=${encodeURIComponent(sym)}`,
+            );
+            if (!r.ok || cancelled) return;
+            const j = (await r.json()) as { price?: number; asOf?: string };
+            if (cancelled || typeof j.price !== "number" || !(j.price > 0)) return;
+            setDaytimeQuotes((prev) => {
+              const cur = prev[sym];
+              if (cur && cur.price === j.price && cur.asOf === j.asOf) return prev; // 변화 없으면 리렌더 방지
+              return { ...prev, [sym]: { price: j.price as number, asOf: j.asOf ?? "" } };
+            });
+          } catch {
+            /* 폴링 실패는 무시(다음 주기 재시도) */
+          }
+        }),
+      );
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [positions]);
+
   const handleAddSymbolInput = useCallback(
     (value: string) => {
       skipAddFormAutoNameRef.current = false;
@@ -2634,7 +2699,13 @@ export default function Home() {
   const enrichedPositions = useMemo(() => {
     return positions.map((position, sourceIndex) => {
       const q = marketQuery.data?.quotes?.[position.symbol];
-      const livePrice = q?.price;
+      // 주간거래 시간대엔 KIS 실시간 현재가를 우선 적용(없으면 기존 시세). USD 종목만 해당.
+      const daytimePrice =
+        position.currency === "USD"
+          ? daytimeQuotes[(position.symbol ?? "").trim().toUpperCase()]?.price
+          : undefined;
+      const livePrice =
+        typeof daytimePrice === "number" && daytimePrice > 0 ? daytimePrice : q?.price;
       const rawPreviousClose =
         typeof q?.previousClose === "number" && q.previousClose > 0 ? q.previousClose : null;
       /** 김승주: 미국장 영업일에만, 그 외: 한국장 영업일에만 전일 대비 등락 표시 */
@@ -2682,7 +2753,7 @@ export default function Home() {
         marketState: q?.marketState ?? null,
       };
     });
-  }, [positions, marketQuery.data, usdKrw, eurKrw]);
+  }, [positions, marketQuery.data, usdKrw, eurKrw, daytimeQuotes]);
 
   /** 보유자·계좌 무관 동일 티커 합산 — 평가·원가·손익·원화 기준 수익률 (표 정렬은 holdingsAggregatedBySymbolSorted) */
   const holdingsAggregatedBySymbol = useMemo(() => {
