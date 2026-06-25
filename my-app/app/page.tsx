@@ -2490,7 +2490,9 @@ export default function Home() {
 
   // 미국 주간거래(데이마켓) 실시간 현재가 — KIS Railway 엔드포인트를 3~5초 폴링해 덮어씀.
   // 키: 티커(대문자). NEXT_PUBLIC_KIS_API_BASE 미설정 시 비활성(기존 Yahoo 시세 그대로).
-  const [daytimeQuotes, setDaytimeQuotes] = useState<Record<string, { price: number; asOf: string }>>({});
+  const [daytimeQuotes, setDaytimeQuotes] = useState<
+    Record<string, { price: number; prevClose: number | null; asOf: string }>
+  >({});
 
   useEffect(() => {
     const base = (process.env.NEXT_PUBLIC_KIS_API_BASE ?? "").trim().replace(/\/+$/, "");
@@ -2515,12 +2517,14 @@ export default function Home() {
               `${base}/api/overseas/daytime-price?symbol=${encodeURIComponent(sym)}`,
             );
             if (!r.ok || cancelled) return;
-            const j = (await r.json()) as { price?: number; asOf?: string };
+            const j = (await r.json()) as { price?: number; prevClose?: number; asOf?: string };
             if (cancelled || typeof j.price !== "number" || !(j.price > 0)) return;
+            // KIS 전일종가(base)도 함께 보관 — 전일대비/등락률을 가격과 같은 출처로 계산하기 위함.
+            const pc = typeof j.prevClose === "number" && j.prevClose > 0 ? j.prevClose : null;
             setDaytimeQuotes((prev) => {
               const cur = prev[sym];
-              if (cur && cur.price === j.price && cur.asOf === j.asOf) return prev; // 변화 없으면 리렌더 방지
-              return { ...prev, [sym]: { price: j.price as number, asOf: j.asOf ?? "" } };
+              if (cur && cur.price === j.price && cur.prevClose === pc && cur.asOf === j.asOf) return prev; // 변화 없으면 리렌더 방지
+              return { ...prev, [sym]: { price: j.price as number, prevClose: pc, asOf: j.asOf ?? "" } };
             });
           } catch {
             /* 폴링 실패는 무시(다음 주기 재시도) */
@@ -2697,14 +2701,21 @@ export default function Home() {
     return positions.map((position, sourceIndex) => {
       const q = marketQuery.data?.quotes?.[position.symbol];
       // 주간거래 시간대엔 KIS 실시간 현재가를 우선 적용(없으면 기존 시세). USD 종목만 해당.
-      const daytimePrice =
+      const daytimeQuote =
         position.currency === "USD"
-          ? daytimeQuotes[(position.symbol ?? "").trim().toUpperCase()]?.price
+          ? daytimeQuotes[(position.symbol ?? "").trim().toUpperCase()]
           : undefined;
-      const livePrice =
-        typeof daytimePrice === "number" && daytimePrice > 0 ? daytimePrice : q?.price;
-      const rawPreviousClose =
+      const daytimePrice = daytimeQuote?.price;
+      const usingDaytime = typeof daytimePrice === "number" && daytimePrice > 0;
+      const livePrice = usingDaytime ? daytimePrice : q?.price;
+      // 주간거래 가격을 쓸 땐 전일대비·등락률도 KIS 전일종가(base) 기준으로 계산해야 가격과 %가 일치.
+      const yahooPrevClose =
         typeof q?.previousClose === "number" && q.previousClose > 0 ? q.previousClose : null;
+      const daytimePrevClose =
+        usingDaytime && typeof daytimeQuote?.prevClose === "number" && daytimeQuote.prevClose > 0
+          ? daytimeQuote.prevClose
+          : null;
+      const rawPreviousClose = usingDaytime ? (daytimePrevClose ?? yahooPrevClose) : yahooPrevClose;
       /** 김승주: 미국장 영업일에만, 그 외: 한국장 영업일에만 전일 대비 등락 표시 */
       const previousClose =
         rawPreviousClose !== null && shouldShowDailyChangeVsPreviousClose(position.owner)
