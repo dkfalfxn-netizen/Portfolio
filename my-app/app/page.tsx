@@ -1731,9 +1731,11 @@ function positionsWithLivePrices(
  * 주말(미국 휴장)만 제외한다. 세션이 없어 시세가 안 오면 엔드포인트가 알아서 빈 값을 주고,
  * 프론트는 price>0일 때만 덮어쓰므로 안전하다.
  */
-function isKstUsTradingPollWindow(now: Date = new Date()): boolean {
+function isUsTradingDayPollWindow(now: Date = new Date()): boolean {
+  // 미국 거래일(월~금)은 반드시 미국 동부(ET) 요일로 판단.
+  // KST 기준으로 하면 미국 금요일 오후(=KST 토요일 새벽)가 잘못 제외돼 정규장이 안 잡힌다.
   const wd = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Seoul",
+    timeZone: "America/New_York",
     weekday: "short",
   }).format(now);
   return wd !== "Sat" && wd !== "Sun";
@@ -2509,7 +2511,7 @@ export default function Home() {
 
     let cancelled = false;
     const poll = async () => {
-      if (!isKstUsTradingPollWindow()) return; // 평일만(주말 미국 휴장)
+      if (!isUsTradingDayPollWindow()) return; // 미국 동부 평일만(주말 미국 휴장)
       await Promise.all(
         usdSymbols.map(async (sym) => {
           try {
