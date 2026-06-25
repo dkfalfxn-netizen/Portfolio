@@ -1741,6 +1741,14 @@ function isUsTradingDayPollWindow(now: Date = new Date()): boolean {
   return wd !== "Sat" && wd !== "Sun";
 }
 
+/** Yahoo가 라이브 시세를 주는 미국 세션(프리·정규·애프터마켓).
+ *  이 구간엔 Yahoo가 실제 프리/애프터 가격을 갱신하므로 그대로 쓰고,
+ *  그 외(POSTPOST·PREPRE·CLOSED·미상 = 미국 야간 = 한국 낮)엔 KIS 주간거래(블루오션) 시세로 덮어쓴다.
+ *  KIS 주간거래는 미국 새벽 ~4시에 종료돼, 실제 프리마켓 시간엔 마지막 체결가에 멈추기 때문. */
+function isYahooLiveUsSession(state: MarketState | undefined): boolean {
+  return state === "PRE" || state === "REGULAR" || state === "POST";
+}
+
 /** 포지션·보유자 로컬 캐시가 없으면(부분 삭제) 동기 시각만 남아 pull이 건너뛰어지는 문제를 막기 위함 */
 function isLocalPortfolioCacheCleared(): boolean {
   if (typeof window === "undefined") return false;
@@ -2708,7 +2716,12 @@ export default function Home() {
           ? daytimeQuotes[(position.symbol ?? "").trim().toUpperCase()]
           : undefined;
       const daytimePrice = daytimeQuote?.price;
-      const usingDaytime = typeof daytimePrice === "number" && daytimePrice > 0;
+      // 세션별 소스 전환: 미국 프리/정규/애프터마켓엔 Yahoo(라이브) 사용,
+      // 그 외(미국 야간=한국 낮)엔 KIS 주간거래로 덮어씀. KIS 주간거래는 실제 프리마켓 땐 멈추기 때문.
+      const usingDaytime =
+        typeof daytimePrice === "number" &&
+        daytimePrice > 0 &&
+        !isYahooLiveUsSession(q?.marketState ?? undefined);
       const livePrice = usingDaytime ? daytimePrice : q?.price;
       // 주간거래 가격을 쓸 땐 전일대비·등락률도 KIS 전일종가(base) 기준으로 계산해야 가격과 %가 일치.
       const yahooPrevClose =
