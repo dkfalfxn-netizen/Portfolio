@@ -1849,6 +1849,50 @@ function RebalancingOwner({
         </div>
       </div>
 
+      {/* ── 모드 차이 도움말 (접이식) ───────────────────────────────────────────── */}
+      <details className="rounded-lg border border-slate-700/40 bg-slate-900/20 text-[11px] leading-relaxed text-muted-foreground">
+        <summary className="cursor-pointer select-none px-3 py-2 font-semibold text-slate-300 hover:text-slate-100">
+          세 모드 차이 / 매도는 어떻게 동작하나? ▸
+        </summary>
+        <div className="space-y-3 px-3 pb-3 pt-1">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-md border border-slate-700/40 bg-slate-900/30 p-2">
+              <p className="mb-1 font-semibold text-slate-200">매수+매도</p>
+              <p>현재 비중을 <span className="text-slate-300">목표 비중</span>으로 리밸런싱.</p>
+              <p className="mt-1 text-slate-400">목표보다 많으면 ▼매도, 적으면 ▲매수. <strong className="text-slate-300">목표에 도달해 있으면 매매 ≈ 0.</strong></p>
+            </div>
+            <div className="rounded-md border border-slate-700/40 bg-slate-900/30 p-2">
+              <p className="mb-1 font-semibold text-slate-200">신규 투자금만</p>
+              <p>입력한 <span className="text-slate-300">현금만</span> 목표 비중대로 매수 배분.</p>
+              <p className="mt-1 text-slate-400">매도는 하지 않음. 추가 매수 계획용.</p>
+            </div>
+            <div className="rounded-md border border-blue-500/30 bg-blue-500/5 p-2">
+              <p className="mb-1 font-semibold text-blue-300">매도(현금확보)</p>
+              <p><span className="text-slate-300">목표 보유 비율</span>만 남기고 나머지 매도.</p>
+              <p className="mt-1 text-slate-400">예: 60 → 전체 자산의 60%만 보유, 40% 현금화. 비중은 그대로 유지.</p>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-amber-500/25 bg-amber-500/5 p-2.5">
+            <p className="mb-1 font-semibold text-amber-300/90">⚠ 헷갈리기 쉬운 점</p>
+            <p>
+              <strong className="text-slate-200">매수+매도에도 매도 기능은 있습니다</strong> — 단 “목표를 초과한 만큼만” 팝니다.
+              그래서 이미 목표에 도달한 상태(예: 100% 진입·목표 일치)에선 팔 게 없어 매도가 안 보입니다.
+              매도를 보려면 그 종목 <span className="text-slate-300">목표%를 현재보다 낮추면</span> 됩니다.
+            </p>
+            <p className="mt-2">
+              <strong className="text-slate-200">“목표까지 5/10” ≠ “매도 50%”.</strong>{" "}
+              5/10은 <span className="text-slate-300">목표 비중의 절반까지 채우는</span> 것(주로 매수, 목표를 넘어 거꾸로 팔지 않음)이고,
+              매도(현금확보) 50%는 <span className="text-slate-300">지금 가진 걸 절반 파는</span> 것입니다. 기준점(목표 vs 현재)이 달라요.
+            </p>
+            <p className="mt-2 text-slate-400">
+              → <strong className="text-slate-300">“목표 도달 상태에서 전체를 N%로 줄이고 싶다”</strong>면 <span className="text-blue-300">매도(현금확보)</span> 모드를 쓰세요.
+              (매수+매도로 하려면 모든 종목 목표%를 일일이 낮춰야 해서, 그 수고를 한 번에 하는 단축 모드입니다.)
+            </p>
+          </div>
+        </div>
+      </details>
+
       {/* ── 바 차트 ─────────────────────────────────────────────────────────── */}
       <div>
         {/* 범례 */}
