@@ -1658,7 +1658,7 @@ function normalizeSellLogStrict(
  * 데이터가 낡지 않았다고 보고, 묻지 않고 이 기기 변경을 우선 저장한다(서버는 자동 백업).
  * 모달은 이 시간보다 오래 동기화가 끊겼던 기기(며칠 묵은 탭 등)에서만 띄운다.
  */
-const CONFLICT_AUTO_PUSH_IF_SYNCED_WITHIN_MS = 10 * 60_000;
+const CONFLICT_AUTO_PUSH_IF_SYNCED_WITHIN_MS = 60 * 60_000;
 
 /** 자동 이행(매수저널·알림 보존) 플래그 최소 재시도 간격 — 업로드가 계속 실패해도 push 폭주 방지 */
 const AUTO_KEEP_AT_KEY = "portfolio_auto_migration_keep_at_v1";
