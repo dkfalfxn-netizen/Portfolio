@@ -142,10 +142,35 @@ async function fetchNaverStockQuote(code: string): Promise<Quote> {
   }
 }
 
+/** 미국 종목 실시간가: KIS 주간거래/정규 엔드포인트(세션 자동 — 데이장·정규·애프터 라이브).
+ *  미지원 종목·실패·KIS 미설정 시 null → 호출부에서 Yahoo로 폴백. price=현재가, previousClose=전일종가(base). */
+async function fetchKisUsQuote(symbol: string): Promise<Quote | null> {
+  const base = (process.env.NEXT_PUBLIC_KIS_API_BASE ?? "").trim().replace(/\/+$/, "");
+  if (!base) return null;
+  try {
+    const r = await fetch(
+      `${base}/api/overseas/daytime-price?symbol=${encodeURIComponent(symbol)}`,
+      { cache: "no-store" },
+    );
+    if (!r.ok) return null; // 404(미국 장 외/미지원) 등 → Yahoo 폴백
+    const j = (await r.json()) as { price?: number; prevClose?: number };
+    if (typeof j.price !== "number" || !(j.price > 0)) return null;
+    return {
+      price: j.price,
+      previousClose: typeof j.prevClose === "number" && j.prevClose > 0 ? j.prevClose : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchQuoteForSymbol(input: string): Promise<Quote> {
   const s = input.trim().toUpperCase();
   if (isKrxCommodity(s)) return /^M040200/.test(s) ? fetchNaverGoldQuote() : { price: null, previousClose: null };
   if (/^[0-9][0-9A-Z]{5}$/.test(s)) return fetchNaverStockQuote(s);
+  // 미국(해외) 종목은 KIS 실시간가 우선 — 보낼 때 그 시점 데이장/정규 라이브 시세 반영. 실패 시 Yahoo 폴백.
+  const kis = await fetchKisUsQuote(s);
+  if (kis) return kis;
   return fetchYahooQuote(toYahooSymbol(s));
 }
 
@@ -548,26 +573,15 @@ export async function GET(req: NextRequest) {
     yesterdayRecord,
   );
 
-  // 동기화 시점 저장 환율이 있으면, 시세를 재조회하지 않고 스냅샷 시세(currentPrice) + 저장 환율로
-  // 계산 → 대시보드가 마지막 동기화 때 본 값과 정확히 일치. 없으면 기존 라이브 시세 방식.
-  const snapUsdKrw = Number((snap as { usd_krw?: unknown }).usd_krw);
-  const snapEurKrw = Number((snap as { eur_krw?: unknown }).eur_krw);
-  const hasSyncFx = Number.isFinite(snapUsdKrw) && snapUsdKrw > 0;
-  const ownerTotalReturns = hasSyncFx
-    ? computeOwnerTotalReturns(
-        normalizeCostPositions(snap.positions),
-        cashForHybrid,
-        {},
-        snapUsdKrw,
-        Number.isFinite(snapEurKrw) && snapEurKrw > 0 ? snapEurKrw : eurKrw,
-      )
-    : computeOwnerTotalReturns(
-        normalizeCostPositions(snap.positions),
-        cashForHybrid,
-        totalReturnQuotes,
-        usdKrw,
-        eurKrw,
-      );
+  // 1안(실시간): 보낼 때 KIS 실시간 시세(totalReturnQuotes에 fetchQuoteForSymbol→KIS가 반영됨)
+  // + 라이브 환율로 총수익률 계산. 데이장(한국 낮)·정규장·애프터 모두 그 시점 KIS 라이브가 반영된다.
+  const ownerTotalReturns = computeOwnerTotalReturns(
+    normalizeCostPositions(snap.positions),
+    cashForHybrid,
+    totalReturnQuotes,
+    usdKrw,
+    eurKrw,
+  );
 
   if (items.length === 0) {
     return NextResponse.json({
@@ -905,25 +919,14 @@ export async function POST(req: NextRequest) {
     yesterdayRecordManual,
   );
 
-  // 동기화 시점 저장 환율이 있으면 스냅샷 시세 + 저장 환율로 계산(대시보드와 일치), 없으면 라이브.
-  const snapUsdKrwManual = Number((snap as { usd_krw?: unknown }).usd_krw);
-  const snapEurKrwManual = Number((snap as { eur_krw?: unknown }).eur_krw);
-  const hasSyncFxManual = Number.isFinite(snapUsdKrwManual) && snapUsdKrwManual > 0;
-  const ownerTotalReturns = hasSyncFxManual
-    ? computeOwnerTotalReturns(
-        normalizeCostPositions(snap.positions),
-        cashNorm,
-        {},
-        snapUsdKrwManual,
-        Number.isFinite(snapEurKrwManual) && snapEurKrwManual > 0 ? snapEurKrwManual : eurK,
-      )
-    : computeOwnerTotalReturns(
-        normalizeCostPositions(snap.positions),
-        cashNorm,
-        totalReturnQuotes,
-        usdK,
-        eurK,
-      );
+  // 1안(실시간): KIS 실시간 시세(totalReturnQuotes) + 라이브 환율로 계산.
+  const ownerTotalReturns = computeOwnerTotalReturns(
+    normalizeCostPositions(snap.positions),
+    cashNorm,
+    totalReturnQuotes,
+    usdK,
+    eurK,
+  );
 
   async function sendHoldings(itemsForMessage: AlertItem[]): Promise<Response | null> {
     if (itemsForMessage.length === 0) return null;
