@@ -127,7 +127,9 @@ async function fetchNaverGoldQuote(): Promise<Quote> {
 
 async function fetchNaverStockQuote(code: string): Promise<Quote> {
   try {
-    const url = `https://m.stock.naver.com/api/stock/${encodeURIComponent(code)}/basic`;
+    // A381180, A0051G0 등 거래소 접두 제거 (네이버 API는 접두 없는 코드 사용) — 대시보드 market route와 동일
+    const cleanCode = /^[A-Z][0-9A-Z]{6}$/i.test(code.trim()) ? code.trim().slice(1) : code.trim();
+    const url = `https://m.stock.naver.com/api/stock/${encodeURIComponent(cleanCode)}/basic`;
     const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" } });
     if (!res.ok) return { price: null, previousClose: null };
     const d = await res.json() as Record<string, unknown>;
@@ -167,8 +169,11 @@ async function fetchKisUsQuote(symbol: string): Promise<Quote | null> {
 async function fetchQuoteForSymbol(input: string): Promise<Quote> {
   const s = input.trim().toUpperCase();
   if (isKrxCommodity(s)) return /^M040200/.test(s) ? fetchNaverGoldQuote() : { price: null, previousClose: null };
-  if (/^[0-9][0-9A-Z]{5}$/.test(s)) return fetchNaverStockQuote(s);
-  // 미국(해외) 종목은 KIS 실시간가 우선 — 보낼 때 그 시점 데이장/정규 라이브 시세 반영. 실패 시 Yahoo 폴백.
+  // KRX 상장 주식·ETF: 6자리(005930)·A접두 7자리(A381180)·KRX:/KQ: 접두 모두 네이버로(대시보드와 동일 소스).
+  // ※ 기존 정규식 /^[0-9][0-9A-Z]{5}$/는 A접두 7자리를 놓쳐 국내 ETF가 Yahoo로 새어 값이 어긋났음.
+  const krxCore = s.startsWith("KRX:") ? s.slice(4) : s.startsWith("KQ:") ? s.slice(3) : s;
+  if (isKrxListedEquityCode(krxCore)) return fetchNaverStockQuote(krxCore);
+  // 미국(해외) 종목은 KIS 실시간가 우선 — 보낼 때 데이장/정규 라이브 반영. 실패 시 Yahoo 폴백.
   const kis = await fetchKisUsQuote(s);
   if (kis) return kis;
   return fetchYahooQuote(toYahooSymbol(s));
