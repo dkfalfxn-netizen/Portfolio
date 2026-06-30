@@ -2490,15 +2490,14 @@ export default function Home() {
   const fxRef = useRef({ usd: usdKrw, eur: eurKrw });
   fxRef.current = { usd: usdKrw, eur: eurKrw };
 
-  // 미국 주간거래(데이마켓) 실시간 현재가 — KIS Railway 엔드포인트를 3~5초 폴링해 덮어씀.
-  // 키: 티커(대문자). NEXT_PUBLIC_KIS_API_BASE 미설정 시 비활성(기존 Yahoo 시세 그대로).
+  // 미국 주간거래(데이마켓) 실시간 현재가 — 같은 앱의 서버리스 라우트 /api/overseas/daytime-price를 4초 폴링해 덮어씀.
+  // 키: 티커(대문자). KIS env 미설정 시 라우트가 503 → 조용히 기존 Yahoo 시세 유지.
   const [daytimeQuotes, setDaytimeQuotes] = useState<
     Record<string, { price: number; prevClose: number | null; asOf: string }>
   >({});
 
   useEffect(() => {
-    const base = (process.env.NEXT_PUBLIC_KIS_API_BASE ?? "").trim().replace(/\/+$/, "");
-    if (!base) return;
+    // 같은 Vercel 앱의 서버리스 라우트(상대경로) 사용 — 별도 백엔드(Railway) 불필요. CORS 없음.
     const usdSymbols = [
       ...new Set(
         positions
@@ -2512,27 +2511,33 @@ export default function Home() {
     let cancelled = false;
     const poll = async () => {
       if (!isUsTradingDayPollWindow()) return; // 미국 동부 평일만(주말 미국 휴장)
-      await Promise.all(
-        usdSymbols.map(async (sym) => {
-          try {
-            const r = await fetch(
-              `${base}/api/overseas/daytime-price?symbol=${encodeURIComponent(sym)}`,
-            );
-            if (!r.ok || cancelled) return;
-            const j = (await r.json()) as { price?: number; prevClose?: number; asOf?: string };
-            if (cancelled || typeof j.price !== "number" || !(j.price > 0)) return;
-            // KIS 전일종가(base)도 함께 보관 — 전일대비/등락률을 가격과 같은 출처로 계산하기 위함.
-            const pc = typeof j.prevClose === "number" && j.prevClose > 0 ? j.prevClose : null;
-            setDaytimeQuotes((prev) => {
-              const cur = prev[sym];
-              if (cur && cur.price === j.price && cur.prevClose === pc && cur.asOf === j.asOf) return prev; // 변화 없으면 리렌더 방지
-              return { ...prev, [sym]: { price: j.price as number, prevClose: pc, asOf: j.asOf ?? "" } };
-            });
-          } catch {
-            /* 폴링 실패는 무시(다음 주기 재시도) */
+      try {
+        // 일괄 조회(한 번의 요청으로 전 종목) — 서버리스 호출 수 절감.
+        const r = await fetch(
+          `/api/overseas/daytime-price?symbols=${encodeURIComponent(usdSymbols.join(","))}`,
+        );
+        if (!r.ok || cancelled) return;
+        const j = (await r.json()) as {
+          quotes?: Record<string, { price?: number; prevClose?: number; asOf?: string }>;
+        };
+        const quotes = j.quotes ?? {};
+        setDaytimeQuotes((prev) => {
+          let changed = false;
+          const next = { ...prev };
+          for (const [sym, q] of Object.entries(quotes)) {
+            if (typeof q.price !== "number" || !(q.price > 0)) continue;
+            // KIS 전일종가(base)도 보관 — 전일대비/등락률을 가격과 같은 출처로 계산.
+            const pc = typeof q.prevClose === "number" && q.prevClose > 0 ? q.prevClose : null;
+            const cur = prev[sym];
+            if (cur && cur.price === q.price && cur.prevClose === pc && cur.asOf === (q.asOf ?? "")) continue;
+            next[sym] = { price: q.price, prevClose: pc, asOf: q.asOf ?? "" };
+            changed = true;
           }
-        }),
-      );
+          return changed ? next : prev; // 변화 없으면 리렌더 방지
+        });
+      } catch {
+        /* 폴링 실패는 무시(다음 주기 재시도) */
+      }
     };
     void poll();
     const id = setInterval(() => void poll(), 4000);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchPrices } from "@/lib/market-prices";
+import { getKisUsQuote } from "@/lib/kis-quote";
 import {
   buildTelegramBriefingHtml,
   collectMiniTrends,
@@ -144,23 +145,13 @@ async function fetchNaverStockQuote(code: string): Promise<Quote> {
   }
 }
 
-/** 미국 종목 실시간가: KIS 주간거래/정규 엔드포인트(세션 자동 — 데이장·정규·애프터 라이브).
+/** 미국 종목 실시간가: KIS 라이브러리 직접 호출(세션 자동 — 데이장·정규·애프터 라이브).
  *  미지원 종목·실패·KIS 미설정 시 null → 호출부에서 Yahoo로 폴백. price=현재가, previousClose=전일종가(base). */
 async function fetchKisUsQuote(symbol: string): Promise<Quote | null> {
-  const base = (process.env.NEXT_PUBLIC_KIS_API_BASE ?? "").trim().replace(/\/+$/, "");
-  if (!base) return null;
   try {
-    const r = await fetch(
-      `${base}/api/overseas/daytime-price?symbol=${encodeURIComponent(symbol)}`,
-      { cache: "no-store" },
-    );
-    if (!r.ok) return null; // 404(미국 장 외/미지원) 등 → Yahoo 폴백
-    const j = (await r.json()) as { price?: number; prevClose?: number };
-    if (typeof j.price !== "number" || !(j.price > 0)) return null;
-    return {
-      price: j.price,
-      previousClose: typeof j.prevClose === "number" && j.prevClose > 0 ? j.prevClose : null,
-    };
+    const q = await getKisUsQuote(symbol);
+    if (!q || !(q.price > 0)) return null;
+    return { price: q.price, previousClose: q.prevClose > 0 ? q.prevClose : null };
   } catch {
     return null;
   }
