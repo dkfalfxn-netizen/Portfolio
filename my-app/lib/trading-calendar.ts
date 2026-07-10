@@ -237,11 +237,17 @@ export function krSettlementTargetUnixSec(
   return Math.floor((ms + hourKst * 3600000) / 1000);
 }
 
-/** 김승주: 미국장 영업일 / 그 외: 한국장 영업일 — 전일 대비 등락 표시 여부 */
-export function shouldShowDailyChangeVsPreviousClose(
-  ownerName: string,
+/**
+ * 전일 대비 등락 표시 여부 — **보유자가 아니라 "그 종목이 거래되는 시장"** 기준.
+ *  - 국내(KRW): 한국장 영업일에만
+ *  - 해외(USD/EUR): 미국장 영업일에만
+ *
+ * 예전엔 보유자 이름(김승주 여부)으로 판단해서, 김도율이 보유한 미국주식이
+ * 한국 토요일(=미국 금요일 정규장 중)에 "전일 종가 없음"으로 뜨는 버그가 있었다.
+ */
+export function shouldShowDailyChangeForCurrency(
+  currency: string,
   at: Date = new Date(),
 ): boolean {
-  if (ownerName === "김승주") return isUsEquityTradingSessionDay(at);
-  return isKrEquityTradingSessionDay(at);
+  return currency === "KRW" ? isKrEquityTradingSessionDay(at) : isUsEquityTradingSessionDay(at);
 }

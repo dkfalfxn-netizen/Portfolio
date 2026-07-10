@@ -92,7 +92,7 @@ import {
   type DailyPrice as SignalDailyPrice,
   type TradeSignal,
 } from "@/lib/signals";
-import { shouldShowDailyChangeVsPreviousClose, krSettlementTargetUnixSec } from "@/lib/trading-calendar";
+import { shouldShowDailyChangeForCurrency, krSettlementTargetUnixSec } from "@/lib/trading-calendar";
 import {
   Card,
   CardContent,
@@ -2725,9 +2725,9 @@ export default function Home() {
           ? daytimeQuote.prevClose
           : null;
       const rawPreviousClose = usingDaytime ? (daytimePrevClose ?? yahooPrevClose) : yahooPrevClose;
-      /** 김승주: 미국장 영업일에만, 그 외: 한국장 영업일에만 전일 대비 등락 표시 */
+      /** 전일 대비 등락은 "그 종목의 시장" 영업일에만 표시 (국내=한국장, 해외=미국장) */
       const previousClose =
-        rawPreviousClose !== null && shouldShowDailyChangeVsPreviousClose(position.owner)
+        rawPreviousClose !== null && shouldShowDailyChangeForCurrency(position.currency)
           ? rawPreviousClose
           : null;
       const currentPrice = livePrice ?? position.currentPrice;
