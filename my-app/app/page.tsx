@@ -27,9 +27,11 @@ import { FALLBACK_USD_KRW, FALLBACK_EUR_KRW } from "@/lib/fx-fallback";
 import { holdingSymbolsEquivalent, inferTradingCurrencyFromTicker, isKrxListedEquityCode } from "@/lib/finance-symbols";
 import {
   fmtInt,
+  fmtUsdCashDisplay,
   fmtUsdNumber,
   MONEY_INT_LOCALE,
   parseKoreanIntDigits,
+  parseUsdCashDigits,
   signedPnlTextClass,
 } from "@/lib/format-money";
 import {
@@ -1751,6 +1753,39 @@ function isLocalPortfolioCacheCleared(): boolean {
   } catch {
     return true;
   }
+}
+
+/** USD 현금 입력 필드 — 포커스 중엔 편집하기 쉽게 원문 그대로, 벗어나면 콤마 포맷으로 보여줌 */
+function UsdCashInput({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const [focused, setFocused] = useState(false);
+  const [draft, setDraft] = useState(() => (value === 0 ? "" : String(value)));
+  const [syncedValue, setSyncedValue] = useState(value);
+
+  if (!focused && value !== syncedValue) {
+    setSyncedValue(value);
+    setDraft(value === 0 ? "" : String(value));
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      className="w-28 rounded-md border bg-background px-2 py-1.5 text-right tabular-nums"
+      placeholder="0"
+      value={focused ? draft : fmtUsdCashDisplay(value)}
+      onFocus={() => {
+        setFocused(true);
+        setDraft(value === 0 ? "" : String(value));
+      }}
+      onBlur={() => setFocused(false)}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setDraft(raw);
+        onChange(Math.round(parseUsdCashDigits(raw) * 100) / 100);
+      }}
+    />
+  );
 }
 
 export default function Home() {
@@ -6361,31 +6396,17 @@ export default function Home() {
                     <span className="text-xs font-medium text-muted-foreground">현금</span>
                     <label className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-muted-foreground">USD</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="w-28 rounded-md border bg-background px-2 py-1.5 text-right tabular-nums"
-                        placeholder="0"
-                        value={
-                          group.cashUsd === 0
-                            ? ""
-                            : Math.round(group.cashUsd * 100) / 100
-                        }
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const n = Number(raw);
+                      <UsdCashInput
+                        value={group.cashUsd}
+                        onChange={(usd) =>
                           setCashByOwner((prev) => ({
                             ...prev,
                             [group.ownerName]: {
                               ...prev[group.ownerName],
-                              usd:
-                                raw === "" || !Number.isFinite(n)
-                                  ? 0
-                                  : Math.round(n * 100) / 100,
+                              usd,
                             },
-                          }));
-                        }}
+                          }))
+                        }
                       />
                     </label>
                     <label className="flex flex-col gap-0.5">

@@ -24,6 +24,94 @@ const OWNER_COLORS: Record<string, string> = {
   전체: "#e2e8f0",
 };
 
+function hashString(str: string): number {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function hexToHsl(hex: string): [number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = (g - b) / d + (g < b ? 6 : 0);
+        break;
+      case g:
+        h = (b - r) / d + 2;
+        break;
+      default:
+        h = (r - g) / d + 4;
+    }
+    h /= 6;
+  }
+  return [h * 360, s * 100, l * 100];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const sN = s / 100;
+  const lN = l / 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = sN * Math.min(lN, 1 - lN);
+  const f = (n: number) => lN - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const toHex = (n: number) =>
+    Math.round(f(n) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(0)}${toHex(8)}${toHex(4)}`;
+}
+
+/**
+ * 보유자 이름별 차트 색상을 만든다. "강희진 ISA"·"강희진 직투"처럼 계좌가 세분화되어
+ * OWNER_COLORS에 정확히 일치하는 키가 없어도, 이름이 시작하는 기본 보유자(예: "강희진")의
+ * 색상 계열에서 명도만 달리해 항상 구분되는 색이 보이도록 한다.
+ */
+function buildOwnerColorMap(names: readonly string[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  const groups = new Map<string, string[]>();
+  const unmatched: string[] = [];
+
+  for (const name of names) {
+    if (OWNER_COLORS[name]) {
+      map[name] = OWNER_COLORS[name];
+      continue;
+    }
+    const baseKey = Object.keys(OWNER_COLORS).find((k) => k !== "전체" && name.startsWith(k));
+    if (baseKey) {
+      if (!groups.has(baseKey)) groups.set(baseKey, []);
+      groups.get(baseKey)!.push(name);
+    } else {
+      unmatched.push(name);
+    }
+  }
+
+  for (const [baseKey, groupNames] of groups) {
+    const [h, s] = hexToHsl(OWNER_COLORS[baseKey]);
+    const sorted = [...groupNames].sort((a, b) => a.localeCompare(b, "ko"));
+    const n = sorted.length;
+    sorted.forEach((name, i) => {
+      const lightness = n === 1 ? 62 : 46 + i * (32 / (n - 1));
+      map[name] = hslToHex(h, s, lightness);
+    });
+  }
+
+  const fallbackPalette = ["#22d3ee", "#a78bfa", "#34d399", "#fb923c", "#f472b6", "#facc15", "#60a5fa", "#f87171"];
+  unmatched.forEach((name) => {
+    map[name] = fallbackPalette[hashString(name) % fallbackPalette.length];
+  });
+
+  return map;
+}
+
 /** 차트·툴팁에서 사용하는 거래 마커 */
 export type DailyTradeMarker = {
   /** 리스트 키용(있으면 사용) */
@@ -334,6 +422,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
   }, [tradeHover]);
 
   const visibleOwners = useMemo(() => [...ownerNames, "전체"] as string[], [ownerNames]);
+  const ownerColorMap = useMemo(() => buildOwnerColorMap(visibleOwners), [visibleOwners]);
   /** 금액 모드에서는 총자산(전체) 라인을 빼고 보유자별만 표시 → Y축이 개별 추이에 맞게 확대됨 */
   const chartLineKeys = useMemo(
     () => (valueAxisMode === "krw" ? [...ownerNames] : visibleOwners),
@@ -539,7 +628,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                             valueAxisMode === "return"
                               ? `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`
                               : fmtFull(v);
-                          const dotColor = OWNER_COLORS[name] ?? "#94a3b8";
+                          const dotColor = ownerColorMap[name] ?? "#94a3b8";
                           return (
                             <li key={name} className="leading-snug">
                               <span className="font-medium" style={{ color: dotColor }}>
@@ -561,7 +650,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                   key={o}
                   type="monotone"
                   dataKey={o}
-                  stroke={OWNER_COLORS[o] ?? "#94a3b8"}
+                  stroke={ownerColorMap[o] ?? "#94a3b8"}
                   strokeWidth={o === "전체" ? 3 : 2.5}
                   dot={false}
                   activeDot={{ r: 5, strokeWidth: 1 }}
@@ -870,7 +959,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                     >
                       <p
                         className="mb-2 border-b border-white/5 pb-1.5 text-[11px] font-semibold"
-                        style={{ color: OWNER_COLORS[owner] ?? "#94a3b8" }}
+                        style={{ color: ownerColorMap[owner] ?? "#94a3b8" }}
                       >
                         보유자 · {owner}
                         <span className="ml-1.5 font-normal text-zinc-500">({items.length}건)</span>

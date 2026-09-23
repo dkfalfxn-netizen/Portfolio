@@ -50,3 +50,19 @@ export function fmtEurNumber(n: number, minFrac = 2, maxFrac = 4): string {
     maximumFractionDigits: maxFrac,
   });
 }
+
+/** 콤마·기타 제거 후 소수 파싱 (USD 현금 입력 필드 onChange용, 소수점은 1개까지만 허용) */
+export function parseUsdCashDigits(raw: string): number {
+  const cleaned = raw.replace(/[^0-9.]/g, "");
+  const firstDot = cleaned.indexOf(".");
+  const normalized =
+    firstDot === -1 ? cleaned : cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "");
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** USD 현금 입력 필드 표시용 (콤마, 불필요한 소수 0은 생략) */
+export function fmtUsdCashDisplay(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "";
+  return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
