@@ -3186,17 +3186,17 @@ export default function Home() {
     ];
   }, [enrichedPositions, totalCashKrw, usdKrw]);
 
-  /** 상단 3칸 요약(미니 KIS 대시보드) — 보유 수는 티커 기준 유니크 */
+  /** 상단 3칸 요약(미니 KIS 대시보드) */
   const kisMetrics = useMemo(() => {
     const stockValue = enrichedPositions.reduce((s, p) => s + p.valueKrw, 0);
+    const stockCost = enrichedPositions.reduce((s, p) => s + p.costKrw, 0);
     const totalAppraisal = stockValue + totalCashKrw;
-    const uniqueTickers = new Set(positions.map((p) => p.symbol.trim().toUpperCase()));
     return {
       totalAppraisal,
+      totalCost: stockCost,
       deposit: totalCashKrw,
-      uniqueTickerCount: uniqueTickers.size,
     };
-  }, [enrichedPositions, totalCashKrw, positions]);
+  }, [enrichedPositions, totalCashKrw]);
 
   const allocationByOwner = useMemo(() => {
     return ownerNames.map((ownerName) => {
@@ -5825,8 +5825,8 @@ export default function Home() {
               {(
                 [
                   { key: "appr", label: "총 평가금액", sub: "실시간", value: `₩${fmtInt(kisMetrics.totalAppraisal)}` },
+                  { key: "cost", label: "총 매수 금액", sub: "주식 원가 기준", value: `₩${fmtInt(kisMetrics.totalCost)}` },
                   { key: "dep", label: "예수금(현금)", sub: "USD·KRW 합산", value: `₩${fmtInt(kisMetrics.deposit)}` },
-                  { key: "cnt", label: "보유 종목 수", sub: "고유 티커", value: String(kisMetrics.uniqueTickerCount) },
                 ] as const
               ).map((c) => (
                 <div
