@@ -2520,6 +2520,8 @@ export default function Home() {
 
   const usdKrw = marketQuery.data?.usdKrw ?? FALLBACK_USD_KRW;
   const eurKrw = marketQuery.data?.eurKrw ?? FALLBACK_EUR_KRW;
+  /** 최초 시세·환율 응답 전에는 폴백값으로 계산된 요약 카드를 보여주지 않음(값이 튀는 현상 방지) */
+  const isMarketLoading = marketQuery.data == null;
   // 동기화(push) 시점 환율을 항상 최신값으로 보관 — 어떤 push 경로에서도 스테일 클로저 없이 읽음.
   // (텔레그램이 "대시보드가 본 값"을 재현하려면 push마다 이 환율이 스냅샷에 함께 저장돼야 함)
   const fxRef = useRef({ usd: usdKrw, eur: eurKrw });
@@ -5834,7 +5836,11 @@ export default function Home() {
                   className="rounded-lg border border-slate-700/80 bg-slate-800/60 p-3 shadow-sm sm:p-4"
                 >
                   <p className="text-[11px] font-medium text-slate-400 sm:text-xs">{c.label}</p>
-                  <p className="mt-1 text-lg font-bold tabular-nums text-white sm:text-xl">{c.value}</p>
+                  {isMarketLoading ? (
+                    <div className="mt-1.5 h-6 w-28 animate-pulse rounded bg-slate-700/60 sm:h-7 sm:w-36" />
+                  ) : (
+                    <p className="mt-1 text-lg font-bold tabular-nums text-white sm:text-xl">{c.value}</p>
+                  )}
                   <p className="mt-0.5 text-[10px] text-slate-500 sm:text-[11px]">{c.sub}</p>
                 </div>
               ))}
@@ -5847,18 +5853,22 @@ export default function Home() {
                   className="rounded-lg border border-slate-700/80 bg-slate-800/60 p-3 shadow-sm sm:p-4"
                 >
                   <p className="text-[11px] font-medium text-slate-400 sm:text-xs">{card.label}</p>
-                  <p
-                    className={cn(
-                      "mt-1 text-lg font-bold tabular-nums sm:text-xl",
-                      card.positive === true
-                        ? "text-red-400"
-                        : card.positive === false
-                          ? "text-sky-400"
-                          : "text-white",
-                    )}
-                  >
-                    {card.value}
-                  </p>
+                  {isMarketLoading ? (
+                    <div className="mt-1.5 h-6 w-24 animate-pulse rounded bg-slate-700/60 sm:h-7 sm:w-32" />
+                  ) : (
+                    <p
+                      className={cn(
+                        "mt-1 text-lg font-bold tabular-nums sm:text-xl",
+                        card.positive === true
+                          ? "text-red-400"
+                          : card.positive === false
+                            ? "text-sky-400"
+                            : "text-white",
+                      )}
+                    >
+                      {card.value}
+                    </p>
+                  )}
                   {card.sub ? (
                     <p className="mt-0.5 text-[10px] text-slate-500 sm:text-[11px]">{card.sub}</p>
                   ) : null}
