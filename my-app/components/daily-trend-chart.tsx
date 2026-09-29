@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { DailySnapshot } from "@/app/page";
+import type { DailySnapshot } from "@/lib/portfolio-types";
 import { fmtInt, fmtUsdNumber, fmtEurNumber } from "@/lib/format-money";
 
 const OWNER_COLORS: Record<string, string> = {

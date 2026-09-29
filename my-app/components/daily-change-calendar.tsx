@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { DailySnapshot } from "@/app/page";
+import type { DailySnapshot } from "@/lib/portfolio-types";
 import { ymdKST } from "@/lib/date-utils";
 import { fmtInt } from "@/lib/format-money";
 
