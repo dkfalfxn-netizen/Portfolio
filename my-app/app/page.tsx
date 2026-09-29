@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -71,7 +71,7 @@ import { DEFAULT_OWNER_NAMES, HoldingsAggTipRow, aggregateSymbolKeyForHoldings, 
 import { CashByOwner, DEFAULT_CASH_BY_OWNER, DEFAULT_POSITIONS, applyPositionUpsert, formatKrwApproxAsUsd, formatPositionMarketValueForeign, isValidPosition, loadCashByOwner, loadPositions, makePositionKey, mergeCashBundleDisplayEntries, mergeDuplicatePositions } from "@/lib/portfolio-positions";
 import { HoldingsSortMode, buildHoldingsGroupBlocks, defaultHoldingsSort, inferOwnerNamesFromSyncPayload, loadBuyJournal, loadDailySnapshots, loadHoldingsSort, loadOwnerNames, loadSellLog, normalizeOwnerNames, safeSetItem, saveDailySnapshot, sortHoldingsItems } from "@/lib/portfolio-storage";
 import { CONFLICT_AUTO_PUSH_IF_SYNCED_WITHIN_MS, canMarkAutoMigrationKeep, formatKstForConflict, isLocalPortfolioCacheCleared, isServerSnapshotNewerThanLocal, isUsTradingDayPollWindow, normalizeBuyJournalStrict, normalizeCashStrict, normalizeHoldingsSortStrict, normalizeSellLogStrict, positionsWithLivePrices, recordAutoMigrationKeep } from "@/lib/portfolio-sync-helpers";
-import { AGG_ALERT_COLUMN_VISIBLE_KEY, AUTO_SYNC_STORAGE, BUY_JOURNAL_KEY, BUY_JOURNAL_MAX, BuyJournalEntry, CASH_CHECK_EPS, CASH_STORAGE_KEY, DAILY_SNAPSHOTS_KEY, DailyLiveChange, DailySnapshot, FEAR_GREED_LABEL_KO, HOLDINGS_ALERT_COLUMN_VISIBLE_KEY, HOLDINGS_CHART_GROUP_PRESETS, HOLDINGS_SORT_STORAGE_KEY, HistoryResponse, LAST_SELL_LOG_SYNC_TS_KEY, LAST_SYNC_TS_KEY, LEGACY_POSITIONS_STORAGE_KEY, MarketResponse, OWNER_NAMES_STORAGE_KEY, OwnerName, Position, REALIZED_SYMBOL_PNL_TOGGLE_KEY, SELL_LOG_DIRTY_KEY, SELL_LOG_KEY, SNAPSHOT_PUSHED_DATE_KEY, SNAPSHOT_PUSHED_TOTAL_KEY, STORAGE_KEY, SYNC_KEY_STORAGE, SellLogEntry, TRADING_FEE_RATE } from "@/lib/portfolio-types";
+import { AGG_ALERT_COLUMN_VISIBLE_KEY, AUTO_SYNC_STORAGE, BUY_JOURNAL_KEY, BUY_JOURNAL_MAX, BuyJournalEntry, CASH_CHECK_EPS, CASH_STORAGE_KEY, DAILY_SNAPSHOTS_KEY, DailyLiveChange, DailySnapshot, FEAR_GREED_LABEL_KO, HOLDINGS_ALERT_COLUMN_VISIBLE_KEY, HOLDINGS_CHART_GROUP_PRESETS, HOLDINGS_SORT_STORAGE_KEY, HistoryResponse, LAST_SELL_LOG_SYNC_TS_KEY, LAST_SYNC_TS_KEY, LEGACY_POSITIONS_STORAGE_KEY, MarketResponse, OWNER_NAMES_STORAGE_KEY, OwnerName, Position, REALIZED_SYMBOL_PNL_TOGGLE_KEY, SELL_LOG_DIRTY_KEY, SELL_LOG_KEY, SNAPSHOT_PUSHED_DATE_KEY, SNAPSHOT_PUSHED_TOTAL_KEY, STORAGE_KEY, SYNC_KEY_STORAGE, SellLogEntry, TRADING_FEE_RATE, TelegramTestResult, WATCHLIST_OWNER_ALL, WatchlistRow } from "@/lib/portfolio-types";
 import {
   calculateBollingerSignal,
   calculateMACrossoverSignal,
@@ -80,13 +80,6 @@ import {
   type TradeSignal,
 } from "@/lib/signals";
 import { shouldShowDailyChangeForCurrency, krSettlementTargetUnixSec } from "@/lib/trading-calendar";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -99,6 +92,9 @@ import { GripVertical } from "lucide-react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { SortableOrStaticTableRow, SortableTr } from "@/components/table-sortable-row";
+import { WatchlistSection } from "@/components/watchlist-section";
+import { SyncSection } from "@/components/sync-section";
+import { TelegramAlertSection } from "@/components/telegram-alert-section";
 
 
 export default function Home() {
@@ -197,23 +193,7 @@ export default function Home() {
   const [holdingsSummaryCollapsed, setHoldingsSummaryCollapsed] = useState<Record<string, boolean>>({});
 
   const [telegramTestBusy, setTelegramTestBusy] = useState(false);
-  const [telegramTestResult, setTelegramTestResult] = useState<{
-    ok: boolean;
-    env?: Record<string, string>;
-    symbols?: Array<{ symbol: string; changePct: number | null; willAlert: boolean }>;
-    alertCount?: number;
-    alreadySentToday?: string[];
-    message?: string;
-    error?: string;
-    detail?: Record<string, string>;
-    watchlistCount?: number;
-    watchlistSignals?: unknown[];
-    sentHoldings?: number;
-    sentWatchlist?: number;
-  } | null>(null);
-  const WATCHLIST_OWNER_ALL = "__ALL__";
-
-  type WatchlistRow = { symbol: string; name: string; group?: string; owners?: string[] };
+  const [telegramTestResult, setTelegramTestResult] = useState<TelegramTestResult | null>(null);
   const [watchlistRows, setWatchlistRows] = useState<WatchlistRow[]>([]);
   const [watchlistLoaded, setWatchlistLoaded] = useState(false);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
@@ -7842,127 +7822,7 @@ export default function Home() {
             aria-hidden={activeTopNav !== "section-watchlist"}
           >
           {/* 관심종목 (텔레그램 MA·RSI·BB·VOL) */}
-          <section id="section-watchlist" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
-            <h2 className="mb-1 font-semibold">⭐ 관심종목 (매수 타이밍 참고)</h2>
-            <p className="mb-3 text-xs text-muted-foreground">
-              보유하지 않은 종목 중 <b>관심 티커</b>를 등록하면, 텔레그램으로{" "}
-              <b>이동평균(MA)·RSI·볼린저(BB)·거래량(VOL)</b> 네 가지 근거를 요약한 시그널을 함께 보냅니다.
-              아래 저장 시 서버(Supabase)에 동기화 키별로 저장됩니다.{" "}
-              <code className="rounded bg-muted px-1">supabase/watchlist_column.sql</code> 실행이 필요합니다.
-            </p>
-            <div className="space-y-2">
-              {watchlistRows.length === 0 && (
-                <p className="text-xs text-muted-foreground">행 추가 후 티커를 입력하세요. (예: 005930, NVDA, TSM)</p>
-              )}
-              {watchlistRows.map((row, idx) => (
-                <div key={idx} className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
-                  <input
-                    className="w-28 rounded border bg-background px-2 py-1 text-xs font-mono uppercase"
-                    placeholder="티커"
-                    value={row.symbol}
-                    onChange={(e) =>
-                      setWatchlistRows((prev) =>
-                        prev.map((r, i) => (i === idx ? { ...r, symbol: e.target.value } : r)),
-                      )
-                    }
-                  />
-                  <input
-                    className="min-w-[120px] flex-1 rounded border bg-background px-2 py-1 text-xs"
-                    placeholder="표시 이름 (선택)"
-                    value={row.name}
-                    onChange={(e) =>
-                      setWatchlistRows((prev) =>
-                        prev.map((r, i) => (i === idx ? { ...r, name: e.target.value } : r)),
-                      )
-                    }
-                  />
-                  <input
-                    className="w-28 rounded border bg-background px-2 py-1 text-xs"
-                    placeholder="그룹 (선택)"
-                    value={row.group ?? ""}
-                    onChange={(e) =>
-                      setWatchlistRows((prev) =>
-                        prev.map((r, i) => (i === idx ? { ...r, group: e.target.value } : r)),
-                      )
-                    }
-                  />
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border bg-background px-2 py-1">
-                    <label className="flex cursor-pointer items-center gap-1 text-[11px]">
-                      <input
-                        type="checkbox"
-                        checked={(row.owners ?? [WATCHLIST_OWNER_ALL]).includes(WATCHLIST_OWNER_ALL)}
-                        onChange={(e) =>
-                          setWatchlistRows((prev) =>
-                            prev.map((r, i) => {
-                              if (i !== idx) return r;
-                              if (e.target.checked) return { ...r, owners: [WATCHLIST_OWNER_ALL] };
-                              return { ...r, owners: [] };
-                            }),
-                          )
-                        }
-                      />
-                      전체
-                    </label>
-                    {ownerNames.map((name) => (
-                      <label key={`watch-owner-${name}`} className="flex cursor-pointer items-center gap-1 text-[11px]">
-                        <input
-                          type="checkbox"
-                          checked={(row.owners ?? [WATCHLIST_OWNER_ALL]).includes(name)}
-                          onChange={(e) =>
-                            setWatchlistRows((prev) =>
-                              prev.map((r, i) => {
-                                if (i !== idx) return r;
-                                const current = (r.owners ?? [WATCHLIST_OWNER_ALL]).filter(
-                                  (v) => v !== WATCHLIST_OWNER_ALL,
-                                );
-                                const next = e.target.checked
-                                  ? Array.from(new Set([...current, name]))
-                                  : current.filter((v) => v !== name);
-                                return { ...r, owners: next.length > 0 ? next : [WATCHLIST_OWNER_ALL] };
-                              }),
-                            )
-                          }
-                        />
-                        {name}
-                      </label>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="ml-auto rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
-                    onClick={() => setWatchlistRows((prev) => prev.filter((_, i) => i !== idx))}
-                  >
-                    삭제
-                  </button>
-                </div>
-              ))}
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
-                  onClick={() =>
-                    setWatchlistRows((prev) => [
-                      ...prev,
-                      { symbol: "", name: "", group: "", owners: [WATCHLIST_OWNER_ALL] },
-                    ])
-                  }
-                >
-                  + 종목 추가
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                  disabled={watchlistBusy}
-                  onClick={() => void handleSaveWatchlist()}
-                >
-                  {watchlistBusy ? "저장 중…" : "관심종목 저장"}
-                </button>
-              </div>
-              {watchlistMessage && (
-                <p className="text-xs text-muted-foreground">{watchlistMessage}</p>
-              )}
-            </div>
-          </section>
+          <WatchlistSection handleSaveWatchlist={handleSaveWatchlist} ownerNames={ownerNames} setWatchlistRows={setWatchlistRows} watchlistBusy={watchlistBusy} watchlistMessage={watchlistMessage} watchlistRows={watchlistRows} />
           </div>
 
           <div
@@ -7973,100 +7833,7 @@ export default function Home() {
             aria-hidden={activeTopNav !== "section-telegram"}
           >
           {/* 텔레그램 가격 변동 알림 섹션 */}
-          <section id="section-telegram" className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
-            <h2 className="mb-1 font-semibold">📲 텔레그램 가격 변동 알림</h2>
-            <p className="mb-3 text-xs text-muted-foreground">
-              크론 자동 발송은 <b>본인 동기화 키</b> 한 계정만 대상으로 하려면 Vercel에{" "}
-              <code className="rounded bg-muted px-1">TELEGRAM_ALERT_SYNC_KEY</code>를 동기화 키와 동일하게 설정하세요.
-              Supabase 포트폴리오·시세 기준 <b>총 평가·전일 대비 수익률·종목 등락</b> HTML 브리핑이{" "}
-              <b>KST 09:30, 14:00, 24:00</b> (평일만, 주말 미발송) (<code className="rounded bg-muted px-1">vercel.json</code>{" "}
-              <code className="rounded bg-muted px-1">slot</code>)에 발송됩니다. 관심종목 MA·RSI·BB·VOL 요약은 위에서 저장한
-              목록을 이어서 보냅니다. 환경변수:{" "}
-              <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code>,{" "}
-              <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code>,{" "}
-              <code className="rounded bg-muted px-1">CRON_SECRET</code>. 브리핑 슬롯 로그는{" "}
-              <code className="rounded bg-muted px-1">price_move_alert_logs_briefing_slot.sql</code> 마이그레이션을
-              적용했는지 확인하세요.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="cursor-pointer rounded-md border px-4 py-2 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                disabled={telegramTestBusy}
-                onClick={() => handleTelegramTest(true)}
-              >
-                {telegramTestBusy ? "점검 중…" : "🔍 진단 (전송 없음)"}
-              </button>
-              <button
-                type="button"
-                className="cursor-pointer rounded-md border border-blue-500/40 bg-blue-500/10 px-4 py-2 text-sm text-blue-600 transition-all duration-100 hover:bg-blue-500/20 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                disabled={telegramTestBusy}
-                onClick={() => handleTelegramTest(false)}
-              >
-                {telegramTestBusy ? "전송 중…" : "📨 테스트 전송 (실제 발송)"}
-              </button>
-            </div>
-            {telegramTestResult && (
-              <div className={`mt-3 rounded-lg border p-3 text-xs ${telegramTestResult.ok ? "border-green-500/30 bg-green-500/5" : "border-red-500/30 bg-red-500/5"}`}>
-                {!telegramTestResult.ok ? (
-                  <div className="space-y-1">
-                    <p className="font-semibold text-red-500">❌ {telegramTestResult.error}</p>
-                    {telegramTestResult.detail && Object.entries(telegramTestResult.detail).map(([k, v]) => (
-                      <p key={k}><span className="text-muted-foreground">{k}:</span> {v}</p>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="font-semibold text-green-600">✅ {telegramTestResult.message}</p>
-                    {telegramTestResult.env && (
-                      <div className="flex gap-4">
-                        {Object.entries(telegramTestResult.env).map(([k, v]) => (
-                          <p key={k}><span className="text-muted-foreground">{k}:</span> {v}</p>
-                        ))}
-                      </div>
-                    )}
-                    {telegramTestResult.alreadySentToday && telegramTestResult.alreadySentToday.length > 0 && (
-                      <p className="text-muted-foreground">오늘 이미 발송됨: {telegramTestResult.alreadySentToday.join(", ")}</p>
-                    )}
-                    {telegramTestResult.symbols && telegramTestResult.symbols.length > 0 && (
-                      <div>
-                        <p className="mb-1 font-medium text-muted-foreground">종목별 현재 변동률:</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 sm:grid-cols-3">
-                          {telegramTestResult.symbols.map((s) => (
-                            <p key={s.symbol} className={s.willAlert ? "font-semibold text-red-500" : ""}>
-                              {s.symbol}: {s.changePct != null ? `${s.changePct > 0 ? "+" : ""}${s.changePct.toFixed(2)}%` : "시세 없음"}
-                              {s.willAlert ? " ⚠️" : ""}
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {telegramTestResult.watchlistSignals && telegramTestResult.watchlistSignals.length > 0 && (
-                      <div className="mt-2 border-t pt-2">
-                        <p className="mb-1 font-medium text-muted-foreground">관심종목 시그널 (진단):</p>
-                        <ul className="space-y-1 text-[11px]">
-                          {(telegramTestResult.watchlistSignals as Array<{
-                            symbol: string;
-                            name: string;
-                            ma: string;
-                            rsi: string;
-                            bb: string;
-                            vol: string;
-                            overall: string;
-                            summaryKo: string;
-                          }>).map((w) => (
-                            <li key={w.symbol}>
-                              <span className="font-medium">{w.name}</span> ({w.symbol}) — {w.overall} · MA:{w.ma} RSI:{w.rsi} BB:{w.bb} VOL:{w.vol} — {w.summaryKo}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
+          <TelegramAlertSection handleTelegramTest={handleTelegramTest} telegramTestBusy={telegramTestBusy} telegramTestResult={telegramTestResult} />
           </div>
 
           <div
@@ -8076,241 +7843,7 @@ export default function Home() {
             )}
             aria-hidden={activeTopNav !== "section-sync"}
           >
-          <Card id="section-sync" className="border-dashed">
-            <CardHeader className="pb-2">
-              <CardDescription>클라우드 동기화 (폰·PC 같은 데이터)</CardDescription>
-              <CardTitle className="text-lg">동기화 키</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                다른 PC·폰에서는 브라우저마다 저장소가 달라서, 집에서 쓰는 동기화 키를 그대로 입력한 뒤
-                「키 저장」만 하면 서버에서 자동으로 불러옵니다. 키는 비밀번호처럼 길게 정하세요.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                서버(Supabase) 연결:{" "}
-                {serverHealth === "loading" ? (
-                  <span>확인 중…</span>
-                ) : serverHealth === "ok" ? (
-                  <span className="text-emerald-600 dark:text-emerald-400">정상</span>
-                ) : (
-                  <span className="text-amber-600 dark:text-amber-400">
-                    문제 있음 — Vercel 환경 변수{" "}
-                    <code className="rounded bg-muted px-1">NEXT_PUBLIC_SUPABASE_URL</code>,{" "}
-                    <code className="rounded bg-muted px-1">SUPABASE_SERVICE_ROLE_KEY</code> 확인 후
-                    재배포
-                  </span>
-                )}
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                <div className="min-w-0 flex-1">
-                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="sync-key">
-                    동기화 키 (8자 이상)
-                  </label>
-                  <input
-                    id="sync-key"
-                    type="password"
-                    autoComplete="off"
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                    placeholder="예: 우리가족포트폴리오2026"
-                    value={syncKeyDraft}
-                    onChange={(e) => setSyncKeyDraft(e.target.value)}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all duration-100 hover:bg-primary/90 active:scale-95"
-                  onClick={handleSaveSyncKey}
-                >
-                  키 저장
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={syncBusy}
-                  onClick={handlePullCloud}
-                >
-                  서버에서 불러오기
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={syncBusy}
-                  onClick={handlePushCloud}
-                >
-                  서버로 올리기
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border border-dashed px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={syncBusy}
-                  onClick={handleBackupSnapshot}
-                >
-                  백업
-                </button>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border border-dashed px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={syncBusy}
-                  onClick={handleDownloadBackups}
-                >
-                  백업 내려받기
-                </button>
-                <input
-                  ref={restoreBackupFileInputRef}
-                  type="file"
-                  accept=".json,application/json"
-                  className="hidden"
-                  onChange={handleRestoreFromBackupFile}
-                />
-                <button
-                  type="button"
-                  className="cursor-pointer rounded-md border border-dashed px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={syncBusy}
-                  onClick={() => restoreBackupFileInputRef.current?.click()}
-                >
-                  백업에서 복원
-                </button>
-                <label className="flex cursor-pointer items-center gap-2 text-sm select-none">
-                  <input
-                    type="checkbox"
-                    className="cursor-pointer accent-primary"
-                    checked={autoSync}
-                    onChange={(e) => {
-                      const v = e.target.checked;
-                      setAutoSync(v);
-                      safeSetItem(AUTO_SYNC_STORAGE, v ? "1" : "0");
-                    }}
-                  />
-                  변경 시 자동으로 서버에 저장 (2초 후)
-                </label>
-              </div>
-              <div className="border-t pt-3">
-                <p className="mb-2 text-xs text-muted-foreground">
-                  현재 동기화 키의 데이터(보유 종목·현금·관심 종목·목표 비율 등)를 <strong className="text-foreground">로컬과 서버에서 모두 비웁니다.</strong> 보유자 목록은 유지됩니다. <strong className="text-foreground">다른 동기화 키의 데이터는 키마다 별도로 저장되어 영향받지 않습니다.</strong> 비우기 직전 서버 상태는 <strong className="text-foreground">자동 백업</strong>되어 「백업에서 복원」으로 되살릴 수 있습니다.
-                </p>
-                {pendingClearConfirm ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-destructive font-medium">이 키의 서버 데이터까지 비웁니다. 진행할까요?</span>
-                    <button
-                      type="button"
-                      className="cursor-pointer rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground transition-all duration-100 hover:bg-destructive/90 active:scale-95"
-                      onClick={handleClearLocalData}
-                    >
-                      확인 (초기화)
-                    </button>
-                    <button
-                      type="button"
-                      className="cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-all duration-100 hover:bg-muted active:scale-95"
-                      onClick={() => setPendingClearConfirm(false)}
-                    >
-                      취소
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-md border border-destructive/50 px-3 py-1.5 text-sm text-destructive transition-all duration-100 hover:bg-destructive/10 active:scale-95"
-                    onClick={() => setPendingClearConfirm(true)}
-                  >
-                    이 키 데이터 초기화 (로컬+서버)
-                  </button>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                「백업」은 서버에 올라간 잔고를 백업 테이블에 한 줄씩 추가합니다(최대 1년, 500건).
-                목표 비중과 리밸 계산기의 종목 분배·모드까지 동일 스키마(sync)로 포함됩니다. 「백업 내려받기」는 먼저 백업을 저장한 뒤 JSON으로 다운로드. 「백업에서 복원」은 JSON을 업로드하면 <strong className="font-medium text-foreground">시점 목록이 표시되며 원하는 시점을 선택해 복원</strong>할 수 있습니다.
-              </p>
-
-              {/* 백업 시점 선택 복원 UI */}
-              {pendingBackups && pendingBackups.length > 0 && (
-                <div className="rounded-lg border border-amber-500/40 bg-amber-950/30 p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-amber-200">
-                      복원할 시점을 선택하세요 ({pendingBackups.length}건)
-                    </p>
-                    <button
-                      type="button"
-                      className="text-[10px] text-zinc-500 hover:text-zinc-300 transition"
-                      onClick={() => { setPendingBackups(null); setSyncMessage(""); }}
-                    >
-                      취소
-                    </button>
-                  </div>
-                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
-                    {pendingBackups.map((b, idx) => {
-                      const kstTime = new Date(b.created_at).toLocaleString("ko-KR", {
-                        timeZone: "Asia/Seoul",
-                        year: "numeric", month: "2-digit", day: "2-digit",
-                        hour: "2-digit", minute: "2-digit", second: "2-digit",
-                      });
-                      const posCount = Array.isArray((b.snapshot as { positions?: unknown }).positions)
-                        ? (b.snapshot.positions as unknown[]).length
-                        : "?";
-                      const srcAt = typeof (b.snapshot as { source_updated_at?: unknown }).source_updated_at === "string"
-                        ? new Date((b.snapshot as { source_updated_at: string }).source_updated_at).toLocaleString("ko-KR", {
-                            timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit",
-                            hour: "2-digit", minute: "2-digit",
-                          })
-                        : null;
-                      return (
-                        <button
-                          key={b.id ?? idx}
-                          type="button"
-                          disabled={syncBusy}
-                          onClick={() => void handleRestoreSpecificBackup(idx)}
-                          className="w-full flex items-center justify-between gap-3 rounded border border-white/10 bg-zinc-900/60 px-3 py-1.5 text-left text-xs hover:bg-zinc-800 transition disabled:opacity-50"
-                        >
-                          <span className="font-mono tabular-nums text-zinc-200">{kstTime}</span>
-                          <span className="shrink-0 text-zinc-500">
-                            {posCount}종목{srcAt ? ` · 데이터 ${srcAt}` : ""}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[10px] text-amber-400/80">⚠ 선택 시 서버 메인 잔고를 해당 시점으로 덮어씁니다.</p>
-                </div>
-              )}
-              {syncMessage ? (
-                <p className="text-xs text-muted-foreground">{syncMessage}</p>
-              ) : null}
-              <p className="text-xs text-muted-foreground">
-                매도 기록 동기화:{" "}
-                {sellLogDirty ? (
-                  <span className="text-amber-600">로컬 변경 있음 (서버 반영 대기)</span>
-                ) : lastSellLogSyncedAt ? (
-                  <span>
-                    최신 반영{" "}
-                    {new Date(lastSellLogSyncedAt).toLocaleString("ko-KR", {
-                      hour12: false,
-                    })}
-                  </span>
-                ) : (
-                  <span>아직 반영 이력 없음</span>
-                )}
-              </p>
-              {syncBusy ? <p className="text-xs text-amber-600">동기화 중…</p> : null}
-              {lastSyncedAt ? (
-                <p className="text-xs text-muted-foreground">
-                  마지막 동기 시각: {new Date(lastSyncedAt).toLocaleString()}
-                </p>
-              ) : null}
-              {syncReady && cloudSyncKey.trim().length >= 8 && hasLoadedLatestBackup ? (
-                <p className="text-xs text-muted-foreground">
-                  서버 최근 백업:{" "}
-                  {latestBackupAt ? (
-                    <span className="font-medium text-foreground">
-                      {new Date(latestBackupAt).toLocaleString()}
-                    </span>
-                  ) : (
-                    <span>아직 없음 (「백업」 또는 「백업 내려받기」로 저장)</span>
-                  )}
-                </p>
-              ) : null}
-            </CardContent>
-          </Card>
+          <SyncSection autoSync={autoSync} cloudSyncKey={cloudSyncKey} handleBackupSnapshot={handleBackupSnapshot} handleClearLocalData={handleClearLocalData} handleDownloadBackups={handleDownloadBackups} handlePullCloud={handlePullCloud} handlePushCloud={handlePushCloud} handleRestoreFromBackupFile={handleRestoreFromBackupFile} handleRestoreSpecificBackup={handleRestoreSpecificBackup} handleSaveSyncKey={handleSaveSyncKey} hasLoadedLatestBackup={hasLoadedLatestBackup} lastSellLogSyncedAt={lastSellLogSyncedAt} lastSyncedAt={lastSyncedAt} latestBackupAt={latestBackupAt} pendingBackups={pendingBackups} pendingClearConfirm={pendingClearConfirm} restoreBackupFileInputRef={restoreBackupFileInputRef} sellLogDirty={sellLogDirty} serverHealth={serverHealth} setAutoSync={setAutoSync} setPendingBackups={setPendingBackups} setPendingClearConfirm={setPendingClearConfirm} setSyncKeyDraft={setSyncKeyDraft} setSyncMessage={setSyncMessage} syncBusy={syncBusy} syncKeyDraft={syncKeyDraft} syncMessage={syncMessage} syncReady={syncReady} />
           </div>
 
         </main>

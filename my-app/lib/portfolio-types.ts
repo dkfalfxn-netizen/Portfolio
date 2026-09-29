@@ -154,3 +154,24 @@ export type BuyJournalEntry = {
   /** USD 매수 정산환율(T+2 09:00) 미확정 — 현재환율 임시. 정산 후 fxRate·totalKrw 자동 보정되면 해제 */
   fxPending?: boolean;
 };
+
+/** 텔레그램 테스트 발송 API 응답 */
+export type TelegramTestResult = {
+  ok: boolean;
+  env?: Record<string, string>;
+  symbols?: Array<{ symbol: string; changePct: number | null; willAlert: boolean }>;
+  alertCount?: number;
+  alreadySentToday?: string[];
+  message?: string;
+  error?: string;
+  detail?: Record<string, string>;
+  watchlistCount?: number;
+  watchlistSignals?: unknown[];
+  sentHoldings?: number;
+  sentWatchlist?: number;
+};
+
+/** 관심종목 owners에서 "모든 보유자"를 뜻하는 토큰 */
+export const WATCHLIST_OWNER_ALL = "__ALL__";
+
+export type WatchlistRow = { symbol: string; name: string; group?: string; owners?: string[] };
