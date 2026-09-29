@@ -18,7 +18,7 @@
 | 빌드 | `npm run build` |
 | 배포 | `npm run deploy` (빌드 → 커밋 → 푸시. **사용자가 요청할 때만**) |
 
-린트 기준선: 기존 **오류 1개(rebalancing-calculator) · 경고 14개**. 이보다 늘리지 않는다.
+린트 기준선(`npx eslint app components lib`): 기존 **오류 1개(rebalancing-calculator) · 경고 21개**. 이보다 늘리지 않는다.
 
 ## 작업 원칙
 1. **데이터 손상 방지가 최우선.** `localStorage` 키(`portfolio_*_v1` 등)·Supabase 스키마·동기화(`/api/sync`) 페이로드 형식은 명시적 요청 없이 바꾸지 않는다. 큰 변경 전에는 `backup-*` 브랜치를 먼저 만든다.
@@ -29,7 +29,7 @@
 6. Next.js 버전이 학습 지식과 다르다. 코드 작성 전 `my-app/node_modules/next/dist/docs/` 를 확인한다 (`my-app/AGENTS.md`).
 
 ## 코드 구조 메모
-- `my-app/app/page.tsx` — 대시보드 본체(`Home()`, 여전히 큼). 점진적으로 분리 중.
+- `my-app/app/page.tsx` — 대시보드 본체(`Home()`, 여전히 큼). 점진적으로 분리 중. 섹션 컴포넌트(`components/watchlist-section.tsx`, `telegram-alert-section.tsx`, `sync-section.tsx`)는 상태를 Home이 갖고 props로 받는다.
 - 분리된 모듈: `lib/portfolio-types.ts`(타입·저장 키 상수), `portfolio-storage.ts`(localStorage 로드/저장), `portfolio-positions.ts`(포지션 병합·파싱), `portfolio-sync-helpers.ts`(서버 pull 검증·충돌 판단), `portfolio-seed.ts`, `portfolio-calc.ts`(매도 실현손익·매입 현금 차감), `portfolio-holdings-helpers.ts`, `broker-notification-parser.ts`(증권사 체결 알림 파서).
 - `app/api/**` — 동기화·시세·크론·알림 라우트. 크론 스케줄은 `vercel.json`.
 - `supabase/*.sql` — 테이블 정의(신규 환경에서 순서대로 실행).
