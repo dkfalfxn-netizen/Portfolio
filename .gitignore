@@ -13,3 +13,6 @@
 # local tool/editor artifacts
 .DS_Store
 Thumbs.db
+
+# Claude Code 개인 설정(공유 설정은 .claude/settings.json)
+.claude/settings.local.json

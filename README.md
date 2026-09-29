@@ -16,6 +16,17 @@
 
 **코드 최신본**은 GitHub `main` 기준이며, 배포는 보통 `my-app`에서 `npm run deploy`(빌드·푸시) 또는 Vercel Git 연동으로 반영됩니다.
 
+### Claude Code로 다른 PC에서 작업할 때
+
+저장소에 Claude Code 설정이 들어 있어 `git clone` 만 하면 같은 규칙·환경으로 시작됩니다.
+
+- `CLAUDE.md` — 프로젝트 규칙·명령어·구조 (데이터 보호, 검증 절차, 커밋 규칙 포함)
+- `.claude/settings.json` — 공유 권한(린트·타입검사·git 조회 허용, `.env*` 읽기 금지)과 SessionStart 훅
+- `.claude/hooks/session-start.sh` — 세션 시작 시 `my-app` 의존성 자동 설치(`npm ci`)
+- `.nvmrc` — Node 22
+
+**Git에 없는 것(직접 옮겨야 함):** `my-app/.env.local`(비밀값), 브라우저 `localStorage` 데이터(동기화 키로 Pull), 개인용 `~/.claude` 설정·메모리.
+
 ### 1. 필수 도구
 
 - **Node.js** 20 이상 (LTS 권장)
