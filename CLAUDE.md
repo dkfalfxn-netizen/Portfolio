@@ -29,7 +29,7 @@
 6. Next.js 버전이 학습 지식과 다르다. 코드 작성 전 `my-app/node_modules/next/dist/docs/` 를 확인한다 (`my-app/AGENTS.md`).
 
 ## 코드 구조 메모
-- `my-app/app/page.tsx` — 대시보드 본체(`Home()`, 여전히 큼). 점진적으로 분리 중. 섹션 컴포넌트(`components/*-section.tsx`: watchlist·telegram-alert·sync·realized·add-position·technical-signal)는 상태를 Home이 갖고 props로 받는다.
+- `my-app/app/page.tsx` — 대시보드 본체(`Home()`, 여전히 큼). 점진적으로 분리 중. 섹션 컴포넌트(`components/*-section.tsx`: watchlist·telegram-alert·sync·realized·add-position·technical-signal·holdings·holdings-by-symbol, 그리고 `dashboard-header.tsx`·`sell-log-detail-modal.tsx`)는 상태를 Home이 갖고 props로 받는다.
 - 분리된 모듈: `lib/portfolio-types.ts`(타입·저장 키 상수), `portfolio-storage.ts`(localStorage 로드/저장), `portfolio-positions.ts`(포지션 병합·파싱), `portfolio-sync-helpers.ts`(서버 pull 검증·충돌 판단), `portfolio-seed.ts`, `portfolio-calc.ts`(매도 실현손익·매입 현금 차감), `portfolio-holdings-helpers.ts`, `broker-notification-parser.ts`(증권사 체결 알림 파서).
 - `app/api/**` — 동기화·시세·크론·알림 라우트. 크론 스케줄은 `vercel.json`.
 - `supabase/*.sql` — 테이블 정의(신규 환경에서 순서대로 실행).
