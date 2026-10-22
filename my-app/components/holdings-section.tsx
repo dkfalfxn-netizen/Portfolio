@@ -12,9 +12,11 @@ import { SortableTr, SortableOrStaticTableRow } from "@/components/table-sortabl
 import { UsdCashInput } from "@/components/usd-cash-input";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
 import { Fragment, type Dispatch, type SetStateAction } from "react";
-import { GripVertical } from "lucide-react";
+import { GripVertical, ChevronDown, ChevronRight } from "lucide-react";
 import { IntradaySparkline } from "@/components/intraday-sparkline";
 import { LivePriceCell } from "@/components/live-price-cell";
+import { EtfHoldingsPanel } from "@/components/etf-holdings-panel";
+import type { EtfHoldingsResponse } from "@/app/api/etf-holdings/route";
 import { positionAlertKey, type AlertThresholdsByKey } from "@/lib/alert-thresholds";
 import { PurchaseFxCell } from "@/components/purchase-fx-cell";
 import { SellLogEntry, BuyJournalEntry, HistoryResponse, MarketResponse, Position, OwnerName } from "@/lib/portfolio-types";
@@ -32,7 +34,9 @@ export type HoldingsSectionProps = {
   editPurchaseUsdKrw: string;
   editQuantity: string;
   editSymbol: string;
+  etfHoldingsQuery: UseQueryResult<EtfHoldingsResponse, Error>;
   eurKrw: number;
+  expandedEtfSymbol: string | null;
   handleDeleteRow: (rowIndex: number) => void;
   historyQuery: UseQueryResult<HistoryResponse, Error>;
   holdingsDndSensors: SensorDescriptor<SensorOptions>[];
@@ -62,6 +66,7 @@ export type HoldingsSectionProps = {
   setEditPurchaseUsdKrw: Dispatch<SetStateAction<string>>;
   setEditQuantity: Dispatch<SetStateAction<string>>;
   setEditSymbol: Dispatch<SetStateAction<string>>;
+  setExpandedEtfSymbol: Dispatch<SetStateAction<string | null>>;
   setHoldingsSortByOwner: Dispatch<SetStateAction<Record<string, HoldingsSortMode>>>;
   setHoldingsSummaryCollapsed: Dispatch<SetStateAction<Record<string, boolean>>>;
   setPendingConfirm: Dispatch<SetStateAction<{ type: "edit" | "delete"; rowIndex: number; position: Position; } | null>>;
@@ -93,7 +98,9 @@ export function HoldingsSection({
   editPurchaseUsdKrw,
   editQuantity,
   editSymbol,
+  etfHoldingsQuery,
   eurKrw,
+  expandedEtfSymbol,
   handleDeleteRow,
   historyQuery,
   holdingsDndSensors,
@@ -123,6 +130,7 @@ export function HoldingsSection({
   setEditPurchaseUsdKrw,
   setEditQuantity,
   setEditSymbol,
+  setExpandedEtfSymbol,
   setHoldingsSortByOwner,
   setHoldingsSummaryCollapsed,
   setPendingConfirm,
@@ -530,6 +538,7 @@ export function HoldingsSection({
                               const isEditing = editingRowIndex === rowIndex;
                               const foreignMarketValue = formatPositionMarketValueForeign(position);
                               return (
+                        <Fragment key={`${rowKey}-wrap`}>
                         <SortableOrStaticTableRow
                           manual={sortMode === "manual"}
                           id={position.sourceIndex}
@@ -578,12 +587,28 @@ export function HoldingsSection({
                                 />
                               </div>
                             ) : (
-                              <>
-                                <p className="text-sm font-semibold leading-snug text-foreground">
-                                  {position.name}
-                                </p>
-                                <p className="text-[11px] text-muted-foreground">{position.symbol}</p>
-                              </>
+                              <button
+                                type="button"
+                                className="group flex items-start gap-1 text-left"
+                                title="구성 종목별 일일 변동 보기"
+                                onClick={() =>
+                                  setExpandedEtfSymbol((cur) =>
+                                    cur === position.symbol ? null : position.symbol,
+                                  )
+                                }
+                              >
+                                {expandedEtfSymbol === position.symbol ? (
+                                  <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                ) : (
+                                  <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                                )}
+                                <span>
+                                  <p className="text-sm font-semibold leading-snug text-foreground">
+                                    {position.name}
+                                  </p>
+                                  <p className="text-[11px] text-muted-foreground">{position.symbol}</p>
+                                </span>
+                              </button>
                             )}
                               </div>
                             </div>
@@ -997,6 +1022,17 @@ export function HoldingsSection({
                         </>
                           )}
                         </SortableOrStaticTableRow>
+                        {expandedEtfSymbol === position.symbol ? (
+                          <TableRow className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell colSpan={showHoldingsAlertColumn ? 11 : 10} className="px-3 py-2.5">
+                              <EtfHoldingsPanel
+                                symbol={position.symbol}
+                                query={etfHoldingsQuery}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ) : null}
+                        </Fragment>
                               );
                             })}
                           </Fragment>

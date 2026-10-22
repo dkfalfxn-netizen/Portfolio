@@ -86,6 +86,7 @@ import { TechnicalSignalSection } from "@/components/technical-signal-section";
 import { SellLogDetailModal } from "@/components/sell-log-detail-modal";
 import { HoldingsBySymbolSection } from "@/components/holdings-by-symbol-section";
 import { HoldingsSection } from "@/components/holdings-section";
+import type { EtfHoldingsResponse } from "@/app/api/etf-holdings/route";
 import { DashboardHeader } from "@/components/dashboard-header";
 
 
@@ -739,6 +740,21 @@ export default function Home() {
     enabled: true,
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
+  });
+
+  /** 보유 표에서 클릭해 펼친 ETF 구성 종목(심볼). 다시 누르면 접힘 */
+  const [expandedEtfSymbol, setExpandedEtfSymbol] = useState<string | null>(null);
+
+  const etfHoldingsQuery = useQuery<EtfHoldingsResponse>({
+    queryKey: ["etf-holdings", expandedEtfSymbol],
+    queryFn: async () => {
+      const res = await fetch(`/api/etf-holdings?symbol=${encodeURIComponent(expandedEtfSymbol!)}`);
+      if (!res.ok) throw new Error("구성 종목 조회 실패");
+      return res.json() as Promise<EtfHoldingsResponse>;
+    },
+    enabled: expandedEtfSymbol !== null,
+    staleTime: 1000 * 60 * 5,
+    refetchInterval: expandedEtfSymbol !== null ? 1000 * 60 : false,
   });
 
   // 요청: 김승주 보유 종목에 대해 기술적 시그널 표시
@@ -4134,7 +4150,7 @@ export default function Home() {
             }
           >
           {(activeTopNav === "section-holdings" || activeTopNav.startsWith("owner-")) ? (
-          <HoldingsSection alertThresholdsByKey={alertThresholdsByKey} buyJournal={buyJournal} cancelEditRow={cancelEditRow} editAvgPrice={editAvgPrice} editChartGroup={editChartGroup} editingRowIndex={editingRowIndex} editName={editName} editPurchaseEurKrw={editPurchaseEurKrw} editPurchaseUsdKrw={editPurchaseUsdKrw} editQuantity={editQuantity} editSymbol={editSymbol} eurKrw={eurKrw} handleDeleteRow={handleDeleteRow} historyQuery={historyQuery} holdingsDndSensors={holdingsDndSensors} holdingsSortByOwner={holdingsSortByOwner} holdingsSummaryCollapsed={holdingsSummaryCollapsed} holdingsViewOwner={holdingsViewOwner} marketQuery={marketQuery} moveRow={moveRow} ownerNames={ownerNames} patchPositionAlertPrice={patchPositionAlertPrice} pendingConfirm={pendingConfirm} pendingSaveConfirm={pendingSaveConfirm} positions={positions} positionsByOwnerForTab={positionsByOwnerForTab} reorderHoldingsDrag={reorderHoldingsDrag} saveAlertThresholdsForOwner={saveAlertThresholdsForOwner} saveEditRow={saveEditRow} savingAlertOwner={savingAlertOwner} sellLog={sellLog} sellLogErrorByOwner={sellLogErrorByOwner} sellLogForm={sellLogForm} setCashByOwner={setCashByOwner} setEditAvgPrice={setEditAvgPrice} setEditChartGroup={setEditChartGroup} setEditName={setEditName} setEditPurchaseEurKrw={setEditPurchaseEurKrw} setEditPurchaseUsdKrw={setEditPurchaseUsdKrw} setEditQuantity={setEditQuantity} setEditSymbol={setEditSymbol} setHoldingsSortByOwner={setHoldingsSortByOwner} setHoldingsSummaryCollapsed={setHoldingsSummaryCollapsed} setPendingConfirm={setPendingConfirm} setPendingSaveConfirm={setPendingSaveConfirm} setSellLog={setSellLog} setSellLogDetailOpenOwner={setSellLogDetailOpenOwner} setSellLogErrorByOwner={setSellLogErrorByOwner} setSellLogForm={setSellLogForm} setShowHoldingsAlertColumn={setShowHoldingsAlertColumn} setShowSymbolPnl={setShowSymbolPnl} setSignalDetailTarget={setSignalDetailTarget} showActionSuccessToast={showActionSuccessToast} showHoldingsAlertColumn={showHoldingsAlertColumn} showSymbolPnl={showSymbolPnl} signalBySymbol={signalBySymbol} startEditRow={startEditRow} usdKrw={usdKrw} />
+          <HoldingsSection alertThresholdsByKey={alertThresholdsByKey} buyJournal={buyJournal} cancelEditRow={cancelEditRow} editAvgPrice={editAvgPrice} editChartGroup={editChartGroup} editingRowIndex={editingRowIndex} editName={editName} editPurchaseEurKrw={editPurchaseEurKrw} editPurchaseUsdKrw={editPurchaseUsdKrw} editQuantity={editQuantity} editSymbol={editSymbol} etfHoldingsQuery={etfHoldingsQuery} eurKrw={eurKrw} expandedEtfSymbol={expandedEtfSymbol} handleDeleteRow={handleDeleteRow} historyQuery={historyQuery} holdingsDndSensors={holdingsDndSensors} holdingsSortByOwner={holdingsSortByOwner} holdingsSummaryCollapsed={holdingsSummaryCollapsed} holdingsViewOwner={holdingsViewOwner} marketQuery={marketQuery} moveRow={moveRow} ownerNames={ownerNames} patchPositionAlertPrice={patchPositionAlertPrice} pendingConfirm={pendingConfirm} pendingSaveConfirm={pendingSaveConfirm} positions={positions} positionsByOwnerForTab={positionsByOwnerForTab} reorderHoldingsDrag={reorderHoldingsDrag} saveAlertThresholdsForOwner={saveAlertThresholdsForOwner} saveEditRow={saveEditRow} savingAlertOwner={savingAlertOwner} sellLog={sellLog} sellLogErrorByOwner={sellLogErrorByOwner} sellLogForm={sellLogForm} setCashByOwner={setCashByOwner} setEditAvgPrice={setEditAvgPrice} setEditChartGroup={setEditChartGroup} setEditName={setEditName} setEditPurchaseEurKrw={setEditPurchaseEurKrw} setEditPurchaseUsdKrw={setEditPurchaseUsdKrw} setEditQuantity={setEditQuantity} setEditSymbol={setEditSymbol} setExpandedEtfSymbol={setExpandedEtfSymbol} setHoldingsSortByOwner={setHoldingsSortByOwner} setHoldingsSummaryCollapsed={setHoldingsSummaryCollapsed} setPendingConfirm={setPendingConfirm} setPendingSaveConfirm={setPendingSaveConfirm} setSellLog={setSellLog} setSellLogDetailOpenOwner={setSellLogDetailOpenOwner} setSellLogErrorByOwner={setSellLogErrorByOwner} setSellLogForm={setSellLogForm} setShowHoldingsAlertColumn={setShowHoldingsAlertColumn} setShowSymbolPnl={setShowSymbolPnl} setSignalDetailTarget={setSignalDetailTarget} showActionSuccessToast={showActionSuccessToast} showHoldingsAlertColumn={showHoldingsAlertColumn} showSymbolPnl={showSymbolPnl} signalBySymbol={signalBySymbol} startEditRow={startEditRow} usdKrw={usdKrw} />
           ) : null}
 
           {activeTopNav === "section-holdings-by-symbol" ? (
