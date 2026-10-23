@@ -249,6 +249,53 @@ function pickStr(o: Record<string, unknown>, ...keys: string[]): string {
   return "";
 }
 
+type KisEtfJsonResult =
+  | { kind: "notjson"; status: number; text: string }
+  | { kind: "json"; ok: boolean; status: number; j: Record<string, unknown>; msg: string };
+
+async function fetchKisEtfComponentJson(code: string): Promise<KisEtfJsonResult> {
+  const token = await getToken();
+  const url =
+    `${kisBaseUrl()}/uapi/etfetn/v1/quotations/inquire-component-stock-price` +
+    `?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${encodeURIComponent(code)}&FID_COND_SCR_DIV_CODE=11216`;
+  const res = await fetch(url, {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      authorization: `Bearer ${token}`,
+      appkey: kisAppKey(),
+      appsecret: kisAppSecret(),
+      tr_id: "FHKST121600C0",
+      custtype: "P",
+    },
+    cache: "no-store",
+  });
+  const text = await res.text();
+  let j: Record<string, unknown>;
+  try {
+    j = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return { kind: "notjson", status: res.status, text };
+  }
+  const msg = `${String(j.msg_cd ?? "")} ${String(j.msg1 ?? "")}`.trim();
+  return { kind: "json", ok: res.ok, status: res.status, j, msg };
+}
+
+/** 진단용 대조군: 평범한 국내 주식형 ETF(KODEX 200)도 같은 호출로 구성종목이 오는지 확인 */
+let kisEtfControlCache: string | null = null;
+async function kisEtfControlProbe(): Promise<string> {
+  if (kisEtfControlCache) return kisEtfControlCache;
+  try {
+    const r = await fetchKisEtfComponentJson("069500");
+    if (r.kind === "notjson") return `비JSON(HTTP ${r.status})`;
+    const o2 = r.j.output2;
+    const desc = Array.isArray(o2) ? `array(${o2.length})` : typeof o2;
+    kisEtfControlCache = `${desc}${String(r.j.rt_cd) !== "0" ? ` rt_cd=${String(r.j.rt_cd)} ${r.msg}` : ""}`;
+    return kisEtfControlCache;
+  } catch (e) {
+    return `예외(${e instanceof Error ? e.message.slice(0, 40) : "?"})`;
+  }
+}
+
 /**
  * 국내 ETF 구성종목 + 비중 + 전일대비.
  * ETF 6자리 코드(예: 381180)를 넣는다. 미설정·실패·빈 응답이면 items=[] 와 diag 를 돌려준다.
@@ -263,37 +310,24 @@ export async function getKisEtfComponents(etfCode: string): Promise<KisEtfCompon
   if (cached && Date.now() - cached.at < KIS_ETF_COMPONENT_TTL_MS) return { items: cached.items, diag: "" };
 
   try {
-    const token = await getToken();
-    const url =
-      `${kisBaseUrl()}/uapi/etfetn/v1/quotations/inquire-component-stock-price` +
-      `?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${encodeURIComponent(code)}&FID_COND_SCR_DIV_CODE=11216`;
-    const res = await fetch(url, {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        authorization: `Bearer ${token}`,
-        appkey: kisAppKey(),
-        appsecret: kisAppSecret(),
-        tr_id: "FHKST121600C0",
-        custtype: "P",
-      },
-      cache: "no-store",
-    });
-    const raw = await res.text();
-    let j: Record<string, unknown> = {};
-    try {
-      j = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return { items: [], diag: `KIS 응답이 JSON이 아님 (HTTP ${res.status}): ${raw.slice(0, 80)}` };
-    }
-    const msg = `${String(j.msg_cd ?? "")} ${String(j.msg1 ?? "")}`.trim();
-    if (!res.ok) return { items: [], diag: `KIS HTTP ${res.status} ${msg}`.trim() };
+    const r = await fetchKisEtfComponentJson(code);
+    if (r.kind === "notjson") return { items: [], diag: `KIS 응답이 JSON이 아님 (HTTP ${r.status}): ${r.text.slice(0, 80)}` };
+    const { j, status, msg } = r;
+    if (!r.ok) return { items: [], diag: `KIS HTTP ${status} ${msg}`.trim() };
     if (j.rt_cd !== undefined && String(j.rt_cd) !== "0") {
       return { items: [], diag: `KIS rt_cd=${String(j.rt_cd)} ${msg}`.trim() };
     }
 
     const list = Array.isArray(j.output2) ? (j.output2 as Record<string, unknown>[]) : [];
     if (list.length === 0) {
-      return { items: [], diag: `KIS 응답에 구성종목(output2) 없음 (keys: ${Object.keys(j).join(",")})` };
+      const o2 = j.output2;
+      const o2desc = Array.isArray(o2) ? `array(${o2.length})` : o2 === null ? "null" : typeof o2;
+      const o1 = j.output1 && typeof j.output1 === "object" ? Object.keys(j.output1 as object).slice(0, 8).join(",") : String(typeof j.output1);
+      const control = code === "069500" ? "" : ` / 대조 069500=${await kisEtfControlProbe()}`;
+      return {
+        items: [],
+        diag: `KIS 응답에 구성종목(output2) 없음 — rt_cd=${String(j.rt_cd)} msg=${msg || "-"} output2=${o2desc} output1.keys=[${o1}]${control}`,
+      };
     }
 
     const items: KisEtfComponent[] = list
