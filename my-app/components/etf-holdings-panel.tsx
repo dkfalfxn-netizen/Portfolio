@@ -2,6 +2,7 @@
 
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { EtfHoldingsResponse } from "@/app/api/etf-holdings/route";
+import { isKrxListedEquityCode } from "@/lib/finance-symbols";
 
 const UP_TEXT = "text-[#ef5350]";
 const DOWN_TEXT = "text-[#00bfa5]";
@@ -23,9 +24,12 @@ export function EtfHoldingsPanel({
   const holdings = query.data?.holdings ?? [];
   if (holdings.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
-        {symbol}의 구성 종목 정보를 제공받지 못했습니다(ETF가 아니거나 데이터 소스 미지원).
-      </p>
+      <div className="space-y-0.5">
+        <p className="text-xs text-muted-foreground">
+          {symbol}의 구성 종목 정보를 제공받지 못했습니다(ETF가 아니거나 데이터 소스 미지원).
+        </p>
+        {query.data?.diag ? <p className="text-[10px] text-muted-foreground/70">원인 힌트: {query.data.diag}</p> : null}
+      </div>
     );
   }
 
@@ -44,7 +48,9 @@ export function EtfHoldingsPanel({
               title={h.name}
             >
               <div className="min-w-0">
-                <p className="truncate font-semibold text-foreground">{h.symbol}</p>
+                <p className="truncate font-semibold text-foreground">
+                  {isKrxListedEquityCode(h.symbol) && h.name && h.name !== h.symbol ? h.name : h.symbol}
+                </p>
                 {h.weightPct != null ? (
                   <p className="text-[10px] text-muted-foreground">비중 {h.weightPct.toFixed(2)}%</p>
                 ) : null}

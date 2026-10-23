@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getKisEtfComponents } from "@/lib/kis-quote";
+import { toYahooSymbol } from "@/lib/finance-symbols";
 
 export type EtfHoldingQuote = {
   symbol: string;
@@ -15,7 +17,24 @@ export type EtfHoldingsResponse = {
   /** topHoldings 모듈이 돌려주는 상위 보유 종목 수(보통 10개) */
   holdings: EtfHoldingQuote[];
   fetchedAt: number;
+  /** 데이터 출처 — 국내 ETF는 KIS, 그 외(또는 KIS 실패 시)는 Yahoo */
+  source?: "kis" | "yahoo";
+  /** holdings 가 비었을 때 원인 힌트(비밀 미포함) */
+  diag?: string;
 };
+
+/** 화면에 보여줄 상위 구성 종목 수 */
+const MAX_HOLDINGS = 10;
+
+/** 국내 ETF 6자리 코드 추출: A381180 / 381180 / KRX:381180 / KQ:... → 381180. 해당 없으면 null */
+function krEtfCode(symbol: string): string | null {
+  let s = symbol.trim().toUpperCase();
+  if (s.startsWith("KRX:")) s = s.slice(4);
+  else if (s.startsWith("KQ:")) s = s.slice(3);
+  if (/^[A-Z][0-9A-Z]{6}$/.test(s)) return s.slice(1);
+  if (/^[0-9][0-9A-Z]{5}$/.test(s)) return s;
+  return null;
+}
 
 /** topHoldings 캐시 — 보유 구성은 하루 수 차례만 바뀌므로 동일 인스턴스 내 재조회 비용을 줄임 */
 const topHoldingsCache = new Map<string, { holdings: { symbol: string; name: string; weightPct: number | null }[]; fetchedAt: number }>();
@@ -169,9 +188,47 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const topHoldings = await fetchTopHoldings(symbol);
+    let kisDiag = "";
+    const krCode = krEtfCode(symbol);
+    if (krCode) {
+      // 국내 ETF: KIS 구성종목시세 우선 (Yahoo topHoldings 는 국내 ETF 를 거의 지원하지 않음)
+      const kis = await getKisEtfComponents(krCode);
+      if (kis.items.length > 0) {
+        const top = kis.items.slice(0, MAX_HOLDINGS);
+        // KIS 에 시세가 없는 항목(해외 종목 등)은 Yahoo 로 보충
+        const filled = await Promise.all(
+          top.map(async (c) => {
+            if (c.price !== null && c.changePct !== null) return c;
+            const q = await fetchQuote(toYahooSymbol(c.code));
+            const changePct =
+              q.price !== null && q.previousClose !== null && q.previousClose !== 0
+                ? ((q.price - q.previousClose) / q.previousClose) * 100
+                : null;
+            return { ...c, price: q.price, previousClose: q.previousClose, changePct };
+          }),
+        );
+        const holdings: EtfHoldingQuote[] = filled.map((c) => ({
+          symbol: c.code,
+          name: c.name || c.code,
+          weightPct: c.weightPct,
+          price: c.price,
+          previousClose: c.previousClose,
+          changePct: c.changePct,
+        }));
+        return NextResponse.json({ symbol, holdings, fetchedAt: Date.now(), source: "kis" } satisfies EtfHoldingsResponse);
+      }
+      kisDiag = kis.diag;
+    }
+
+    // 해외 ETF(또는 국내 ETF 의 KIS 실패 시 Yahoo 폴백 — 국내는 .KS 로 변환)
+    const topHoldings = await fetchTopHoldings(krCode ? toYahooSymbol(symbol) : symbol);
     if (topHoldings.length === 0) {
-      return NextResponse.json({ symbol, holdings: [], fetchedAt: Date.now() } satisfies EtfHoldingsResponse);
+      return NextResponse.json({
+        symbol,
+        holdings: [],
+        fetchedAt: Date.now(),
+        ...(kisDiag ? { diag: kisDiag } : {}),
+      } satisfies EtfHoldingsResponse);
     }
 
     const quotes = await Promise.all(topHoldings.map((h) => fetchQuote(h.symbol)));
@@ -192,7 +249,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({ symbol, holdings, fetchedAt: Date.now() } satisfies EtfHoldingsResponse);
+    return NextResponse.json({ symbol, holdings, fetchedAt: Date.now(), source: "yahoo" } satisfies EtfHoldingsResponse);
   } catch {
     return NextResponse.json({ error: "구성 종목 조회 오류" }, { status: 500 });
   }
