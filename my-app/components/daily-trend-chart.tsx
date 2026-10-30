@@ -308,12 +308,7 @@ function computeYDomain(
   return [min - pad, max + pad];
 }
 
-type ScatterPoint = {
-  isoDate: string;
-  owner: string;
-  y: number;
-  trades: DailyTradeMarker[];
-};
+const TRADE_Y_PREFIX = "__trade_";
 
 type Props = {
   snapshots: DailySnapshot[];
@@ -325,7 +320,7 @@ type Props = {
 export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, tradeMarkers = [] }: Props) {
   const [displayMode, setDisplayMode] = useState<"chart" | "table">("chart");
   const [valueAxisMode, setValueAxisMode] = useState<"krw" | "return">("krw");
-  const [range, setRange] = useState<30 | 90 | 180>(90);
+  const [range, setRange] = useState<30 | 90 | 180 | 365>(90);
   const [hoverTooltip, setHoverTooltip] = useState<HoverTooltip | null>(null);
   const [tradeHover, setTradeHover] = useState<TradeHover | null>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
@@ -474,27 +469,26 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
     return map;
   }, [tradeMarkers, snapshotDateSet, visibleOwners]);
 
-  const tradeScatterData = useMemo(() => {
-    const groups = new Map<string, DailyTradeMarker[]>();
-    for (const m of tradeMarkers) {
-      if (!snapshotDateSet.has(m.isoDate)) continue;
-      if (!visibleOwners.includes(m.owner)) continue;
-      const key = `${m.isoDate}\t${m.owner}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(m);
-    }
-    const pts: ScatterPoint[] = [];
-    for (const [, trades] of groups) {
-      const isoDate = trades[0]!.isoDate;
-      const owner = trades[0]!.owner;
-      const row = chartData.find((r) => r.isoDate === isoDate);
-      if (!row) continue;
-      const y = row[owner];
-      if (typeof y !== "number" || !Number.isFinite(y)) continue;
-      pts.push({ isoDate, owner, y, trades });
-    }
-    return pts;
-  }, [tradeMarkers, snapshotDateSet, visibleOwners, chartData]);
+  /**
+   * 거래 마커(Scatter)가 차트 본 데이터와 같은 행을 쓰도록, 거래가 있는 날·보유자에만 `__trade_<보유자>` 값을 채운다.
+   * (Scatter 에 별도 data 를 주면 툴팁 인덱스가 어긋나 날짜가 첫 마커 날짜에 고정되는 문제가 있었음)
+   */
+  const chartDataWithTrades = useMemo(() => {
+    const hasTrade = new Set<string>();
+    for (const [iso, list] of tradesByIsoDate) for (const m of list) hasTrade.add(`${iso}\t${m.owner}`);
+    if (hasTrade.size === 0) return chartData;
+    return chartData.map((row) => {
+      const out: Record<string, string | number> = { ...row };
+      for (const o of chartLineKeys) {
+        if (o === "전체") continue;
+        const y = row[o];
+        if (hasTrade.has(`${row.isoDate}\t${o}`) && typeof y === "number" && Number.isFinite(y)) {
+          out[`${TRADE_Y_PREFIX}${o}`] = y;
+        }
+      }
+      return out;
+    });
+  }, [chartData, chartLineKeys, tradesByIsoDate]);
 
   if (filtered.length === 0) {
     return (
@@ -515,7 +509,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
               ({firstFull} ~ {lastFull})
             </>
           ) : null}
-          . 30·90·180일은 <span className="underline decoration-dotted">보여줄 최대 구간</span>이며, 그 안에서
+          . 30·90·180·365일은 <span className="underline decoration-dotted">보여줄 최대 구간</span>이며, 그 안에서
           실제로 기록된 날만 차트에 표시됩니다.
           <span className="block mt-1">
             세로축은 선택한 구간의 최소·최대 평가액(또는 수익률)에 맞춰 자동으로 맞춰지며, 위아래로 약 2.5% 여백을 둡니다.{" "}
@@ -535,7 +529,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
       {/* 컨트롤 */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1">
-          {([30, 90, 180] as const).map((r) => (
+          {([30, 90, 180, 365] as const).map((r) => (
             <button
               key={r}
               type="button"
@@ -580,7 +574,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
       {displayMode === "chart" ? (
         <div className="h-[504px] w-full sm:h-[576px]">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 4, right: 12, bottom: 4, left: 0 }}>
+            <ComposedChart data={chartDataWithTrades} margin={{ top: 4, right: 12, bottom: 4, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
               <XAxis
                 dataKey="isoDate"
@@ -657,20 +651,25 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                   strokeDasharray={o === "전체" ? "6 3" : undefined}
                 />
               ))}
-              <Scatter
-                data={tradeScatterData}
-                dataKey="y"
-                fill="transparent"
-                isAnimationActive={false}
-                legendType="none"
-                shape={(shapeProps: {
+              {chartLineKeys
+                .filter((o) => o !== "전체")
+                .map((o) => (
+                  <Scatter
+                    key={`trade-${o}`}
+                    dataKey={`${TRADE_Y_PREFIX}${o}`}
+                    fill="transparent"
+                    isAnimationActive={false}
+                    legendType="none"
+                    tooltipType="none"
+                    shape={(shapeProps: {
                   cx?: number;
                   cy?: number;
-                  payload?: ScatterPoint;
+                  payload?: { isoDate?: string };
                 }) => {
                   const { cx = 0, cy = 0, payload } = shapeProps;
-                  const trades = payload?.trades;
-                  if (!trades?.length) return null;
+                  const dayAll = payload?.isoDate ? tradesByIsoDate.get(payload.isoDate) : undefined;
+                  const trades = dayAll?.filter((m) => m.owner === o);
+                  if (!trades?.length || !Number.isFinite(cx) || !Number.isFinite(cy)) return null;
                   const hasBuy = trades.some((t) => t.kind === "buy");
                   const hasSell = trades.some((t) => t.kind === "sell");
                   const r = 4;
@@ -679,8 +678,7 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                   const showTip = (e: React.PointerEvent<SVGCircleElement>) => {
                     const iso = payload?.isoDate;
                     if (!iso) return;
-                    const allDay = tradesByIsoDate.get(iso) ?? trades;
-                    setTradeHover({ x: e.clientX, y: e.clientY, trades: allDay });
+                    setTradeHover({ x: e.clientX, y: e.clientY, trades: dayAll ?? trades });
                   };
                   return (
                     <g>
@@ -719,7 +717,8 @@ export function DailyTrendChart({ snapshots, ownerNames, liveChangeByDate, trade
                     </g>
                   );
                 }}
-              />
+                  />
+                ))}
             </ComposedChart>
           </ResponsiveContainer>
         </div>

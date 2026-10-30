@@ -2420,7 +2420,7 @@ export default function Home() {
       return;
     }
 
-    void fetch(`/api/snapshot?sync_key=${encodeURIComponent(key)}&days=180`)
+    void fetch(`/api/snapshot?sync_key=${encodeURIComponent(key)}&days=400`)
       .then((r) => (r.ok ? r.json() : null))
       .then(
         (

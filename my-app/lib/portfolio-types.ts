@@ -105,7 +105,7 @@ export const HOLDINGS_CHART_GROUP_PRESETS = [
   "방산",
 ] as const;
 /** 일별 스냅샷 최대 보관 일수 */
-export const SNAPSHOT_MAX_DAYS = 180;
+export const SNAPSHOT_MAX_DAYS = 400; // 차트 최대 365일 + 여유
 /** 실현손익 '종목별 손익' 접기 키(전 보유자 합산 표이므로 단일 토글) */
 export const REALIZED_SYMBOL_PNL_TOGGLE_KEY = "__realizedSymbolPnlAll__";
 
