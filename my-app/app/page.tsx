@@ -51,6 +51,9 @@ import {
   type AlertThresholdsByKey,
 } from "@/lib/alert-thresholds";
 import { todayKST, yesterdayKST } from "@/lib/date-utils";
+import { useStockSplits } from "@/lib/use-stock-splits";
+import { stampKnownSplits } from "@/lib/stock-splits";
+import { SplitNoticeBanner } from "@/components/split-notice-banner";
 
 import { hasAlertThresholdRule } from "@/lib/portfolio-alert-ui";
 import { purchaseCashDeduction, usdPurchaseCashPlan } from "@/lib/portfolio-calc";
@@ -194,6 +197,16 @@ export default function Home() {
 
   /** 보유자::티커 → 익절·손절 가격 및 수익률 % 기준 */
   const [alertThresholdsByKey, setAlertThresholdsByKey] = useState<AlertThresholdsByKey>({});
+  // 주식 분할(SOXX·SNDK 등) 자동 반영 — 시세에서 분할이 확인되면 수량·평단·알림가·매수저널을 조정
+  const stockSplits = useStockSplits({
+    ready: isHydrated,
+    positions,
+    setPositions,
+    buyJournal,
+    setBuyJournal,
+    alertThresholdsByKey,
+    setAlertThresholdsByKey,
+  });
   /** 보유 표 기준선 열 — 평소 숨김, 토글로 표시 */
   const [showHoldingsAlertColumn, setShowHoldingsAlertColumn] = useState(false);
   /** 종목별 합산 표 기준선(익·손 %) 열 */
@@ -3379,6 +3392,12 @@ export default function Home() {
       }
     }
     setAddPositionError("");
+    if (stockSplits.isSymbolSplitPending(symbol)) {
+      const msg = `${symbol}은(는) 주식 분할 반영 대기 중입니다 — 반영된 뒤에 추가해 주세요.`;
+      setAddPositionError(msg);
+      showActionErrorToast(msg);
+      return;
+    }
 
     const shortOwners: OwnerName[] = [];
     /** USD 매수 보유자별: 달러로 전액 vs 원화로 전액 */
@@ -3566,6 +3585,10 @@ export default function Home() {
       const accountName = accountType === "국내주식" ? "국내주식-주계좌" : "미국주식-주계좌";
       const ownersOrdered = ownerNames.filter((o) => t.owners.includes(o));
       if (!symbol || !nameTrimmed || t.qty <= 0 || t.price <= 0 || ownersOrdered.length === 0) continue;
+      if (stockSplits.isSymbolSplitPending(symbol)) {
+        showActionErrorToast(`${symbol}은(는) 주식 분할 반영 대기 중이라 매수 반영을 건너뜁니다. 반영 후 다시 시도해 주세요.`);
+        continue;
+      }
 
       setPositions((prev) => {
         const next = [...prev];
@@ -3579,7 +3602,7 @@ export default function Home() {
             const blendedAvg = (existing.quantity * existing.avgPrice + t.qty * t.price) / totalQty;
             next[idx] = { ...existing, quantity: totalQty, avgPrice: blendedAvg };
           } else {
-            next.push({
+            next.push(stampKnownSplits({
               symbol,
               name: nameTrimmed,
               quantity: t.qty,
@@ -3595,7 +3618,7 @@ export default function Home() {
               accountType,
               accountName,
               owner,
-            });
+            }, todayKST()));
           }
         }
         return next;
@@ -3894,6 +3917,19 @@ export default function Home() {
 
       <div className="mx-auto w-full max-w-[1600px] px-2 py-4 sm:py-6 md:px-4">
         <main className="min-w-0">
+          {/* 주식 분할 안내/적용 — 탭과 무관하게 항상 노출 */}
+          <div className="mb-4 empty:hidden">
+            <SplitNoticeBanner
+              pendingDue={stockSplits.pendingDue}
+              confirmedIds={stockSplits.confirmedIds}
+              upcoming={stockSplits.upcoming}
+              notice={stockSplits.notice}
+              undoAvailable={stockSplits.undoAvailable}
+              onUndo={stockSplits.undo}
+              onDismissNotice={stockSplits.dismissNotice}
+              onApplyManually={stockSplits.applyManually}
+            />
+          </div>
           <div
             className={cn(
               activeTopNav === "dashboard" ? "block" : "hidden",
@@ -3902,7 +3938,6 @@ export default function Home() {
             aria-hidden={activeTopNav !== "dashboard"}
           >
           <div className="space-y-4 font-sans sm:space-y-6">
-
             <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {(
                 [

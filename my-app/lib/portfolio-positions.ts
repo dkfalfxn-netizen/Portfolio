@@ -1,3 +1,5 @@
+import { todayKST } from "@/lib/date-utils";
+import { stampKnownSplits } from "@/lib/stock-splits";
 import { fmtUsdNumber } from "@/lib/format-money";
 import { SEED_강희진_보유 } from "@/lib/portfolio-seed";
 import { parseCashPair, safeSetItem } from "@/lib/portfolio-storage";
@@ -152,7 +154,7 @@ export function mergeCashBundleDisplayEntries(
 export function applyPositionUpsert(prev: Position[], nextEntry: Position): Position[] {
   const key = makePositionKey(nextEntry);
   const idx = prev.findIndex((p) => makePositionKey(p) === key);
-  if (idx === -1) return [...prev, nextEntry];
+  if (idx === -1) return [...prev, stampKnownSplits(nextEntry, todayKST())];
   const existing = prev[idx];
   const newQty = existing.quantity + nextEntry.quantity;
   const newAvg =

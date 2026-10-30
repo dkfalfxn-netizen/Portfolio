@@ -23,6 +23,11 @@ export type Position = {
   owner: OwnerName;
   /** 원형 차트에서 같은 값끼리 합산할 그룹명 (미입력 시 티커 기준) */
   chartGroup?: string;
+  /**
+   * 이 행의 수량·평단이 이미 반영한 주식 분할 id 목록 (예: "SOXX@2026-11-05").
+   * 중복 적용 방지용 — 포지션 JSON과 함께 동기화되어 기기 간에 공유된다.
+   */
+  splitsApplied?: string[];
 };
 
 export type MarketState = "REGULAR" | "PRE" | "POST" | "POSTPOST" | "PREPRE" | "CLOSED" | null;
