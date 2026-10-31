@@ -36,7 +36,7 @@ export function kisCredentialsConfigured(): boolean {
 }
 
 /** 미국 시세 코드 선택: 'regular'(NAS/NYS/AMS, 04:00~20:00 ET 평일) / 'extended'(BAQ/BAY/BAA, 야간·주말). */
-function usMarketSession(): "regular" | "extended" {
+export function usMarketSession(): "regular" | "extended" {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     weekday: "short",
