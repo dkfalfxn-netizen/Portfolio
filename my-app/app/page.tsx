@@ -52,6 +52,7 @@ import {
 } from "@/lib/alert-thresholds";
 import { todayKST, yesterdayKST } from "@/lib/date-utils";
 import { useStockSplits } from "@/lib/use-stock-splits";
+import { chooseUsLiveSource } from "@/lib/live-price";
 import { stampKnownSplits } from "@/lib/stock-splits";
 import { SplitNoticeBanner } from "@/components/split-notice-banner";
 
@@ -1066,7 +1067,13 @@ export default function Home() {
       const daytimePrice = daytimeQuote?.price;
       // KIS 엔드포인트가 세션에 맞는 거래소 코드를 자동 선택(프리·정규·애프터=NAS 라이브, 미국 야간=주간거래).
       // 따라서 KIS 값이 있으면 항상 우선 사용(미국 거래 전 시간대를 4초 폴링으로 커버).
-      const usingDaytime = typeof daytimePrice === "number" && daytimePrice > 0;
+      // 단, 야후가 프리/애프터 가격을 주는 구간(PRE/POST)에서는 KIS 가 정규장 종가에 머물 수 있어 야후를 우선한다.
+      const liveSource = chooseUsLiveSource({
+        yahooPrice: q?.price,
+        yahooState: q?.marketState,
+        kisPrice: daytimePrice,
+      });
+      const usingDaytime = liveSource === "kis";
       const livePrice = usingDaytime ? daytimePrice : q?.price;
       // 주간거래 가격을 쓸 땐 전일대비·등락률도 KIS 전일종가(base) 기준으로 계산해야 가격과 %가 일치.
       const yahooPrevClose =
