@@ -2,7 +2,7 @@
 
 import { sortHoldingsItems, buildHoldingsGroupBlocks, HoldingsSortMode } from "@/lib/portfolio-storage";
 import { cn } from "@/lib/utils";
-import { type UseQueryResult } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { type SensorDescriptor, type SensorOptions } from "@dnd-kit/core";
 import { fmtInt, fmtUsdNumber, parseKoreanIntDigits, signedPnlTextClass, MONEY_INT_LOCALE } from "@/lib/format-money";
 import { formatKrwApproxAsUsd, formatPositionMarketValueForeign, CashByOwner } from "@/lib/portfolio-positions";
@@ -149,6 +149,31 @@ export function HoldingsSection({
   startEditRow,
   usdKrw,
 }: HoldingsSectionProps) {
+  // 미국 종목 일중 차트: KIS 1분봉(세션에 맞춰 데이장/정규장). 실패·미설정이면 Yahoo(marketQuery.intraday)로 폴백.
+  const usdSymbolsKey = [
+    ...new Set(
+      positions
+        .filter((p) => p.currency === "USD")
+        .map((p) => (p.symbol ?? "").trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ]
+    .sort()
+    .join(",");
+  const kisIntradayQuery = useQuery<Record<string, number[]>>({
+    queryKey: ["kis-intraday", usdSymbolsKey],
+    enabled: usdSymbolsKey.length > 0,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    retry: false,
+    queryFn: async () => {
+      const r = await fetch(`/api/overseas/intraday?symbols=${encodeURIComponent(usdSymbolsKey)}`);
+      if (!r.ok) return {};
+      const j = (await r.json()) as { intraday?: Record<string, number[]> };
+      return j.intraday ?? {};
+    },
+  });
+
   return (
     <div id="section-holdings" className="flex flex-col gap-4">
           <section className="min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-700/60 bg-slate-800/40 shadow-sm">
@@ -626,7 +651,13 @@ export function HoldingsSection({
                           <TableCell className="px-2 py-1.5 align-middle">
                             <div className="flex justify-center">
                               <IntradaySparkline
-                                points={marketQuery.data?.intraday?.[position.symbol] ?? []}
+                                points={
+                                  (position.currency === "USD"
+                                    ? kisIntradayQuery.data?.[(position.symbol ?? "").trim().toUpperCase()]
+                                    : undefined) ??
+                                  marketQuery.data?.intraday?.[position.symbol] ??
+                                  []
+                                }
                               />
                             </div>
                           </TableCell>
