@@ -493,7 +493,7 @@ export function buildTelegramBriefingHtml(opts: {
   items: BriefingItem[];
   miniTrends?: MiniTrendMap;
   /** 전일 일봉까지만 보면 HOLD였다가, 최신 일봉 반영 후 BUY/SELL로 바뀐 지표만 */
-  holdTransitions: HoldTransitionSymbol[];
+  holdTransitions?: HoldTransitionSymbol[];
 }): string {
   const {
     slotLabel,
@@ -501,7 +501,6 @@ export function buildTelegramBriefingHtml(opts: {
     portfolioChangeVsYesterdayPct,
     ownerDailyReturns,
     ownerTotalReturns,
-    holdTransitions,
   } = opts;
 
   const timeLine = slotLabel ? `⏰ <i>${escapeHtml(slotLabel)}</i>\n\n` : "";
@@ -573,34 +572,7 @@ export function buildTelegramBriefingHtml(opts: {
     ownerBlock = `\n\n<b>👤 보유자별 요약</b>\n${lines.join("\n")}`;
   }
 
-  /** HOLD→전환 종목을 BUY / SELL 한 줄로 묶음 */
-  let signalBlock = "";
-  if (holdTransitions.length > 0) {
-    const buyShown: string[] = [];
-    const sellShown: string[] = [];
-    for (const h of holdTransitions) {
-      const pretty =
-        `${escapeHtml(h.name.trim() || h.symbol)} (<code>${escapeHtml(h.symbol)}</code>)`;
-      const hasBuy = h.rows.some((row) => row.to === "BUY");
-      const hasSell = h.rows.some((row) => row.to === "SELL");
-      if (hasBuy) buyShown.push(pretty);
-      if (hasSell) sellShown.push(pretty);
-    }
-    const buyUnique = [...new Set(buyShown)];
-    const sellUnique = [...new Set(sellShown)];
-
-    signalBlock =
-      `\n\n<b>🎯 매매 시그널 (MA·RSI·BB·VOL 기준)</b>\n` +
-      `<i>전일 HOLD → 오늘 BUY·SELL로 바뀐 종목만</i>`;
-
-    if (buyUnique.length === 0 && sellUnique.length === 0) {
-      signalBlock += "\n<i>(표시 가능한 전환 없음)</i>";
-    } else {
-      signalBlock +=
-        `\n🟢 <b>BUY</b>: ${buyUnique.length ? buyUnique.join(", ") : "—"}\n` +
-        `🔴 <b>SELL</b>: ${sellUnique.length ? sellUnique.join(", ") : "—"}`;
-    }
-  }
+  // 매매 시그널(HOLD→BUY/SELL 전환) 블록은 리포트에서 제외함.
 
   const header =
     `${buildHoldingsPriceBlock(opts.items)}` +
@@ -608,7 +580,6 @@ export function buildTelegramBriefingHtml(opts: {
     `📊 <b>포트폴리오 데일리 리포트</b> (${escapeHtml(dateLabel)})\n\n` +
     `${portfolioLine}` +
     `${ownerBlock}` +
-    `${signalBlock}` +
     `${cronFooter}`;
 
   return header;
