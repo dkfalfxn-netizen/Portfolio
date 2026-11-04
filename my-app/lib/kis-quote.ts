@@ -270,7 +270,7 @@ const MINUTE_CACHE_TTL_MS = 30 * 1000;
 
 /**
  * 미국 종목의 "현재 세션" 1분봉 종가 배열(오래된 순).
- *  - 데이장(extended, BAQ/BAY/BAA): 가장 최근 한국 날짜의 10:00 이후 봉만 → 데이장 차트
+ *  - 데이장(extended, BAQ/BAY/BAA): 오늘(한국 날짜) 봉만 → 아직 오늘 봉이 없으면 [] (전날 봉을 남기지 않음)
  *  - 프리·정규·애프터(regular, NAS/NYS/AMS): 가장 최근 거래소 날짜의 전체 봉
  * 시세가 없거나 실패하면 null → 호출측이 Yahoo 차트로 폴백.
  */
@@ -280,10 +280,14 @@ export async function getKisUsIntraday(symbol: string): Promise<number[] | null>
   const session = usMarketSession();
   const cacheKey = `${session}:${sym}`;
   const hit = minuteCache.get(cacheKey);
-  if (hit && Date.now() - hit.at < MINUTE_CACHE_TTL_MS) return hit.points.length >= 2 ? hit.points : null;
+  if (hit && Date.now() - hit.at < MINUTE_CACHE_TTL_MS) return hit.points;
 
   const token = await getToken();
   const order = session === "regular" ? REGULAR_TRY_ORDER : DAYTIME_TRY_ORDER;
+  const kstToday = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" })
+    .format(new Date())
+    .replace(/-/g, "");
+  let answered = false;
   for (const excd of order) {
     try {
       const kept: KisMinuteRow[] = [];
@@ -292,11 +296,12 @@ export async function getKisUsIntraday(symbol: string): Promise<number[] | null>
       for (let page = 0; page < 6; page++) {
         const rows = await fetchMinutePage(token, sym, excd, keyb);
         if (rows.length === 0) break;
-        if (page === 0) newestDay = session === "regular" ? rows[0]!.xymd : rows[0]!.kymd;
+        answered = true;
+        if (page === 0) newestDay = session === "regular" ? rows[0]!.xymd : kstToday;
         let reachedBoundary = false;
         for (const r of rows) {
           const day = session === "regular" ? r.xymd : r.kymd;
-          const inWindow = day === newestDay && (session === "regular" || r.khms >= "100000");
+          const inWindow = day === newestDay;
           if (inWindow) kept.push(r);
           else reachedBoundary = true;
         }
@@ -319,6 +324,11 @@ export async function getKisUsIntraday(symbol: string): Promise<number[] | null>
     } catch {
       // 다음 거래소 시도
     }
+  }
+  // 데이장인데 거래소는 응답했으나 오늘 봉이 없음(개장 전) → 빈 배열(전날 차트 대신 "—")
+  if (session === "extended" && answered) {
+    minuteCache.set(cacheKey, { at: Date.now(), points: [] });
+    return [];
   }
   return null;
 }
