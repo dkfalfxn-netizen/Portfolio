@@ -5,7 +5,6 @@ import { getKisUsQuote } from "@/lib/kis-quote";
 import {
   buildTelegramBriefingHtml,
   collectMiniTrends,
-  collectHoldTransitions,
   computeLivePortfolioKrw,
   computeOwnerDailyReturnsHybrid,
   computeOwnerTotalReturns,
@@ -593,7 +592,6 @@ export async function GET(req: NextRequest) {
     if (itemsForMessage.length === 0) return null;
     const briefingItems = toBriefingItems(itemsForMessage);
     const miniTrends = await collectMiniTrends(briefingItems);
-    const holdTransitions = await collectHoldTransitions(briefingItems);
     const text = buildTelegramBriefingHtml({
       slotLabel,
       dateLabel: mmddKST(),
@@ -602,7 +600,6 @@ export async function GET(req: NextRequest) {
       ownerTotalReturns,
       items: briefingItems,
       miniTrends,
-      holdTransitions,
     });
     const send = await sendTelegramMessage(text);
     if (!send.ok) {
@@ -928,7 +925,6 @@ export async function POST(req: NextRequest) {
     if (itemsForMessage.length === 0) return null;
     const briefingItems = toBriefingItems(itemsForMessage);
     const miniTrends = await collectMiniTrends(briefingItems);
-    const holdTransitions = await collectHoldTransitions(briefingItems);
     const text = buildTelegramBriefingHtml({
       slotLabel: BRIEFING_SLOT_LABELS.manual,
       dateLabel: mmddKST(),
@@ -937,7 +933,6 @@ export async function POST(req: NextRequest) {
       ownerTotalReturns,
       items: briefingItems,
       miniTrends,
-      holdTransitions,
     });
     const send = await sendTelegramMessage(text);
     if (!send.ok) return NextResponse.json({ ok: false, error: send.error }, { status: 500 });

@@ -445,6 +445,39 @@ function fmtPriceCompactForMobile(item: BriefingItem): string {
   return `$${p.toFixed(2)}`;
 }
 
+/** 현재가 전체 표기: 원화(국내 6자리·A접두 7자리·금현물)는 ₩쉼표, 그 외는 $쉼표(소수 2자리) */
+function fmtPriceFull(item: BriefingItem): string {
+  if (item.price === null || !Number.isFinite(item.price)) return "—";
+  const sym = item.symbol.trim().toUpperCase();
+  const isKrw =
+    /^[0-9][0-9A-Z]{5}$/.test(sym) ||
+    /^A[0-9][0-9A-Z]{5}$/.test(sym) ||
+    sym.startsWith("KRX:") ||
+    sym.startsWith("KQ:") ||
+    /^M\d{8}$/.test(sym);
+  if (isKrw) return fmtKrw(Math.round(item.price));
+  return `$${item.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** 맨 위 "보유 종목 현재가" 블록. 같은 종목은 한 줄(여러 보유자여도 중복 제거). */
+function buildHoldingsPriceBlock(items: BriefingItem[]): string {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const it of items) {
+    const key = it.symbol.trim().toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label = escapeHtml((it.name || it.symbol).trim());
+    const pct =
+      it.changePct !== null && Number.isFinite(it.changePct)
+        ? ` ${it.changePct >= 0 ? "▲" : "▼"}${Math.abs(it.changePct).toFixed(2)}%`
+        : "";
+    lines.push(`• ${label} <code>${escapeHtml(key)}</code> <b>${escapeHtml(fmtPriceFull(it))}</b>${pct}`);
+  }
+  if (lines.length === 0) return "";
+  return `💰 <b>보유 종목 현재가</b>\n${lines.join("\n")}\n\n`;
+}
+
 /**
  * 텔레그램 HTML 브리핑 (parse_mode: HTML).
  * 가독성을 위해 섹션별 줄바꿈·이모지·굵게 위주 구성 (<pre> 대량 나열 없음).
@@ -460,7 +493,7 @@ export function buildTelegramBriefingHtml(opts: {
   items: BriefingItem[];
   miniTrends?: MiniTrendMap;
   /** 전일 일봉까지만 보면 HOLD였다가, 최신 일봉 반영 후 BUY/SELL로 바뀐 지표만 */
-  holdTransitions: HoldTransitionSymbol[];
+  holdTransitions?: HoldTransitionSymbol[];
 }): string {
   const {
     slotLabel,
@@ -468,7 +501,6 @@ export function buildTelegramBriefingHtml(opts: {
     portfolioChangeVsYesterdayPct,
     ownerDailyReturns,
     ownerTotalReturns,
-    holdTransitions,
   } = opts;
 
   const timeLine = slotLabel ? `⏰ <i>${escapeHtml(slotLabel)}</i>\n\n` : "";
@@ -540,41 +572,14 @@ export function buildTelegramBriefingHtml(opts: {
     ownerBlock = `\n\n<b>👤 보유자별 요약</b>\n${lines.join("\n")}`;
   }
 
-  /** HOLD→전환 종목을 BUY / SELL 한 줄로 묶음 */
-  let signalBlock = "";
-  if (holdTransitions.length > 0) {
-    const buyShown: string[] = [];
-    const sellShown: string[] = [];
-    for (const h of holdTransitions) {
-      const pretty =
-        `${escapeHtml(h.name.trim() || h.symbol)} (<code>${escapeHtml(h.symbol)}</code>)`;
-      const hasBuy = h.rows.some((row) => row.to === "BUY");
-      const hasSell = h.rows.some((row) => row.to === "SELL");
-      if (hasBuy) buyShown.push(pretty);
-      if (hasSell) sellShown.push(pretty);
-    }
-    const buyUnique = [...new Set(buyShown)];
-    const sellUnique = [...new Set(sellShown)];
-
-    signalBlock =
-      `\n\n<b>🎯 매매 시그널 (MA·RSI·BB·VOL 기준)</b>\n` +
-      `<i>전일 HOLD → 오늘 BUY·SELL로 바뀐 종목만</i>`;
-
-    if (buyUnique.length === 0 && sellUnique.length === 0) {
-      signalBlock += "\n<i>(표시 가능한 전환 없음)</i>";
-    } else {
-      signalBlock +=
-        `\n🟢 <b>BUY</b>: ${buyUnique.length ? buyUnique.join(", ") : "—"}\n` +
-        `🔴 <b>SELL</b>: ${sellUnique.length ? sellUnique.join(", ") : "—"}`;
-    }
-  }
+  // 매매 시그널(HOLD→BUY/SELL 전환) 블록은 리포트에서 제외함.
 
   const header =
+    `${buildHoldingsPriceBlock(opts.items)}` +
     `${timeLine}` +
     `📊 <b>포트폴리오 데일리 리포트</b> (${escapeHtml(dateLabel)})\n\n` +
     `${portfolioLine}` +
     `${ownerBlock}` +
-    `${signalBlock}` +
     `${cronFooter}`;
 
   return header;
