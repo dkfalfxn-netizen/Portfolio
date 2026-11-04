@@ -445,6 +445,39 @@ function fmtPriceCompactForMobile(item: BriefingItem): string {
   return `$${p.toFixed(2)}`;
 }
 
+/** 현재가 전체 표기: 원화(국내 6자리·A접두 7자리·금현물)는 ₩쉼표, 그 외는 $쉼표(소수 2자리) */
+function fmtPriceFull(item: BriefingItem): string {
+  if (item.price === null || !Number.isFinite(item.price)) return "—";
+  const sym = item.symbol.trim().toUpperCase();
+  const isKrw =
+    /^[0-9][0-9A-Z]{5}$/.test(sym) ||
+    /^A[0-9][0-9A-Z]{5}$/.test(sym) ||
+    sym.startsWith("KRX:") ||
+    sym.startsWith("KQ:") ||
+    /^M\d{8}$/.test(sym);
+  if (isKrw) return fmtKrw(Math.round(item.price));
+  return `$${item.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** 맨 위 "보유 종목 현재가" 블록. 같은 종목은 한 줄(여러 보유자여도 중복 제거). */
+function buildHoldingsPriceBlock(items: BriefingItem[]): string {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const it of items) {
+    const key = it.symbol.trim().toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const label = escapeHtml((it.name || it.symbol).trim());
+    const pct =
+      it.changePct !== null && Number.isFinite(it.changePct)
+        ? ` ${it.changePct >= 0 ? "▲" : "▼"}${Math.abs(it.changePct).toFixed(2)}%`
+        : "";
+    lines.push(`• ${label} <code>${escapeHtml(key)}</code> <b>${escapeHtml(fmtPriceFull(it))}</b>${pct}`);
+  }
+  if (lines.length === 0) return "";
+  return `💰 <b>보유 종목 현재가</b>\n${lines.join("\n")}\n\n`;
+}
+
 /**
  * 텔레그램 HTML 브리핑 (parse_mode: HTML).
  * 가독성을 위해 섹션별 줄바꿈·이모지·굵게 위주 구성 (<pre> 대량 나열 없음).
@@ -570,6 +603,7 @@ export function buildTelegramBriefingHtml(opts: {
   }
 
   const header =
+    `${buildHoldingsPriceBlock(opts.items)}` +
     `${timeLine}` +
     `📊 <b>포트폴리오 데일리 리포트</b> (${escapeHtml(dateLabel)})\n\n` +
     `${portfolioLine}` +
