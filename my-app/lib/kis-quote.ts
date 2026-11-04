@@ -219,6 +219,146 @@ export async function getKisUsQuotes(symbols: string[]): Promise<Record<string, 
   return out;
 }
 
+// ── 미국 분봉(일중 차트) — KIS 해외주식분봉조회 ─────────────────────────────
+type KisMinuteRow = { kymd: string; khms: string; xymd: string; xhms: string; last: number };
+
+async function fetchMinutePage(
+  token: string,
+  ticker: string,
+  excd: string,
+  keyb: string,
+): Promise<KisMinuteRow[]> {
+  const url =
+    `${kisBaseUrl()}/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice` +
+    `?AUTH=&EXCD=${encodeURIComponent(excd)}&SYMB=${encodeURIComponent(ticker)}` +
+    `&NMIN=1&PINC=1&NEXT=${keyb ? "1" : ""}&NREC=120&FILL=&KEYB=${keyb}`;
+  const res = await fetch(url, {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      authorization: `Bearer ${token}`,
+      appkey: kisAppKey(),
+      appsecret: kisAppSecret(),
+      tr_id: "HHDFS76950200",
+      custtype: "P",
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  const j = (await res.json()) as { output2?: Array<Record<string, unknown>> };
+  return (j.output2 ?? [])
+    .map((o) => ({
+      kymd: String(o.kymd ?? ""),
+      khms: String(o.khms ?? ""),
+      xymd: String(o.xymd ?? ""),
+      xhms: String(o.xhms ?? ""),
+      last: moneyFloat(o.last),
+    }))
+    .filter((r) => r.last > 0 && r.kymd.length === 8 && r.khms.length === 6);
+}
+
+/** 다음 페이지 조회키: 마지막(가장 오래된) 행의 거래소 시각 − 1분 (YYYYMMDDHHMMSS). */
+function prevMinuteKey(row: KisMinuteRow): string {
+  const y = +row.xymd.slice(0, 4), mo = +row.xymd.slice(4, 6) - 1, d = +row.xymd.slice(6, 8);
+  const h = +row.xhms.slice(0, 2), mi = +row.xhms.slice(2, 4);
+  const t = new Date(Date.UTC(y, mo, d, h, mi - 1, 0));
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${p(t.getUTCFullYear(), 4)}${p(t.getUTCMonth() + 1)}${p(t.getUTCDate())}${p(t.getUTCHours())}${p(t.getUTCMinutes())}00`;
+}
+
+const minuteCache = new Map<string, { at: number; points: number[] }>();
+const MINUTE_CACHE_TTL_MS = 30 * 1000;
+
+/**
+ * 미국 종목의 "현재 세션" 1분봉 종가 배열(오래된 순).
+ *  - 데이장(extended, BAQ/BAY/BAA): 오늘(한국 날짜) 봉만 → 아직 오늘 봉이 없으면 [] (전날 봉을 남기지 않음)
+ *  - 프리·정규·애프터(regular, NAS/NYS/AMS): 가장 최근 거래소 날짜의 전체 봉
+ * 시세가 없거나 실패하면 null → 호출측이 Yahoo 차트로 폴백.
+ */
+export async function getKisUsIntraday(symbol: string): Promise<number[] | null> {
+  const sym = (symbol || "").trim().toUpperCase();
+  if (!sym || !kisCredentialsConfigured()) return null;
+  const session = usMarketSession();
+  const cacheKey = `${session}:${sym}`;
+  const hit = minuteCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < MINUTE_CACHE_TTL_MS) return hit.points;
+
+  const token = await getToken();
+  const order = session === "regular" ? REGULAR_TRY_ORDER : DAYTIME_TRY_ORDER;
+  const kstToday = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" })
+    .format(new Date())
+    .replace(/-/g, "");
+  let answered = false;
+  for (const excd of order) {
+    try {
+      const kept: KisMinuteRow[] = [];
+      let keyb = "";
+      let newestDay = "";
+      for (let page = 0; page < 6; page++) {
+        const rows = await fetchMinutePage(token, sym, excd, keyb);
+        if (rows.length === 0) break;
+        answered = true;
+        if (page === 0) newestDay = session === "regular" ? rows[0]!.xymd : kstToday;
+        let reachedBoundary = false;
+        for (const r of rows) {
+          const day = session === "regular" ? r.xymd : r.kymd;
+          const inWindow = day === newestDay;
+          if (inWindow) kept.push(r);
+          else reachedBoundary = true;
+        }
+        if (reachedBoundary || rows.length < 120) break;
+        keyb = prevMinuteKey(rows[rows.length - 1]!);
+      }
+      if (kept.length >= 2) {
+        let pts = kept.reverse().map((r) => r.last);
+        const maxPts = 100;
+        if (pts.length > maxPts) {
+          const step = Math.ceil(pts.length / maxPts);
+          const out: number[] = [];
+          for (let i = 0; i < pts.length; i += step) out.push(pts[i]!);
+          if (out[out.length - 1] !== pts[pts.length - 1]) out.push(pts[pts.length - 1]!);
+          pts = out;
+        }
+        minuteCache.set(cacheKey, { at: Date.now(), points: pts });
+        return pts;
+      }
+    } catch {
+      // 다음 거래소 시도
+    }
+  }
+  // 데이장인데 거래소는 응답했으나 오늘 봉이 없음(개장 전) → 빈 배열(전날 차트 대신 "—")
+  if (session === "extended" && answered) {
+    minuteCache.set(cacheKey, { at: Date.now(), points: [] });
+    return [];
+  }
+  return null;
+}
+
+/**
+ * 현재 세션이 전체 길이 중 얼마나 진행됐는지(0~1). 차트를 장 초에는 왼쪽에 짧게 그리기 위한 값.
+ *  - extended(데이장/BA*): 20:00 ET ~ 04:00 ET (8시간)
+ *  - regular(프리·정규·애프터): 04:00 ET ~ 20:00 ET (16시간)
+ * 주말 등 세션 판별이 애매하면 1(전체 폭).
+ */
+export function usSessionProgress(now: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const wd = parts.find((p) => p.type === "weekday")?.value ?? "";
+  if (wd === "Sat" || wd === "Sun") return 1;
+  const hh = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const mm = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  const etMin = (hh % 24) * 60 + mm;
+  if (usMarketSession() === "regular") {
+    return Math.min(1, Math.max(0, (etMin - 4 * 60) / (16 * 60)));
+  }
+  const elapsed = etMin >= 20 * 60 ? etMin - 20 * 60 : etMin + 4 * 60;
+  return Math.min(1, Math.max(0, elapsed / (8 * 60)));
+}
+
 // ── 국내 ETF 구성종목 (KIS: ETF 구성종목시세) ───────────────────────────────
 
 export type KisEtfComponent = {
