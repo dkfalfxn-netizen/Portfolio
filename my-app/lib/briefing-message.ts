@@ -475,12 +475,15 @@ function buildHoldingsPriceBlock(items: BriefingItem[]): string {
     const key = it.symbol.trim().toUpperCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    const label = escapeHtml((it.name || it.symbol).trim());
     const pct =
       it.changePct !== null && Number.isFinite(it.changePct)
         ? ` ${it.changePct >= 0 ? "▲" : "▼"}${Math.abs(it.changePct).toFixed(2)}%`
         : "";
-    lines.push(`• ${label} <code>${escapeHtml(key)}</code> <b>${escapeHtml(fmtPriceFull(it))}</b>${pct}`);
+    // 미국 종목은 티커만, 국내 종목은 종목명 + 코드
+    const head = isKrwSymbol(key)
+      ? `${escapeHtml((it.name || it.symbol).trim())} <code>${escapeHtml(key)}</code>`
+      : `<code>${escapeHtml(key)}</code>`;
+    lines.push(`• ${head} <b>${escapeHtml(fmtPriceFull(it))}</b>${pct}`);
   }
   if (lines.length === 0) return "";
   return `💰 <b>보유 종목 현재가</b>\n${lines.join("\n")}\n\n`;
