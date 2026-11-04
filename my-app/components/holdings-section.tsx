@@ -160,7 +160,10 @@ export function HoldingsSection({
   ]
     .sort()
     .join(",");
-  const kisIntradayQuery = useQuery<Record<string, number[]>>({
+  const kisIntradayQuery = useQuery<{
+    intraday: Record<string, number[]>;
+    meta: Record<string, { progress: number; prevClose: number | null }>;
+  }>({
     queryKey: ["kis-intraday", usdSymbolsKey],
     enabled: usdSymbolsKey.length > 0,
     refetchInterval: 60_000,
@@ -168,9 +171,12 @@ export function HoldingsSection({
     retry: false,
     queryFn: async () => {
       const r = await fetch(`/api/overseas/intraday?symbols=${encodeURIComponent(usdSymbolsKey)}`);
-      if (!r.ok) return {};
-      const j = (await r.json()) as { intraday?: Record<string, number[]> };
-      return j.intraday ?? {};
+      if (!r.ok) return { intraday: {}, meta: {} };
+      const j = (await r.json()) as {
+        intraday?: Record<string, number[]>;
+        meta?: Record<string, { progress: number; prevClose: number | null }>;
+      };
+      return { intraday: j.intraday ?? {}, meta: j.meta ?? {} };
     },
   });
 
@@ -650,15 +656,19 @@ export function HoldingsSection({
                           </TableCell>
                           <TableCell className="px-2 py-1.5 align-middle">
                             <div className="flex justify-center">
-                              <IntradaySparkline
-                                points={
-                                  (position.currency === "USD"
-                                    ? kisIntradayQuery.data?.[(position.symbol ?? "").trim().toUpperCase()]
-                                    : undefined) ??
-                                  marketQuery.data?.intraday?.[position.symbol] ??
-                                  []
-                                }
-                              />
+                              {(() => {
+                                const symKey = (position.symbol ?? "").trim().toUpperCase();
+                                const kisPts =
+                                  position.currency === "USD" ? kisIntradayQuery.data?.intraday?.[symKey] : undefined;
+                                const kisMeta = kisPts ? kisIntradayQuery.data?.meta?.[symKey] : undefined;
+                                return (
+                                  <IntradaySparkline
+                                    points={kisPts ?? marketQuery.data?.intraday?.[position.symbol] ?? []}
+                                    progress={kisMeta?.progress}
+                                    baseline={kisMeta?.prevClose ?? undefined}
+                                  />
+                                );
+                              })()}
                             </div>
                           </TableCell>
                           <TableCell className="px-3 py-1.5 align-top">

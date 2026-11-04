@@ -333,6 +333,32 @@ export async function getKisUsIntraday(symbol: string): Promise<number[] | null>
   return null;
 }
 
+/**
+ * 현재 세션이 전체 길이 중 얼마나 진행됐는지(0~1). 차트를 장 초에는 왼쪽에 짧게 그리기 위한 값.
+ *  - extended(데이장/BA*): 20:00 ET ~ 04:00 ET (8시간)
+ *  - regular(프리·정규·애프터): 04:00 ET ~ 20:00 ET (16시간)
+ * 주말 등 세션 판별이 애매하면 1(전체 폭).
+ */
+export function usSessionProgress(now: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const wd = parts.find((p) => p.type === "weekday")?.value ?? "";
+  if (wd === "Sat" || wd === "Sun") return 1;
+  const hh = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const mm = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  const etMin = (hh % 24) * 60 + mm;
+  if (usMarketSession() === "regular") {
+    return Math.min(1, Math.max(0, (etMin - 4 * 60) / (16 * 60)));
+  }
+  const elapsed = etMin >= 20 * 60 ? etMin - 20 * 60 : etMin + 4 * 60;
+  return Math.min(1, Math.max(0, elapsed / (8 * 60)));
+}
+
 // ── 국내 ETF 구성종목 (KIS: ETF 구성종목시세) ───────────────────────────────
 
 export type KisEtfComponent = {
