@@ -446,16 +446,20 @@ function fmtPriceCompactForMobile(item: BriefingItem): string {
 }
 
 /** 현재가 전체 표기: 원화(국내 6자리·A접두 7자리·금현물)는 ₩쉼표, 그 외는 $쉼표(소수 2자리) */
-function fmtPriceFull(item: BriefingItem): string {
-  if (item.price === null || !Number.isFinite(item.price)) return "—";
-  const sym = item.symbol.trim().toUpperCase();
-  const isKrw =
+function isKrwSymbol(symbol: string): boolean {
+  const sym = symbol.trim().toUpperCase();
+  return (
     /^[0-9][0-9A-Z]{5}$/.test(sym) ||
     /^A[0-9][0-9A-Z]{5}$/.test(sym) ||
     sym.startsWith("KRX:") ||
     sym.startsWith("KQ:") ||
-    /^M\d{8}$/.test(sym);
-  if (isKrw) return fmtKrw(Math.round(item.price));
+    /^M\d{8}$/.test(sym)
+  );
+}
+
+function fmtPriceFull(item: BriefingItem): string {
+  if (item.price === null || !Number.isFinite(item.price)) return "—";
+  if (isKrwSymbol(item.symbol)) return fmtKrw(Math.round(item.price));
   return `$${item.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
@@ -463,7 +467,11 @@ function fmtPriceFull(item: BriefingItem): string {
 function buildHoldingsPriceBlock(items: BriefingItem[]): string {
   const seen = new Set<string>();
   const lines: string[] = [];
-  for (const it of items) {
+  // 미국(해외) 종목을 위에, 국내(원화) 종목을 아래에. 같은 그룹 안에서는 기존 순서 유지(안정 정렬).
+  const ordered = [...items].sort(
+    (a, b) => Number(isKrwSymbol(a.symbol)) - Number(isKrwSymbol(b.symbol)),
+  );
+  for (const it of ordered) {
     const key = it.symbol.trim().toUpperCase();
     if (seen.has(key)) continue;
     seen.add(key);
