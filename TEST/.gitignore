@@ -1,0 +1,10 @@
+/node_modules
+/.next/
+/out/
+.env*
+!.env.example
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+# 로컬 모드 데이터(학생 기록·PIN 해시) — 절대 커밋하지 않음
+/data/*.json
