@@ -91,6 +91,91 @@ function readChartHeadlinePrice(
   return { price: regularPrice, marketState: state };
 }
 
+type ChartCandle = { t: number; c: number };
+
+/** chart 응답의 (타임스탬프, 종가) 유효 봉 목록(오래된 순) */
+function extractCandles(data: unknown): ChartCandle[] {
+  const result = (data as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as
+    | { timestamp?: unknown[]; indicators?: { quote?: Array<{ close?: unknown[] }> } }
+    | undefined;
+  const ts = result?.timestamp;
+  const closes = result?.indicators?.quote?.[0]?.close;
+  if (!Array.isArray(ts) || !Array.isArray(closes)) return [];
+  const out: ChartCandle[] = [];
+  for (let i = 0; i < Math.min(ts.length, closes.length); i++) {
+    const t = ts[i];
+    const c = closes[i];
+    if (typeof t === "number" && typeof c === "number" && Number.isFinite(c) && c > 0) out.push({ t, c });
+  }
+  return out;
+}
+
+function downsample(nums: number[], maxPts = 100): number[] {
+  if (nums.length <= maxPts) return nums;
+  const step = Math.ceil(nums.length / maxPts);
+  const out: number[] = [];
+  for (let i = 0; i < nums.length; i += step) out.push(nums[i]!);
+  if (out[out.length - 1] !== nums[nums.length - 1]) out.push(nums[nums.length - 1]!);
+  return out;
+}
+
+/**
+ * 프리장(정규장 개장 전) 시세 보정.
+ * Yahoo는 개장 전 range=1d 요청에 전 거래일 봉을 주는 경우가 있어,
+ * "마지막 봉 = 어제 애프터 종가", "chartPreviousClose = 그저께 종가"가 되면서
+ * 프리장 등락률 대신 어제 등락률이 표시되던 문제가 있었다.
+ *  - 기준가: 오늘 정규장 시작 전에 확정된 regularMarketPrice(= 직전 거래일 종가)
+ *  - 현재가: preMarketPrice → 오늘 프리장(pre.start 이후) 마지막 봉(없으면 range=2d 재조회)
+ *           → 프리장 체결이 아직 없으면 직전 종가(변동 0)
+ * 판단 근거가 부족하면 null(기존 로직 유지).
+ */
+async function resolvePreMarketQuote(
+  symbol: string,
+  meta: unknown,
+  data: unknown,
+): Promise<{ price: number; previousClose: number | null; sparkline: number[] } | null> {
+  const m = meta as Record<string, unknown> | undefined;
+  if (!m) return null;
+  const num = (k: string) => {
+    const v = m[k];
+    return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+  };
+  const periods = m.currentTradingPeriod as
+    | { pre?: { start: number; end: number }; regular?: { start: number; end: number } }
+    | undefined;
+  const preStart = periods?.pre?.start;
+  const regularStart = periods?.regular?.start;
+  if (typeof preStart !== "number" || typeof regularStart !== "number") return null;
+
+  const regularPrice = num("regularMarketPrice");
+  const regularTime = m.regularMarketTime;
+  // 직전 거래일 종가: regularMarketPrice 가 오늘 정규장 시작 전에 찍힌 값일 때만 신뢰
+  const lastClose =
+    regularPrice !== null && typeof regularTime === "number" && regularTime < regularStart ? regularPrice : null;
+
+  let todayCandles = extractCandles(data).filter((k) => k.t >= preStart);
+  if (todayCandles.length === 0) {
+    try {
+      const res = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=2d&includePrePost=true`,
+        { method: "GET", cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" } },
+      );
+      if (res.ok) todayCandles = extractCandles(await res.json()).filter((k) => k.t >= preStart);
+    } catch {
+      /* 무시: 아래 폴백 */
+    }
+  }
+
+  const lastTodayCandle = todayCandles.length > 0 ? todayCandles[todayCandles.length - 1]!.c : null;
+  const price = num("preMarketPrice") ?? lastTodayCandle ?? lastClose;
+  if (price === null) return null;
+  return {
+    price,
+    previousClose: lastClose,
+    sparkline: downsample(todayCandles.map((k) => k.c)),
+  };
+}
+
 function extractSparklinePoints(data: unknown): number[] {
   const result = (data as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as
     | { indicators?: { quote?: Array<{ close?: unknown[] }> } }
@@ -353,10 +438,20 @@ export async function GET(req: NextRequest) {
           const data = await response.json();
           const meta = data?.chart?.result?.[0]?.meta;
           const lastCandle = extractLastCandlePrice(data);
-          const { price, marketState } = readChartHeadlinePrice(meta, lastCandle);
+          const headline = readChartHeadlinePrice(meta, lastCandle);
+          let price = headline.price;
+          const marketState = headline.marketState;
           const currency = typeof meta?.currency === "string" ? meta.currency : null;
-          const previousClose = readPreviousClose(meta);
-          const sparkline = extractSparklinePoints(data);
+          let previousClose = readPreviousClose(meta);
+          let sparkline = extractSparklinePoints(data);
+          if (marketState === "PRE") {
+            const pre = await resolvePreMarketQuote(symbol, meta, data);
+            if (pre) {
+              price = pre.price;
+              if (pre.previousClose !== null) previousClose = pre.previousClose;
+              if (pre.sparkline.length >= 2) sparkline = pre.sparkline;
+            }
+          }
           return [
             symbol.toUpperCase(),
             { price, currency, previousClose, sparkline, marketState } satisfies ChartQuote,
