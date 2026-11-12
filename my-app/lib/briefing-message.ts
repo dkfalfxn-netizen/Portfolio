@@ -570,7 +570,7 @@ function buildHoldingsPriceBlock(items: BriefingItem[]): string {
 
 /**
  * 텔레그램 HTML 브리핑 (parse_mode: HTML).
- * 모바일에서 한눈에 보이도록: 요약(전체·보유자별) → 종목 표 순서.
+ * 모바일에서 한눈에 보이도록: 전체 요약 → 종목 표 → 보유자별 순서.
  * 표는 <pre> 고정폭 + 숫자 열 먼저/이름 맨 뒤 + 🔴🔵 색 점.
  */
 export function buildTelegramBriefingHtml(opts: {
@@ -662,7 +662,7 @@ export function buildTelegramBriefingHtml(opts: {
     (slotLabel ? ` · ${escapeHtml(slotLabel)}` : "");
   const holdings = buildHoldingsPriceBlock(opts.items);
 
-  return [title, portfolioLine, ownerBlock, holdings, cronFooter].filter((x) => x).join("\n\n");
+  return [title, portfolioLine, holdings, ownerBlock, cronFooter].filter((x) => x).join("\n\n");
 }
 
 /** Yahoo 6개월 일봉 — 시그널용 */
