@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchPrices } from "@/lib/market-prices";
 import { getKisUsQuote } from "@/lib/kis-quote";
+import { chooseUsLiveSource } from "@/lib/live-price";
+import { fetchYahooChartQuote } from "@/lib/yahoo-chart-quote";
 import {
   buildTelegramBriefingHtml,
   collectMiniTrends,
@@ -163,8 +165,26 @@ async function fetchQuoteForSymbol(input: string): Promise<Quote> {
   // ※ 기존 정규식 /^[0-9][0-9A-Z]{5}$/는 A접두 7자리를 놓쳐 국내 ETF가 Yahoo로 새어 값이 어긋났음.
   const krxCore = s.startsWith("KRX:") ? s.slice(4) : s.startsWith("KQ:") ? s.slice(3) : s;
   if (isKrxListedEquityCode(krxCore)) return fetchNaverStockQuote(krxCore);
-  // 미국(해외) 종목은 KIS 실시간가 우선 — 보낼 때 데이장/정규 라이브 반영. 실패 시 Yahoo 폴백.
-  const kis = await fetchKisUsQuote(s);
+  // 미국(해외) 종목: 대시보드와 같은 규칙(chooseUsLiveSource)으로 KIS·Yahoo 중 선택.
+  //  - 정규장 / BlueOcean 야간(나이트장) 열림: KIS 실시간가
+  //  - 프리·애프터장: Yahoo 시간외 체결가(KIS는 정규장 종가에 머묾) — 프리장은 직전 종가 대비로 보정
+  //  - 야간 닫힘(금 20시~일 20시 ET 등): Yahoo 마지막 체결가
+  // 가격과 전일종가는 같은 출처를 써서 등락률이 어긋나지 않게 한다.
+  const [kis, yahoo] = await Promise.all([
+    fetchKisUsQuote(s),
+    fetchYahooChartQuote(toYahooSymbol(s)).catch(() => null),
+  ]);
+  const source = chooseUsLiveSource({
+    yahooPrice: yahoo?.price,
+    yahooState: yahoo?.marketState ?? undefined,
+    kisPrice: kis?.price,
+  });
+  if (source === "kis" && kis) {
+    return { price: kis.price, previousClose: kis.previousClose ?? yahoo?.previousClose ?? null };
+  }
+  if (source === "yahoo" && yahoo) {
+    return { price: yahoo.price, previousClose: yahoo.previousClose };
+  }
   if (kis) return kis;
   return fetchYahooQuote(toYahooSymbol(s));
 }
