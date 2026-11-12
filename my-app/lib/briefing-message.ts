@@ -463,32 +463,115 @@ function fmtPriceFull(item: BriefingItem): string {
   return `$${item.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-/** 맨 위 "보유 종목 현재가" 블록. 같은 종목은 한 줄(여러 보유자여도 중복 제거). */
+/** 상승 🔴 / 하락 🔵 / 보합·없음 ⚪ (국내 시세 앱 색 관례). 행마다 이모지 1개라 고정폭 정렬이 유지된다. */
+function moveDot(p: number | null): string {
+  if (p === null || !Number.isFinite(p)) return "⚪";
+  if (p > 0.004) return "🔴";
+  if (p < -0.004) return "🔵";
+  return "⚪";
+}
+
+/** 고정폭 표 안에서 쓰는 ASCII 등락률 (+13.69% / -1.53%) — ▲▼는 폰트 폭이 달라 정렬이 깨짐 */
+function fmtPctAscii(p: number | null): string {
+  if (p === null || !Number.isFinite(p)) return "-";
+  return `${p >= 0 ? "+" : "-"}${Math.abs(p).toFixed(2)}%`;
+}
+
+/** 원화 금액을 만원 단위로 (-31,130,709 → -3,113만). 행마다 한글 1글자라 정렬 유지 */
+function fmtManwon(n: number): string {
+  const man = Math.round(Math.abs(n) / 10000);
+  return `${n < 0 ? "-" : "+"}${man.toLocaleString("ko-KR")}만`;
+}
+
+const KR_ETF_BRANDS = [
+  "TIGER", "KODEX", "ACE", "RISE", "KBSTAR", "SOL", "PLUS", "HANARO", "KOSEF", "ARIRANG",
+  "TIMEFOLIO", "KIWOOM", "WON", "BNK", "1Q", "TREX", "히어로즈", "마이다스", "에셋플러스", "UNICORN",
+];
+
+/** 국내 종목·ETF 이름 줄이기: 운용사 브랜드·"미국" 접두, 액티브/적격/Plus/(H) 등 꼬리 제거 */
+export function shortKrName(name: string): string {
+  let n = name.trim();
+  for (const b of KR_ETF_BRANDS) {
+    if (n.toUpperCase().startsWith(`${b.toUpperCase()} `)) {
+      n = n.slice(b.length).trim();
+      break;
+    }
+  }
+  n = n.replace(/^미국/, "");
+  n = n.replace(/\((H|합성|UH)\)/gi, "");
+  n = n.replace(/\s*(액티브|적격|Plus)(?=\s|$)/gi, "");
+  n = n.replace(/\s+/g, "");
+  return n || name.trim();
+}
+
+function fmtPriceUsdAscii(p: number | null): string {
+  if (p === null || !Number.isFinite(p)) return "-";
+  return `$${p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtPriceKrwAscii(p: number | null): string {
+  if (p === null || !Number.isFinite(p)) return "-";
+  return Math.round(p).toLocaleString("ko-KR");
+}
+
+/** 고정폭 표: 숫자 열(오른쪽 정렬)을 앞에, 이름(한글 가능)을 맨 뒤에 둬서 폰트와 무관하게 정렬 유지 */
+function buildAlignedRows(rows: Array<{ dot: string; cols: string[]; label: string }>, labelMaxWidth = 18): string {
+  if (rows.length === 0) return "";
+  const nCols = rows[0]!.cols.length;
+  const widths = Array.from({ length: nCols }, (_, i) =>
+    Math.max(...rows.map((r) => stringDisplayWidth(r.cols[i] ?? ""))),
+  );
+  const lines = rows.map((r) => {
+    const cols = r.cols.map((c, i) => padDisplayStart(c, widths[i]!)).join("  ");
+    return `${r.dot} ${cols}  ${truncateDisplay(r.label, labelMaxWidth)}`;
+  });
+  return `<pre>${escapeHtml(lines.join("\n"))}</pre>`;
+}
+
+/** "보유 종목" 블록 — 미국/국내로 나누고 등락률 높은 순. 같은 종목은 한 줄(여러 보유자여도 중복 제거). */
 function buildHoldingsPriceBlock(items: BriefingItem[]): string {
   const seen = new Set<string>();
-  const lines: string[] = [];
-  // 미국(해외) 종목을 위에, 국내(원화) 종목을 아래에. 같은 그룹 안에서는 기존 순서 유지(안정 정렬).
-  const ordered = [...items].sort(
-    (a, b) => Number(isKrwSymbol(a.symbol)) - Number(isKrwSymbol(b.symbol)),
-  );
-  for (const it of ordered) {
+  const us: BriefingItem[] = [];
+  const kr: BriefingItem[] = [];
+  for (const it of items) {
     const key = it.symbol.trim().toUpperCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    const label = escapeHtml((it.name || it.symbol).trim());
-    const pct =
-      it.changePct !== null && Number.isFinite(it.changePct)
-        ? ` ${it.changePct >= 0 ? "▲" : "▼"}${Math.abs(it.changePct).toFixed(2)}%`
-        : "";
-    lines.push(`• ${label} <code>${escapeHtml(key)}</code> <b>${escapeHtml(fmtPriceFull(it))}</b>${pct}`);
+    (isKrwSymbol(it.symbol) ? kr : us).push(it);
   }
-  if (lines.length === 0) return "";
-  return `💰 <b>보유 종목 현재가</b>\n${lines.join("\n")}\n\n`;
+  const byPctDesc = (a: BriefingItem, b: BriefingItem) =>
+    (b.changePct ?? Number.NEGATIVE_INFINITY) - (a.changePct ?? Number.NEGATIVE_INFINITY);
+  us.sort(byPctDesc);
+  kr.sort(byPctDesc);
+
+  const parts: string[] = [];
+  if (us.length > 0) {
+    const table = buildAlignedRows(
+      us.map((it) => ({
+        dot: moveDot(it.changePct),
+        cols: [fmtPctAscii(it.changePct), fmtPriceUsdAscii(it.price)],
+        label: it.symbol.trim().toUpperCase(),
+      })),
+    );
+    parts.push(`🇺🇸 <b>미국</b>\n${table}`);
+  }
+  if (kr.length > 0) {
+    const table = buildAlignedRows(
+      kr.map((it) => ({
+        dot: moveDot(it.changePct),
+        cols: [fmtPctAscii(it.changePct), fmtPriceKrwAscii(it.price)],
+        label: shortKrName(it.name || it.symbol),
+      })),
+    );
+    parts.push(`🇰🇷 <b>국내</b> <i>(원)</i>\n${table}`);
+  }
+  return parts.join("\n");
 }
 
 /**
  * 텔레그램 HTML 브리핑 (parse_mode: HTML).
- * 가독성을 위해 섹션별 줄바꿈·이모지·굵게 위주 구성 (<pre> 대량 나열 없음).
+ * 모바일에서 한눈에 보이도록: 요약(전체·보유자별) → 종목 표 순서.
+ * 표는 <pre> 고정폭 + 숫자 열 먼저/이름 맨 뒤 + 🔴🔵 색 점.
  */
 export function buildTelegramBriefingHtml(opts: {
   slotLabel?: string;
@@ -511,9 +594,7 @@ export function buildTelegramBriefingHtml(opts: {
     ownerTotalReturns,
   } = opts;
 
-  const timeLine = slotLabel ? `⏰ <i>${escapeHtml(slotLabel)}</i>\n\n` : "";
-  const cronFooter =
-    "\n\n<i>📡 자동(KST): 01:00 · 09:30 · 12:00 · 15:40 · 23:00</i>";
+  const cronFooter = "<i>📡 자동(KST): 01:00 · 09:30 · 12:00 · 15:40 · 23:00</i>";
 
   // 전체 총 수익률(평가손익률) — 보유자별 합산. ownerTotalReturns가 있으면 일일 대신 이 값 사용
   const overallTotal = (() => {
@@ -532,65 +613,56 @@ export function buildTelegramBriefingHtml(opts: {
 
   let portfolioLine = "";
   if (overallTotal !== null) {
-    const arrow = overallTotal.pct >= 0 ? "▲" : "▼";
-    const pctStr = `${overallTotal.pct >= 0 ? "+" : ""}${overallTotal.pct.toFixed(2)}%`;
-    const profitStr = `${overallTotal.profitKrw >= 0 ? "+" : "-"}${fmtKrw(Math.abs(overallTotal.profitKrw))}`;
-    portfolioLine = `전체 총 수익률: <b>${arrow} ${pctStr}</b> <i>(${profitStr})</i>`;
+    portfolioLine =
+      `${moveDot(overallTotal.pct)} 전체 총 수익률 <b>${fmtPctAscii(overallTotal.pct)}</b>` +
+      ` <i>(${escapeHtml(fmtManwon(overallTotal.profitKrw))}원)</i>`;
   } else if (portfolioChangeVsYesterdayPct !== null && Number.isFinite(portfolioChangeVsYesterdayPct)) {
-    const p = portfolioChangeVsYesterdayPct;
-    const arrow = p >= 0 ? "▲" : "▼";
-    portfolioLine = `전체 수익률: <b>${arrow} ${p >= 0 ? "+" : ""}${p.toFixed(2)}%</b>`;
+    portfolioLine = `${moveDot(portfolioChangeVsYesterdayPct)} 전체 수익률 <b>${fmtPctAscii(portfolioChangeVsYesterdayPct)}</b>`;
   } else {
     portfolioLine = "전체 수익률: <i>전일 일별 스냅 없음 (저장 후 비교 가능)</i>";
   }
 
+  const ownerSort = (a: { owner: string }, b: { owner: string }) => {
+    const ao = ownerOrderIndex(a.owner);
+    const bo = ownerOrderIndex(b.owner);
+    if (ao !== bo) return ao - bo;
+    return a.owner.localeCompare(b.owner, "ko");
+  };
+
   let ownerBlock = "";
   if (ownerTotalReturns && ownerTotalReturns.length > 0) {
     // 보유자별 총 수익률(평가손익률) — 일일 변동률 대신 표시
-    const sorted = [...ownerTotalReturns].sort((a, b) => {
-      const ao = ownerOrderIndex(a.owner);
-      const bo = ownerOrderIndex(b.owner);
-      if (ao !== bo) return ao - bo;
-      return a.owner.localeCompare(b.owner, "ko");
-    });
-    const lines = sorted.map((r) => {
-      if (r.returnPct === null || !Number.isFinite(r.returnPct)) {
-        return `• ${escapeHtml(r.owner)}: <i>원가 정보 없음</i>`;
-      }
-      const arrow = r.returnPct >= 0 ? "▲" : "▼";
-      const pctStr = `${r.returnPct >= 0 ? "+" : ""}${r.returnPct.toFixed(2)}%`;
-      const profitStr = `${r.profitKrw >= 0 ? "+" : "-"}${fmtKrw(Math.abs(r.profitKrw))}`;
-      return `• ${escapeHtml(r.owner)}: <b>${arrow} ${pctStr}</b> <i>(${profitStr})</i>`;
-    });
-    ownerBlock = `\n\n<b>👤 보유자별 총 수익률</b>\n${lines.join("\n")}`;
+    const sorted = [...ownerTotalReturns].sort(ownerSort);
+    const withCost = sorted.filter((r) => r.returnPct !== null && Number.isFinite(r.returnPct));
+    const noCost = sorted.filter((r) => !(r.returnPct !== null && Number.isFinite(r.returnPct)));
+    const table = buildAlignedRows(
+      withCost.map((r) => ({
+        dot: moveDot(r.returnPct),
+        cols: [fmtPctAscii(r.returnPct), fmtManwon(r.profitKrw)],
+        label: r.owner,
+      })),
+    );
+    const extra = noCost.map((r) => `• ${escapeHtml(r.owner)}: <i>원가 정보 없음</i>`).join("\n");
+    ownerBlock = `👤 <b>보유자별 총 수익률</b>\n${table}${extra ? `${table ? "\n" : ""}${extra}` : ""}`;
   } else if (ownerDailyReturns && ownerDailyReturns.length > 0) {
-    const sorted = [...ownerDailyReturns].sort((a, b) => {
-      const ao = ownerOrderIndex(a.owner);
-      const bo = ownerOrderIndex(b.owner);
-      if (ao !== bo) return ao - bo;
-      return a.owner.localeCompare(b.owner, "ko");
-    });
-    const lines = sorted.map((r) => {
-      if (r.changePct === null || !Number.isFinite(r.changePct)) {
-        return `• ${escapeHtml(r.owner)}: <i>전일 스냅 없음</i>`;
-      }
-      const arrow = r.changePct >= 0 ? "▲" : "▼";
-      return `• ${escapeHtml(r.owner)}: <b>${arrow} ${r.changePct >= 0 ? "+" : ""}${r.changePct.toFixed(2)}%</b>`;
-    });
-    ownerBlock = `\n\n<b>👤 보유자별 요약</b>\n${lines.join("\n")}`;
+    const sorted = [...ownerDailyReturns].sort(ownerSort);
+    const withPct = sorted.filter((r) => r.changePct !== null && Number.isFinite(r.changePct));
+    const noPct = sorted.filter((r) => !(r.changePct !== null && Number.isFinite(r.changePct)));
+    const table = buildAlignedRows(
+      withPct.map((r) => ({ dot: moveDot(r.changePct), cols: [fmtPctAscii(r.changePct)], label: r.owner })),
+    );
+    const extra = noPct.map((r) => `• ${escapeHtml(r.owner)}: <i>전일 스냅 없음</i>`).join("\n");
+    ownerBlock = `👤 <b>보유자별 요약</b>\n${table}${extra ? `${table ? "\n" : ""}${extra}` : ""}`;
   }
 
   // 매매 시그널(HOLD→BUY/SELL 전환) 블록은 리포트에서 제외함.
 
-  const header =
-    `${buildHoldingsPriceBlock(opts.items)}` +
-    `${timeLine}` +
-    `📊 <b>포트폴리오 데일리 리포트</b> (${escapeHtml(dateLabel)})\n\n` +
-    `${portfolioLine}` +
-    `${ownerBlock}` +
-    `${cronFooter}`;
+  const title =
+    `📊 <b>포트폴리오 리포트</b> ${escapeHtml(dateLabel)}` +
+    (slotLabel ? ` · ${escapeHtml(slotLabel)}` : "");
+  const holdings = buildHoldingsPriceBlock(opts.items);
 
-  return header;
+  return [title, portfolioLine, ownerBlock, holdings, cronFooter].filter((x) => x).join("\n\n");
 }
 
 /** Yahoo 6개월 일봉 — 시그널용 */
